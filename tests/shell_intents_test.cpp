@@ -64,6 +64,8 @@ void TestShellIntents::testNavigationIntentsAreProvidedAndHandoff()
         QStringLiteral("basecamp.settings.open")));
     QVERIFY(ShellIntents::kNavigationIntents.contains(
         QStringLiteral("basecamp.apps.open")));
+    QVERIFY(ShellIntents::kNavigationIntents.contains(
+        QStringLiteral("basecamp.packages.open")));
 }
 
 void TestShellIntents::testNavigationIntentsAreNavigationOnly()

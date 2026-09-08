@@ -4,6 +4,10 @@
 #include "LogosBasecampPaths.h"
 #include "LogRedirector.h"
 #include "AccessPolicyOption.h"
+#include "links/LinkUrl.h"
+#include "links/LinkUrlInbox.h"
+#include "links/SchemeRegistrar.h"
+#include "links/SingleInstanceGuard.h"
 #ifdef ENABLE_QML_INSPECTOR
 #include "inspectorserver.h"
 #endif
@@ -102,6 +106,15 @@ int main(int argc, char *argv[])
 
     // Create QApplication first
     QApplication app(argc, argv);
+
+    // BEFORE ANYTHING ELSE that can take time. On macOS a `basecamp://` click
+    // that launches the app delivers the URL as a QFileOpenEvent very early;
+    // a filter installed after the core is up misses it, and then the macOS
+    // cold path needs a second mechanism the other platforms do not have.
+    // Installing here is what lets every source — this filter, argv, and the
+    // single-instance socket — funnel into one inbox.
+    LinkUrlInbox::installEventFilter(&app);
+
     app.setOrganizationName("Logos");
     app.setApplicationName("LogosBasecamp");
     app.styleHints()->setTabFocusBehavior(Qt::TabFocusAllControls);
@@ -110,6 +123,10 @@ int main(int argc, char *argv[])
     // nothing (enforcement off) — Basecamp's default, unchanged. See the
     // logos_core_set_access_policy call further down.
     QByteArray accessPolicyJson;
+
+    // A `basecamp://` URL this process was launched with, read out of the
+    // parser block below. Empty for an ordinary launch.
+    QString launchUri;
 
     // Parse --user-dir / -u and set LOGOS_USER_DIR before anything else resolves
     // a path. This lets multiple Basecamp instances run side-by-side against
@@ -132,6 +149,15 @@ int main(int argc, char *argv[])
                            "file, or inline JSON."),
             QStringLiteral("enforce|path|json"));
         parser.addOption(accessPolicyOption);
+        // An explicit option, not a bare positional: the value comes from a
+        // scheme handler and is attacker-influenced, and one that happened to
+        // look like a flag must not be read as one. Matches what the Windows
+        // registry command and the Linux desktop entry pass.
+        QCommandLineOption uriOption(QStringLiteral("uri"),
+            QStringLiteral("A basecamp:// URL to open. Set by the OS scheme "
+                           "handler; not normally typed by hand."),
+            QStringLiteral("url"));
+        parser.addOption(uriOption);
         if (!parser.parse(app.arguments())) {
             std::cerr << parser.errorText().toStdString() << std::endl;
             return 1;
@@ -171,7 +197,39 @@ int main(int argc, char *argv[])
             }
             qputenv("LOGOS_USER_DIR", absUserDir.toUtf8());
         }
+
+        launchUri = parser.value(uriOption);
     }
+
+    // ── Single instance, per user directory ─────────────────────────────
+    //
+    // AFTER the --user-dir block, because the socket name is derived from the
+    // RESOLVED base directory: --user-dir exists so instances can run side by
+    // side deliberately, and a global lock would break exactly that.
+    //
+    // BEFORE log redirection, because a secondary instance lives for about
+    // twenty milliseconds and should not leave a rotated per-session log file
+    // behind for every link the user clicks.
+    //
+    // One call, two outcomes. Nobody listening ⇒ this process is the app and
+    // starts listening. Someone answers ⇒ the URL has been handed over and
+    // there is nothing left to do.
+    auto guard = std::make_unique<SingleInstanceGuard>();
+    if (guard->acquire(LogosBasecampPaths::baseDirectory(), launchUri)
+        == SingleInstanceGuard::Secondary) {
+        return 0;
+    }
+
+    // This process owns the socket, so it owns the URL it was launched with.
+    // Into the inbox rather than acted on: the registry does not know what any
+    // app provides until PackageCoordinator's first refresh, seconds from now.
+    if (!launchUri.isEmpty())
+        LinkUrlInbox::instance().post(launchUri);
+
+    QObject::connect(guard.get(), &SingleInstanceGuard::urlReceived,
+                     &app, [](const QString& url) {
+                         LinkUrlInbox::instance().post(url);
+                     });
 
     // Redirect stdout/stderr to a rotating per-session log file under
     // <baseDirectory>/logs. Must happen after setOrganizationName/setApplicationName
@@ -331,6 +389,38 @@ int main(int argc, char *argv[])
     // destruction ordering explicitly during shutdown (see below).
     auto mainWindow = std::make_unique<Window>(&logosAPI, core.get());
     mainWindow->show();
+
+    // Tell the OS that `basecamp://` means this executable. This is what makes
+    // the COLD path work — with nothing running, the OS looks up a command line
+    // and launches it; the single-instance socket only ever covers the warm
+    // path. A no-op on macOS, where Info.plist's CFBundleURLTypes does it.
+    //
+    // After show() so a first run does not pay for it before anything is on
+    // screen, and because a failure here must not stop the app starting.
+    if (!SchemeRegistrar::registerScheme()) {
+        qWarning() << "Failed to register the" << LinkUrl::scheme()
+                   << "URL scheme; links will not open this app.";
+    }
+
+    // A second launch — with a URL or not — brings this window forward, so a
+    // click that appears to do nothing at least produces motion. Same reason
+    // Status calls makeStatusAppActive() on secondInstanceDetected.
+    QObject::connect(guard.get(), &SingleInstanceGuard::secondInstanceDetected,
+                     mainWindow.get(), [w = mainWindow.get()]() {
+                         w->show();
+                         w->raise();
+                         w->activateWindow();
+                     });
+
+    // Bare `basecamp://` raises and nothing else, and a link that DOES carry an
+    // intent raises before the consent dialog — the user clicked in a browser
+    // and is looking at it, so a dialog on a window that never came forward is
+    // worse than a window that then asks.
+    mainWindow->setLinkRaiseHandler([w = mainWindow.get()]() {
+        w->show();
+        w->raise();
+        w->activateWindow();
+    });
 
 #ifdef ENABLE_QML_INSPECTOR
     // Start QML Inspector server (controlled by QML_INSPECTOR_PORT env var, default 3768)
