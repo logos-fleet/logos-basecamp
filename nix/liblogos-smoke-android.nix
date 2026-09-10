@@ -19,24 +19,22 @@ let
   # output, and an APK built from those carries no .so at all -- mkQtAndroidApk
   # then fails with "these DT_NEEDED sonames are neither in the APK nor
   # provided by Android".
-  libRoots = map lib.getLib (
-    chain.all
-    ++ [
-      pkgs.spdlog
-      pkgs.fmt
-      pkgs.openssl
-      pkgs.libsodium
-      pkgs.icu
-      pkgs.zlib
-    ]
+  # `chain.all` carries the third-party tail liblogos_core links; the extra
+  # entries are what those link in turn (fmt, icu, zlib) and libsodium, which
+  # only lgx uses.
+  libRoots = lib.unique (
+    map lib.getLib (
+      chain.all
+      ++ [
+        pkgs.fmt
+        pkgs.libsodium
+        pkgs.icu
+        pkgs.zlib
+      ]
+    )
   );
-  includeRoots = chain.all ++ [
-    pkgs.boost
-    pkgs.openssl
-    pkgs.spdlog
-    pkgs.nlohmann_json
-  ];
-  joined = l: lib.concatStringsSep ";" (map toString l);
+  includeRoots = chain.all;
+  joined = lib.concatMapStringsSep ";" toString;
 
   # An APK carries only files named lib<name>.so, and nixpkgs' cross libraries
   # are versioned (libspdlog.so.1.17, libssl.so.3, libicuuc.so.76) with the
@@ -46,20 +44,26 @@ let
   apkLibs = pkgs.pkgsBuildBuild.runCommand "liblogos-smoke-apk-libs" {
     nativeBuildInputs = [ pkgs.pkgsBuildBuild.patchelf ];
   } ''
+    # The unversioned name a library travels under in the APK. Android ships
+    # private libicu*, libssl and libcrypto; a DT_NEEDED by the same name
+    # resolves to THOSE, not to ours, and the app dies at dlopen with a
+    # missing C++-mangled ICU symbol. Rename ours so no collision is possible.
+    apk_name() {
+      local stem="''${1%%.so*}"
+      case "$stem" in libicu*|libssl|libcrypto) stem="''${stem}_lg" ;; esac
+      echo "$stem.so"
+    }
     mkdir -p $out/lib
     for root in ${lib.concatStringsSep " " (map toString libRoots)}; do
       for f in "$root"/lib/lib*.so*; do
         [ -e "$f" ] || continue
+        [ -L "$f" ] && continue
         name=$(basename "$f")
         case "$name" in libQt6*|*.a|*.la) continue ;; esac
-        stem="''${name%%.so*}"
-        # Android ships private libicu*, libssl and libcrypto; a DT_NEEDED by
-        # the same name resolves to THOSE, not to ours, and the app dies at
-        # dlopen with a missing C++-mangled ICU symbol. Rename ours so no
-        # collision is possible.
-        case "$stem" in libicu*|libssl|libcrypto) stem="''${stem}_lg" ;; esac
-        base="$stem.so"
-        [ -L "$f" ] && continue
+        base=$(apk_name "$name")
+        # Several prefixes stage the same library (liblogos and the package
+        # manager copy their closure beside themselves); one copy is enough.
+        [ -e "$out/lib/$base" ] && continue
         cp "$f" "$out/lib/$base"
         chmod u+w "$out/lib/$base"
         patchelf --set-soname "$base" "$out/lib/$base"
@@ -67,9 +71,8 @@ let
     done
     for l in $out/lib/*.so; do
       for n in $(patchelf --print-needed "$l"); do
-        stem="''${n%%.so*}"
-        case "$stem" in libicu*|libssl|libcrypto) stem="''${stem}_lg" ;; esac
-        [ "$n" = "$stem.so" ] || patchelf --replace-needed "$n" "$stem.so" "$l"
+        base=$(apk_name "$n")
+        [ "$n" = "$base" ] || patchelf --replace-needed "$n" "$base" "$l"
       done
     done
     ls -la $out/lib

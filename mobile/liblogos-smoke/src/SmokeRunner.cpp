@@ -32,12 +32,12 @@ qint64 SmokeRunner::run(int argc, char* argv[])
     // Everything the core writes stays under the app sandbox. AppDataLocation
     // is Library/Application Support/<org>/<app> on iOS and
     // /data/data/<pkg>/files on Android; neither is reachable from outside.
-    m_baseDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/logos";
-    const QString modulesDir = m_baseDir + "/modules";
-    const QString persistDir = m_baseDir + "/persistence";
+    const QString baseDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/logos";
+    const QString modulesDir = baseDir + "/modules";
+    const QString persistDir = baseDir + "/persistence";
     QDir().mkpath(modulesDir);
     QDir().mkpath(persistDir);
-    emit log(QStringLiteral("base dir: %1").arg(m_baseDir));
+    emit log(QStringLiteral("base dir: %1").arg(baseDir));
     emit log(QStringLiteral("protocol: %1 (abi major %2)")
                  .arg(QString::fromUtf8(lp_protocol_version()))
                  .arg(lp_protocol_abi_major()));

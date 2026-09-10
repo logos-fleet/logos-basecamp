@@ -22,14 +22,8 @@ qt_add_executable(LiblogosSmoke
     ${SRC}/main.cpp
     ${SRC}/SmokeRunner.cpp ${SRC}/SmokeRunner.h)
 
-foreach(_root IN LISTS LOGOS_INCLUDE_ROOTS)
-    foreach(_inc include include/cpp include/core include/implementations/plain
-                 include/logos_container include/logos_module_loader include/process_stats)
-        if(IS_DIRECTORY "${_root}/${_inc}")
-            target_include_directories(LiblogosSmoke PRIVATE "${_root}/${_inc}")
-        endif()
-    endforeach()
-endforeach()
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
+logos_smoke_add_include_roots(LiblogosSmoke PRIVATE "${LOGOS_INCLUDE_ROOTS}")
 
 # Every .so under the roots travels in the APK; only the three the host calls
 # directly are on the link line. A shared library that is merely dlopened by

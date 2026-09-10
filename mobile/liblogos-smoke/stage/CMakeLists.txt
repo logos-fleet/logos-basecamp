@@ -29,16 +29,8 @@ target_include_directories(liblogos_smoke_host PUBLIC
     $<BUILD_INTERFACE:${SRC}>
     $<INSTALL_INTERFACE:include/liblogos-smoke-host>)
 
-# Each Logos stage installs its headers under a different subdirectory of its
-# prefix (the repos disagree, and this is not the place to change that).
-foreach(_root IN LISTS LOGOS_IOS_INCLUDE_ROOTS)
-    foreach(_inc include include/cpp include/core include/implementations/plain
-                 include/logos_container include/logos_module_loader include/process_stats)
-        if(IS_DIRECTORY "${_root}/${_inc}")
-            target_include_directories(liblogos_smoke_host PUBLIC "${_root}/${_inc}")
-        endif()
-    endforeach()
-endforeach()
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
+logos_smoke_add_include_roots(liblogos_smoke_host PUBLIC "${LOGOS_IOS_INCLUDE_ROOTS}")
 
 # A flat list of archives is enough: ld-prime resolves across archives in any
 # order. liblogos_core goes first anyway, so its undefined symbols are what

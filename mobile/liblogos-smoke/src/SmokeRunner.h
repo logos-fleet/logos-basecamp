@@ -20,12 +20,9 @@ public:
     // cleanup on a core that never started is not defined by the C API.
     void stop();
 
-    QString baseDir() const { return m_baseDir; }
-
 signals:
     void log(const QString& line);
 
 private:
-    QString m_baseDir;
     bool m_started = false;
 };

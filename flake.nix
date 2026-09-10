@@ -2,11 +2,12 @@
   description = "Logos Basecamp - Qt application with UI plugins";
 
   inputs = {
-    # logos-nix and logos-liblogos are LOCKED TO THE logos-fleet FORKS, not to
-    # these URLs: the smoke host needs logos-nix's mobile pseudo-systems
-    # (lib.mkMobileTargets / lib.mkForAllMobileTargets) and logos-liblogos's
-    # lib.mkMobileChains, neither of which is upstream yet. `nix flake update`
-    # on either would move it back and the mobile outputs would stop
+    # THE MOBILE CHAIN'S INPUTS ARE LOCKED TO THE logos-fleet FORKS, not to
+    # these URLs: the smoke host needs logos-nix's mobile pseudo-systems,
+    # logos-liblogos's lib.mkMobileChains, and the cross-build CMake options
+    # in logos-protocol, logos-plugin-qt, logos-module, logos-package and
+    # logos-package-manager -- none of which are upstream yet. `nix flake
+    # update` would move them back and the mobile outputs would stop
     # evaluating; re-pin with
     #   nix flake lock --override-input <input> github:logos-fleet/<repo>/<rev>
     logos-nix.url = "github:logos-co/logos-nix";
@@ -211,20 +212,26 @@
       # platform, and the canonical one is x86_64-linux, which a Mac cannot
       # realise even though it builds the identical closure. legacyPackages
       # below is where a Mac asks for the Android APK.
+      #
+      # The smoke host builds against the package set the chain itself was
+      # built from (`chain.pkgs`) rather than instantiating a second one.
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
-        let
-          chains = logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; };
-        in
-        logos-nix.lib.mkForAllMobileTargets
-          (logos-nix.lib.mkMobileTargets { inherit androidBuildSystem; })
-          ({ system, pkgs, ... }:
+        nixpkgs.lib.mapAttrs
+          (system: chain:
             import (
               if system == "aarch64-android"
               then ./nix/liblogos-smoke-android.nix
               else ./nix/liblogos-smoke-ios.nix
-            ) { inherit pkgs; chain = chains.${system}; src = ./.; });
+            ) { inherit (chain) pkgs; inherit chain; src = ./.; })
+          (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; });
 
-      mobileSmoke = mkMobileSmoke { };
+      # One smoke set per Android build platform; `packages`, `apps` and
+      # `legacyPackages` below are views of these, so nothing is instantiated
+      # twice.
+      mobileSmokeFor = nixpkgs.lib.genAttrs logos-nix.lib.androidBuildSystems
+        (androidBuildSystem: mkMobileSmoke { inherit androidBuildSystem; });
+      # Flake `packages` carry the canonical (x86_64-linux) Android build platform.
+      mobileSmoke = mobileSmokeFor.x86_64-linux;
     in
     {
       packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, logosQtMcp, installDev, installPortable, dirBundler, ... }:
@@ -693,7 +700,7 @@
             };
             run-liblogos-smoke-android = {
               type = "app";
-              program = "${(mkMobileSmoke { androidBuildSystem = "aarch64-darwin"; }).aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+              program = "${mobileSmokeFor.aarch64-darwin.aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
             };
           };
           x86_64-linux = (desktopApps.x86_64-linux or { }) // {
@@ -706,9 +713,7 @@
 
       # The mobile artifacts keyed by the platform that BUILDS them; see
       # mkMobileSmoke for why Android needs this and packages does not suffice.
-      legacyPackages = nixpkgs.lib.genAttrs logos-nix.lib.androidBuildSystems (buildSystem: {
-        mobile = mkMobileSmoke { androidBuildSystem = buildSystem; };
-      });
+      legacyPackages = nixpkgs.lib.mapAttrs (_: mobile: { inherit mobile; }) mobileSmokeFor;
 
       checks = forAllSystems ({ pkgs, system, ... }: {
         smoke-test = self.packages.${system}.smoke-test;

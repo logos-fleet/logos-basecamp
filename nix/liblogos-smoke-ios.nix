@@ -21,24 +21,21 @@ let
   appleSdk = pkgs.qt6.qtbase.appleSdk;
   bundleId = "co.logos.liblogos.smoke";
 
-  libRoots = chain.all ++ [
-    pkgs.boost
-    pkgs.openssl
-    pkgs.spdlog
-  ];
-  includeRoots = libRoots ++ [ pkgs.nlohmann_json ];
-  joined = l: lib.concatStringsSep ";" (map toString l);
+  # `chain.all` is the whole link set, third-party tail included: every
+  # prefix whose lib/*.a is linked and whose include/ is compiled against.
+  roots = chain.all;
+  joined = lib.concatMapStringsSep ";" toString;
 
   stage = pkgs.mkIosCmakeStage {
     pname = "liblogos-smoke-host-ios";
     version = "0.1.0";
     inherit src;
     sourceDir = "mobile/liblogos-smoke/stage";
-    buildInputs = libRoots;
+    buildInputs = roots;
     cmakeFlags = [
-      "-DCMAKE_FIND_ROOT_PATH=${joined libRoots}"
-      "-DLOGOS_IOS_LIB_ROOTS=${joined libRoots}"
-      "-DLOGOS_IOS_INCLUDE_ROOTS=${joined includeRoots}"
+      "-DCMAKE_FIND_ROOT_PATH=${joined roots}"
+      "-DLOGOS_IOS_LIB_ROOTS=${joined roots}"
+      "-DLOGOS_IOS_INCLUDE_ROOTS=${joined roots}"
     ];
   };
 
@@ -59,7 +56,7 @@ let
         -DCMAKE_TOOLCHAIN_FILE=${pkgs.logosQtCrossToolchainFile} \
         ${lib.escapeShellArgs pkgs.logosQtCrossCmakeFlags} \
         "-DCMAKE_PREFIX_PATH=${stage}" \
-        "-DCMAKE_FIND_ROOT_PATH=${stage};${joined libRoots}" \
+        "-DCMAKE_FIND_ROOT_PATH=${stage};${joined roots}" \
         "$@"
     }
 
