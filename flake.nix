@@ -2,6 +2,13 @@
   description = "Logos Basecamp - Qt application with UI plugins";
 
   inputs = {
+    # logos-nix and logos-liblogos are LOCKED TO THE logos-fleet FORKS, not to
+    # these URLs: the smoke host needs logos-nix's mobile pseudo-systems
+    # (lib.mkMobileTargets / lib.mkForAllMobileTargets) and logos-liblogos's
+    # lib.mkMobileChains, neither of which is upstream yet. `nix flake update`
+    # on either would move it back and the mobile outputs would stop
+    # evaluating; re-pin with
+    #   nix flake lock --override-input <input> github:logos-fleet/<repo>/<rev>
     logos-nix.url = "github:logos-co/logos-nix";
     # Follow the same nixpkgs as logos-nix
     nixpkgs.follows = "logos-nix/nixpkgs";
