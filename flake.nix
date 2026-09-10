@@ -39,6 +39,13 @@
     # its OWN older liblgx in the bundle's flat lib/ — where the module's
     # newer copy can never win on macOS, and package_manager crashes.
     logos-liblogos.inputs.logos-package-manager.follows = "logos-package-manager";
+    # ...and ONE lgx source tree and ONE logos-module. liblogos's mobile chain
+    # builds lgx (and logos_module) FROM SOURCE off these inputs, so without
+    # the follows the smoke host links a different lgx tree than the one this
+    # flake ships, and a standalone `nix build` of the mobile outputs resolves
+    # them upstream, where the cross-build options do not exist yet.
+    logos-liblogos.inputs.logos-package.follows = "logos-package";
+    logos-liblogos.inputs.logos-module.follows = "logos-module";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
     logos-capability-module.url = "github:logos-co/logos-capability-module";
@@ -650,43 +657,52 @@
 
       # nix run .                   → dev build  (depends on /nix/store at runtime)
       # nix run .#bin-bundle-dir    → self-contained bundle (Qt frameworks in lib/)
-      apps = forAllSystems ({ system, ... }: {
-        default = {
-          type = "app";
-          program = "${self.packages.${system}.app}/bin/LogosBasecamp";
-        };
-        bin-bundle-dir = {
-          type = "app";
-          program = "${self.packages.${system}.bin-bundle-dir}/bin/LogosBasecamp";
-        };
-      })
-      # The mobile runners are build-platform scripts, so they belong to the
-      # system that RUNS them, not to the pseudo-system they target:
-      #   nix run .#run-liblogos-smoke-ios-sim
-      #   LOGOS_IOS_TEAM_ID=... LOGOS_IOS_DEVICE=... nix run .#run-liblogos-smoke-ios-device
-      #   nix run .#run-liblogos-smoke-android
-      // {
-        aarch64-darwin = (self.apps.aarch64-darwin or { }) // {
-          run-liblogos-smoke-ios-sim = {
-            type = "app";
-            program = "${mobileSmoke.aarch64-ios-simulator.run-liblogos-smoke-ios-sim}/bin/run-liblogos-smoke-ios-sim";
+      apps =
+        let
+          desktopApps = forAllSystems ({ system, ... }: {
+            default = {
+              type = "app";
+              program = "${self.packages.${system}.app}/bin/LogosBasecamp";
+            };
+            bin-bundle-dir = {
+              type = "app";
+              program = "${self.packages.${system}.bin-bundle-dir}/bin/LogosBasecamp";
+            };
+          });
+        in
+        desktopApps
+        # The mobile runners are build-platform scripts, so they belong to the
+        # system that RUNS them, not to the pseudo-system they target:
+        #   nix run .#run-liblogos-smoke-ios-sim
+        #   LOGOS_IOS_TEAM_ID=... LOGOS_IOS_DEVICE=... nix run .#run-liblogos-smoke-ios-device
+        #   nix run .#run-liblogos-smoke-android
+        #
+        # The left operand is named rather than read back off `self.apps`: an
+        # attribute of `apps` cannot refer to `apps` itself, `or { }` does not
+        # break the cycle, and the result is an infinite recursion the moment
+        # anything asks for apps.aarch64-darwin.
+        // {
+          aarch64-darwin = (desktopApps.aarch64-darwin or { }) // {
+            run-liblogos-smoke-ios-sim = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-ios-simulator.run-liblogos-smoke-ios-sim}/bin/run-liblogos-smoke-ios-sim";
+            };
+            run-liblogos-smoke-ios-device = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-ios.run-liblogos-smoke-ios-device}/bin/run-liblogos-smoke-ios-device";
+            };
+            run-liblogos-smoke-android = {
+              type = "app";
+              program = "${(mkMobileSmoke { androidBuildSystem = "aarch64-darwin"; }).aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+            };
           };
-          run-liblogos-smoke-ios-device = {
-            type = "app";
-            program = "${mobileSmoke.aarch64-ios.run-liblogos-smoke-ios-device}/bin/run-liblogos-smoke-ios-device";
-          };
-          run-liblogos-smoke-android = {
-            type = "app";
-            program = "${(mkMobileSmoke { androidBuildSystem = "aarch64-darwin"; }).aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+          x86_64-linux = (desktopApps.x86_64-linux or { }) // {
+            run-liblogos-smoke-android = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+            };
           };
         };
-        x86_64-linux = (self.apps.x86_64-linux or { }) // {
-          run-liblogos-smoke-android = {
-            type = "app";
-            program = "${mobileSmoke.aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
-          };
-        };
-      };
 
       # The mobile artifacts keyed by the platform that BUILDS them; see
       # mkMobileSmoke for why Android needs this and packages does not suffice.
