@@ -180,6 +180,37 @@
         installPortable = nix-bundle-logos-module-install.bundlers.${system}.portable;
         dirBundler = nix-bundle-dir.bundlers.${buildSystem}.qtApp;
       });
+
+      # ── Mobile: the liblogos smoke host ───────────────────────────────────
+      # liblogos_core running on a phone with nothing loaded. The core, and
+      # the eight repos it links, are cross-built by logos-liblogos
+      # (lib.mkMobileChains); this flake adds the host that starts it and the
+      # runners that put it on a simulator, an iPhone/iPad or an Android
+      # device.
+      #
+      # Mobile pseudo-systems are opt-in in logos-nix (an iOS host is
+      # stdenv.isDarwin, so folding them into forAllTargets misroutes every
+      # `if isDarwin` above) and are merged onto `packages` the same way
+      # x86_64-windows is.
+      #
+      # androidBuildSystem: the Android derivations' `system` is their BUILD
+      # platform, and the canonical one is x86_64-linux, which a Mac cannot
+      # realise even though it builds the identical closure. legacyPackages
+      # below is where a Mac asks for the Android APK.
+      mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
+        let
+          chains = logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; };
+        in
+        logos-nix.lib.mkForAllMobileTargets
+          (logos-nix.lib.mkMobileTargets { inherit androidBuildSystem; })
+          ({ system, pkgs, ... }:
+            import (
+              if system == "aarch64-android"
+              then ./nix/liblogos-smoke-android.nix
+              else ./nix/liblogos-smoke-ios.nix
+            ) { inherit pkgs; chain = chains.${system}; src = ./.; });
+
+      mobileSmoke = mkMobileSmoke { };
     in
     {
       packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, logosQtMcp, installDev, installPortable, dirBundler, ... }:
@@ -608,7 +639,7 @@
             appBin = "${macosAppTest}/LogosBasecamp.app/Contents/MacOS/LogosBasecamp";
           };
         }
-      );
+      ) // mobileSmoke;
 
       # nix run .                   → dev build  (depends on /nix/store at runtime)
       # nix run .#bin-bundle-dir    → self-contained bundle (Qt frameworks in lib/)
@@ -621,6 +652,39 @@
           type = "app";
           program = "${self.packages.${system}.bin-bundle-dir}/bin/LogosBasecamp";
         };
+      })
+      # The mobile runners are build-platform scripts, so they belong to the
+      # system that RUNS them, not to the pseudo-system they target:
+      #   nix run .#run-liblogos-smoke-ios-sim
+      #   LOGOS_IOS_TEAM_ID=... LOGOS_IOS_DEVICE=... nix run .#run-liblogos-smoke-ios-device
+      #   nix run .#run-liblogos-smoke-android
+      // {
+        aarch64-darwin = (self.apps.aarch64-darwin or { }) // {
+          run-liblogos-smoke-ios-sim = {
+            type = "app";
+            program = "${mobileSmoke.aarch64-ios-simulator.run-liblogos-smoke-ios-sim}/bin/run-liblogos-smoke-ios-sim";
+          };
+          run-liblogos-smoke-ios-device = {
+            type = "app";
+            program = "${mobileSmoke.aarch64-ios.run-liblogos-smoke-ios-device}/bin/run-liblogos-smoke-ios-device";
+          };
+          run-liblogos-smoke-android = {
+            type = "app";
+            program = "${(mkMobileSmoke { androidBuildSystem = "aarch64-darwin"; }).aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+          };
+        };
+        x86_64-linux = (self.apps.x86_64-linux or { }) // {
+          run-liblogos-smoke-android = {
+            type = "app";
+            program = "${mobileSmoke.aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+          };
+        };
+      };
+
+      # The mobile artifacts keyed by the platform that BUILDS them; see
+      # mkMobileSmoke for why Android needs this and packages does not suffice.
+      legacyPackages = nixpkgs.lib.genAttrs logos-nix.lib.androidBuildSystems (buildSystem: {
+        mobile = mkMobileSmoke { androidBuildSystem = buildSystem; };
       });
 
       checks = forAllSystems ({ pkgs, system, ... }: {
