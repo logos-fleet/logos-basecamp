@@ -14,6 +14,50 @@ find_package(LiblogosSmokeHost CONFIG REQUIRED)
 qt_add_executable(LiblogosSmoke MACOSX_BUNDLE ${CMAKE_CURRENT_SOURCE_DIR}/../src/main.cpp)
 target_link_libraries(LiblogosSmoke PRIVATE Logos::LiblogosSmokeHost Qt6::Widgets)
 
+# ── the Bundled Bare module ───────────────────────────────────────────────
+# The counter's iOS framework, embedded and signed with the app's identity by
+# Xcode's copy phase. <App>.app/Frameworks/ is the only directory an iOS app
+# may carry a dylib in, and dyld will not load an image that is not signed --
+# which is why the module cannot be staged into the sandbox at runtime.
+set(LOGOS_IOS_BARE_MODULE_FRAMEWORK "" CACHE STRING
+    "Path to the Bare module's .framework bundle to embed")
+if(LOGOS_IOS_BARE_MODULE_FRAMEWORK)
+    if(NOT IS_DIRECTORY "${LOGOS_IOS_BARE_MODULE_FRAMEWORK}")
+        message(FATAL_ERROR
+            "LOGOS_IOS_BARE_MODULE_FRAMEWORK is not a directory: ${LOGOS_IOS_BARE_MODULE_FRAMEWORK}")
+    endif()
+    set_property(TARGET LiblogosSmoke APPEND PROPERTY
+        XCODE_EMBED_FRAMEWORKS "${LOGOS_IOS_BARE_MODULE_FRAMEWORK}")
+    set_target_properties(LiblogosSmoke PROPERTIES
+        XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY TRUE
+        XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY TRUE
+        # The framework's own install_name is @rpath/<bundle>/<binary>; without
+        # this the app has no @rpath to resolve it against and every dlopen
+        # fails with "image not found" no matter where the bundle sits.
+        XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks")
+else()
+    message(WARNING
+        "LiblogosSmoke: no LOGOS_IOS_BARE_MODULE_FRAMEWORK -- the app will start "
+        "the core and then report the bundled module as missing.")
+endif()
+
+# ── the symbols the module resolves upward ────────────────────────────────
+# ADR 0006: a Bare module leaves every `lp_*` undefined and binds it to the app
+# image at dlopen. In a fully static iOS app neither half of that is a linker
+# default -- the archive member is not pulled in unless something references
+# it, and an unlisted symbol is not exported. logos_ios_export_symbols() does
+# both, off a list nix computes from the module's own `nm -u` output.
+set(LOGOS_IOS_CMAKE_DIR "" CACHE STRING "Directory holding LogosIosSymbolExports.cmake")
+set(LOGOS_IOS_EXPORTED_SYMBOLS_FILE "" CACHE STRING "Newline-separated symbols the app must export")
+if(LOGOS_IOS_CMAKE_DIR AND LOGOS_IOS_EXPORTED_SYMBOLS_FILE)
+    include(${LOGOS_IOS_CMAKE_DIR}/LogosIosSymbolExports.cmake)
+    logos_ios_export_symbols(LiblogosSmoke SYMBOL_FILES ${LOGOS_IOS_EXPORTED_SYMBOLS_FILE})
+elseif(LOGOS_IOS_BARE_MODULE_FRAMEWORK)
+    message(FATAL_ERROR
+        "LiblogosSmoke embeds a Bare module but was given no exported-symbol list. "
+        "The app would link and install and then fail at dlopen with undefined lp_*.")
+endif()
+
 set_target_properties(LiblogosSmoke PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/../Info.plist.in
     MACOSX_BUNDLE_GUI_IDENTIFIER co.logos.liblogos.smoke

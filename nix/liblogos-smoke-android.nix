@@ -8,12 +8,23 @@
   # logos-liblogos's mobile chain for the aarch64-android set.
   chain,
   src,
+  # The Bundled Bare module for aarch64-android: lib/lib<name>_bare.so
+  # (logos-module-builder's `bare` output on the Android package set). It
+  # travels in the APK like every other Logos .so and lands in the app's
+  # native library directory, which since API 29 is the only place Android
+  # will dlopen from at all.
+  bareModule,
 }:
 
 let
   inherit (pkgs) lib;
   packageName = "co.logos.liblogos.smoke";
   activity = "org.qtproject.qt.android.bindings.QtActivity";
+
+  # The Bundled Bare module's file name. `lib` prefix because an APK carries
+  # only lib*.so; `_bare` stem suffix because that is how liblogos tells a Bare
+  # module from a Qt plugin.
+  bareModuleSo = "libbare_counter_bare.so";
 
   # lib.getLib: nixpkgs' openssl, fmt and icu default to their bin or dev
   # output, and an APK built from those carries no .so at all -- mkQtAndroidApk
@@ -33,7 +44,16 @@ let
       ]
     )
   );
-  includeRoots = chain.all;
+  # spdlog too: the iOS chain carries it in `all`, the Android one does not,
+  # and the host compiles against it to hang a logcat sink on the core's
+  # channels (BundledModuleRunner). Same prefix the chain linked, so there is
+  # no second spdlog.
+  # lib.getDev: nixpkgs' spdlog splits its headers into a `dev` output, and the
+  # default one carries lib/ alone -- passing it here adds an include root that
+  # exists and holds nothing.
+  # ...and fmt beside it: this spdlog is built against an external fmt
+  # (SPDLOG_FMT_EXTERNAL), so spdlog/fmt/fmt.h includes <fmt/format.h>.
+  includeRoots = chain.all ++ map lib.getDev [ pkgs.spdlog pkgs.fmt ];
   joined = lib.concatMapStringsSep ";" toString;
 
   # An APK carries only files named lib<name>.so, and nixpkgs' cross libraries
@@ -98,6 +118,54 @@ let
   }).overrideAttrs (old: {
     setSourceRoot = "sourceRoot=$(echo */mobile/liblogos-smoke/android)";
     gradleFlags = (old.gradleFlags or [ ]) ++ [ "--stacktrace" ];
+
+    # ── the Bundled module, PACKAGED BUT NOT AUTO-LOADED ────────────────────
+    # It is dropped into androiddeployqt's output directory AFTER the tool has
+    # written res/values/libs.xml, so gradle packages it (jniLibs.srcDirs is
+    # `libs`) and QtLoader never hears about it.
+    #
+    # This is not tidiness. QT_ANDROID_EXTRA_LIBS is a LOAD list: QtLoader
+    # System.load()s every entry on the qtMainLoopThread before any Logos code
+    # runs. A Bare module leaves every `lp_*` undefined by design, and that
+    # early load resolves them against nothing -- measured on an SM-G990B, the
+    # app died before its first frame with
+    #   java.lang.UnsatisfiedLinkError: dlopen failed: cannot locate symbol
+    #   "lp_token_save" referenced by ".../libbare_counter_bare.so"
+    # The module must be opened by the Native container, once the core has
+    # registered it.
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.pkgsBuildBuild.patchelf ];
+
+    preBuild = (old.preBuild or "") + ''
+      install -Dm755 ${bareModule}/lib/${bareModuleSo} \
+        android-build/libs/${pkgs.androidPkgs.abi}/${bareModuleSo}
+
+      # The module names the host's protocol image in its own DT_NEEDED
+      # (logos-module-builder does that at link time -- on Android bionic
+      # offers a dlopen'd library no other way to reach an app library's
+      # symbols). Assert both halves here, because the APK is where they have
+      # to meet: a module whose dependency the APK does not carry is
+      # unloadable, and the device says so only at load.
+      needed=$(patchelf --print-needed \
+        android-build/libs/${pkgs.androidPkgs.abi}/${bareModuleSo})
+      grep -qx liblogos_protocol.so <<< "$needed" || {
+        echo "error: ${bareModuleSo} does not name liblogos_protocol.so in DT_NEEDED;" >&2
+        echo "its lp_* would resolve against nothing on this platform. NEEDED was:" >&2
+        printf '  %s\n' $needed >&2
+        exit 1
+      }
+      [ -f "android-build/libs/${pkgs.androidPkgs.abi}/liblogos_protocol.so" ] || {
+        echo "error: liblogos_protocol.so is not in the APK, and ${bareModuleSo} needs it" >&2
+        exit 1
+      }
+
+      # libs.xml is what QtLoader reads. If the module ever appears in it, the
+      # app is back to the crash above -- and it would look like a Qt problem.
+      if grep -q "${bareModuleSo}" android-build/res/values/libs.xml; then
+        echo "error: ${bareModuleSo} is in libs.xml; QtLoader would load it eagerly" >&2
+        exit 1
+      fi
+      echo "==> bundled Bare module packaged, not auto-loaded: ${bareModuleSo}"
+    '';
   });
   apkFile = "${apk}/${apk.apkName}";
   adb = "${pkgs.androidPkgs.androidsdk}/bin/adb";

@@ -6,6 +6,7 @@
 // process exits, so a hung shutdown is visible as a hang and not as a kill.
 #include <QtGlobal>
 
+#include "BundledModuleRunner.h"
 #include "SmokeRunner.h"
 
 #include <QApplication>
@@ -98,6 +99,17 @@ int main(int argc, char* argv[])
     sinceMain.start();
     runner.run(argc, argv);
     say(QStringLiteral("core up, %1 ms since main()").arg(sinceMain.elapsed()));
+
+    // The app's ONE Bundled module, brought up in the Native container. It is
+    // run after the core is up and before the event loop, so the verdict is on
+    // screen and in the platform console by the time the first frame is drawn
+    // -- an automated run reads it off the console and never has to tap
+    // anything.
+    BundledModuleRunner bundled;
+    QObject::connect(&bundled, &BundledModuleRunner::log, &say);
+    const bool bundledOk = bundled.run();
+    say(bundledOk ? QStringLiteral("bundled module: PASS")
+                  : QStringLiteral("bundled module: FAIL"));
 
     auto shutdown = [&]() {
         runner.stop();

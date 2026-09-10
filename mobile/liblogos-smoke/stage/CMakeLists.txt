@@ -24,6 +24,8 @@ set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 add_library(liblogos_smoke_host STATIC
     ${SRC}/SmokeRunner.cpp
     ${SRC}/SmokeRunner.h
+    ${SRC}/BundledModuleRunner.cpp
+    ${SRC}/BundledModuleRunner.h
 )
 target_include_directories(liblogos_smoke_host PUBLIC
     $<BUILD_INTERFACE:${SRC}>
@@ -31,6 +33,11 @@ target_include_directories(liblogos_smoke_host PUBLIC
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(liblogos_smoke_host PUBLIC "${LOGOS_IOS_INCLUDE_ROOTS}")
+
+# The bundled module's manifest, compiled in -- see the header it generates.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosBundledManifest.cmake)
+logos_bundled_manifest(liblogos_smoke_host
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bare_counter/manifest.json)
 
 # A flat list of archives is enough: ld-prime resolves across archives in any
 # order. liblogos_core goes first anyway, so its undefined symbols are what
@@ -66,7 +73,8 @@ target_link_libraries(liblogos_smoke_host PUBLIC
 
 set_target_properties(liblogos_smoke_host PROPERTIES EXPORT_NAME LiblogosSmokeHost)
 install(TARGETS liblogos_smoke_host EXPORT LiblogosSmokeHostTargets ARCHIVE DESTINATION lib)
-install(FILES ${SRC}/SmokeRunner.h DESTINATION include/liblogos-smoke-host)
+install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledModuleRunner.h
+        DESTINATION include/liblogos-smoke-host)
 install(EXPORT LiblogosSmokeHostTargets
     FILE LiblogosSmokeHostTargets.cmake NAMESPACE Logos::
     DESTINATION lib/cmake/LiblogosSmokeHost)
