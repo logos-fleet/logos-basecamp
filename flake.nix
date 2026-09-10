@@ -2,6 +2,14 @@
   description = "Logos Basecamp - Qt application with UI plugins";
 
   inputs = {
+    # THE MOBILE CHAIN'S INPUTS ARE LOCKED TO THE logos-fleet FORKS, not to
+    # these URLs: the smoke host needs logos-nix's mobile pseudo-systems,
+    # logos-liblogos's lib.mkMobileChains, and the cross-build CMake options
+    # in logos-protocol, logos-plugin-qt, logos-module, logos-package and
+    # logos-package-manager -- none of which are upstream yet. `nix flake
+    # update` would move them back and the mobile outputs would stop
+    # evaluating; re-pin with
+    #   nix flake lock --override-input <input> github:logos-fleet/<repo>/<rev>
     logos-nix.url = "github:logos-co/logos-nix";
     # Follow the same nixpkgs as logos-nix
     nixpkgs.follows = "logos-nix/nixpkgs";
@@ -32,6 +40,13 @@
     # its OWN older liblgx in the bundle's flat lib/ — where the module's
     # newer copy can never win on macOS, and package_manager crashes.
     logos-liblogos.inputs.logos-package-manager.follows = "logos-package-manager";
+    # ...and ONE lgx source tree and ONE logos-module. liblogos's mobile chain
+    # builds lgx (and logos_module) FROM SOURCE off these inputs, so without
+    # the follows the smoke host links a different lgx tree than the one this
+    # flake ships, and a standalone `nix build` of the mobile outputs resolves
+    # them upstream, where the cross-build options do not exist yet.
+    logos-liblogos.inputs.logos-package.follows = "logos-package";
+    logos-liblogos.inputs.logos-module.follows = "logos-module";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
     logos-capability-module.url = "github:logos-co/logos-capability-module";
@@ -180,6 +195,43 @@
         installPortable = nix-bundle-logos-module-install.bundlers.${system}.portable;
         dirBundler = nix-bundle-dir.bundlers.${buildSystem}.qtApp;
       });
+
+      # ── Mobile: the liblogos smoke host ───────────────────────────────────
+      # liblogos_core running on a phone with nothing loaded. The core, and
+      # the eight repos it links, are cross-built by logos-liblogos
+      # (lib.mkMobileChains); this flake adds the host that starts it and the
+      # runners that put it on a simulator, an iPhone/iPad or an Android
+      # device.
+      #
+      # Mobile pseudo-systems are opt-in in logos-nix (an iOS host is
+      # stdenv.isDarwin, so folding them into forAllTargets misroutes every
+      # `if isDarwin` above) and are merged onto `packages` the same way
+      # x86_64-windows is.
+      #
+      # androidBuildSystem: the Android derivations' `system` is their BUILD
+      # platform, and the canonical one is x86_64-linux, which a Mac cannot
+      # realise even though it builds the identical closure. legacyPackages
+      # below is where a Mac asks for the Android APK.
+      #
+      # The smoke host builds against the package set the chain itself was
+      # built from (`chain.pkgs`) rather than instantiating a second one.
+      mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
+        nixpkgs.lib.mapAttrs
+          (system: chain:
+            import (
+              if system == "aarch64-android"
+              then ./nix/liblogos-smoke-android.nix
+              else ./nix/liblogos-smoke-ios.nix
+            ) { inherit (chain) pkgs; inherit chain; src = ./.; })
+          (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; });
+
+      # One smoke set per Android build platform; `packages`, `apps` and
+      # `legacyPackages` below are views of these, so nothing is instantiated
+      # twice.
+      mobileSmokeFor = nixpkgs.lib.genAttrs logos-nix.lib.androidBuildSystems
+        (androidBuildSystem: mkMobileSmoke { inherit androidBuildSystem; });
+      # Flake `packages` carry the canonical (x86_64-linux) Android build platform.
+      mobileSmoke = mobileSmokeFor.x86_64-linux;
     in
     {
       packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, logosQtMcp, installDev, installPortable, dirBundler, ... }:
@@ -608,20 +660,60 @@
             appBin = "${macosAppTest}/LogosBasecamp.app/Contents/MacOS/LogosBasecamp";
           };
         }
-      );
+      ) // mobileSmoke;
 
       # nix run .                   → dev build  (depends on /nix/store at runtime)
       # nix run .#bin-bundle-dir    → self-contained bundle (Qt frameworks in lib/)
-      apps = forAllSystems ({ system, ... }: {
-        default = {
-          type = "app";
-          program = "${self.packages.${system}.app}/bin/LogosBasecamp";
+      apps =
+        let
+          desktopApps = forAllSystems ({ system, ... }: {
+            default = {
+              type = "app";
+              program = "${self.packages.${system}.app}/bin/LogosBasecamp";
+            };
+            bin-bundle-dir = {
+              type = "app";
+              program = "${self.packages.${system}.bin-bundle-dir}/bin/LogosBasecamp";
+            };
+          });
+        in
+        desktopApps
+        # The mobile runners are build-platform scripts, so they belong to the
+        # system that RUNS them, not to the pseudo-system they target:
+        #   nix run .#run-liblogos-smoke-ios-sim
+        #   LOGOS_IOS_TEAM_ID=... LOGOS_IOS_DEVICE=... nix run .#run-liblogos-smoke-ios-device
+        #   nix run .#run-liblogos-smoke-android
+        #
+        # The left operand is named rather than read back off `self.apps`: an
+        # attribute of `apps` cannot refer to `apps` itself, `or { }` does not
+        # break the cycle, and the result is an infinite recursion the moment
+        # anything asks for apps.aarch64-darwin.
+        // {
+          aarch64-darwin = (desktopApps.aarch64-darwin or { }) // {
+            run-liblogos-smoke-ios-sim = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-ios-simulator.run-liblogos-smoke-ios-sim}/bin/run-liblogos-smoke-ios-sim";
+            };
+            run-liblogos-smoke-ios-device = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-ios.run-liblogos-smoke-ios-device}/bin/run-liblogos-smoke-ios-device";
+            };
+            run-liblogos-smoke-android = {
+              type = "app";
+              program = "${mobileSmokeFor.aarch64-darwin.aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+            };
+          };
+          x86_64-linux = (desktopApps.x86_64-linux or { }) // {
+            run-liblogos-smoke-android = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+            };
+          };
         };
-        bin-bundle-dir = {
-          type = "app";
-          program = "${self.packages.${system}.bin-bundle-dir}/bin/LogosBasecamp";
-        };
-      });
+
+      # The mobile artifacts keyed by the platform that BUILDS them; see
+      # mkMobileSmoke for why Android needs this and packages does not suffice.
+      legacyPackages = nixpkgs.lib.mapAttrs (_: mobile: { inherit mobile; }) mobileSmokeFor;
 
       checks = forAllSystems ({ pkgs, system, ... }: {
         smoke-test = self.packages.${system}.smoke-test;

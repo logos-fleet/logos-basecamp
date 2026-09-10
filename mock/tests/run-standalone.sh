@@ -111,8 +111,11 @@ run_suite() {
 # QtPrivate::TypeAndForceComplete on newer Qt and older headers reject it.
 #
 # The from-source path stays as a fallback for a bare checkout with no nix.
+# CXX, not a literal g++: the nix check derivation runs this on darwin too,
+# where the stdenv provides clang++ and no g++ at all. A bare checkout still
+# gets the old default.
 # shellcheck disable=SC2086
-g++ -std=c++17 -fPIC $SAN -o mock_fixture_test \
+"${CXX:-g++}" -std=c++17 -fPIC $SAN -o mock_fixture_test \
     "$HERE/mock_fixture_test.cpp" "$MOCKDIR/src/MockBackendFixture.cpp" qrc_fixture.cpp \
     "${INCLUDES[@]}" $QT_CORE_CFLAGS $QT_CORE_LIBS
 run_suite "fixture resolution" env HOME="$BUILD" LOGOS_USER_DIR="$BUILD/userdir" ./mock_fixture_test
