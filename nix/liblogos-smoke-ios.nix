@@ -13,6 +13,10 @@
   chain,
   # The basecamp source tree (this flake's ./.).
   src,
+  # The Bundled Bare module for THIS target: an .framework bundle under
+  # Library/Frameworks/ (logos-module-builder's `bare` output on an iOS
+  # package set).
+  bareModule,
 }:
 
 let
@@ -26,6 +30,47 @@ let
   roots = chain.all;
   joined = lib.concatMapStringsSep ";" toString;
 
+  # ── the Bundled module ──────────────────────────────────────────────────
+  bareModuleName = "bare_counter_bare";
+  bareFramework = "${bareModule}/Library/Frameworks/${bareModuleName}.framework";
+
+  # The symbols the app must FORCE-LOAD and EXPORT so the module resolves them
+  # upward at dlopen (ADR 0006).
+  #
+  # Computed, never listed. It is the module image's own undefined symbols
+  # INTERSECTED with what the Logos archives define -- so it is exactly the set
+  # that has to come from the app and nothing else. Everything the module gets
+  # from /usr/lib (libc++, libSystem) drops out of the intersection on its own,
+  # because no archive here defines it. A hand-written list would be right
+  # until the module gained a call.
+  exportedSymbols = buildPkgs.runCommandLocal "liblogos-smoke-ios-module-symbols.txt" {
+    nativeBuildInputs = [ buildPkgs.darwin.cctools ];
+  } ''
+    set -euo pipefail
+    nm -guj "${bareFramework}/${bareModuleName}" | sort -u > undefined.txt
+
+    : > defined.txt
+    for root in ${lib.concatStringsSep " " (map toString roots)}; do
+      for a in "$root"/lib/*.a; do
+        [ -e "$a" ] || continue
+        nm -gUj "$a" 2>/dev/null >> defined.txt || true
+      done
+    done
+    sort -u -o defined.txt defined.txt
+
+    comm -12 undefined.txt defined.txt > $out
+    if [ ! -s $out ]; then
+      echo "error: the Bare module resolves NOTHING upward from the app." >&2
+      echo "That cannot be right for a module that speaks the logos-protocol" >&2
+      echo "C ABI -- it means the intersection is being computed against the" >&2
+      echo "wrong archives, and the app would export nothing." >&2
+      echo "--- undefined in the module:" >&2; cat undefined.txt >&2
+      exit 1
+    fi
+    echo "app must export $(wc -l < $out) symbol(s) for ${bareModuleName}:" >&2
+    cat $out >&2
+  '';
+
   stage = pkgs.mkIosCmakeStage {
     pname = "liblogos-smoke-host-ios";
     version = "0.1.0";
@@ -37,6 +82,10 @@ let
       "-DLOGOS_IOS_LIB_ROOTS=${joined roots}"
       "-DLOGOS_IOS_INCLUDE_ROOTS=${joined roots}"
     ];
+    # Carried by the stage only so its passthru hands the app the two flags
+    # logos_ios_export_symbols() needs; the stage is a static archive and
+    # exports nothing itself.
+    exportedSymbolFiles = [ exportedSymbols ];
   };
 
   # Shared by both runners. The build dir is keyed on the stage's store path,
@@ -49,12 +98,27 @@ let
     build_dir="''${LOGOS_IOS_SMOKE_BUILD_DIR:-''${TMPDIR:-/tmp}/liblogos-smoke-ios/$(basename ${stage})}"
     app="$build_dir/Debug-${appleSdk}/LiblogosSmoke.app"
 
+    # Xcode's copy phase signs the framework IN PLACE after copying it, and a
+    # store path is read-only all the way down -- ditto preserves that, so
+    # codesign would fail on the copy. Stage a writable one first.
+    stage_framework() {
+      rm -rf "$build_dir/embed"
+      mkdir -p "$build_dir/embed"
+      cp -R "${bareFramework}" "$build_dir/embed/"
+      chmod -R u+w "$build_dir/embed"
+      embed_fw="$build_dir/embed/$(basename ${bareFramework})"
+      echo "==> bundled module: $embed_fw"
+    }
+
     configure_app() {
       mkdir -p "$build_dir"
+      stage_framework
       echo "==> configure ($build_dir)"
       cmake -S "$app_src" -B "$build_dir" -G Xcode \
         -DCMAKE_TOOLCHAIN_FILE=${pkgs.logosQtCrossToolchainFile} \
         ${lib.escapeShellArgs pkgs.logosQtCrossCmakeFlags} \
+        ${lib.escapeShellArgs stage.logosIosSymbolExports.cmakeFlags} \
+        "-DLOGOS_IOS_BARE_MODULE_FRAMEWORK=$embed_fw" \
         "-DCMAKE_PREFIX_PATH=${stage}" \
         "-DCMAKE_FIND_ROOT_PATH=${stage};${joined roots}" \
         "$@"
@@ -83,6 +147,30 @@ let
         exit 1
       fi
       echo "==> no /nix/store reference in the executable"
+
+      # AC: the framework is INSIDE <App>.app/Frameworks/ and signed. Asserted
+      # here rather than trusted, because a copy phase that silently did
+      # nothing leaves an app that starts, runs the core and only then reports
+      # a missing module -- three steps from the cause.
+      embedded="$app/Frameworks/$(basename ${bareFramework})"
+      [ -d "$embedded" ] || { echo "error: no $embedded in the app bundle" >&2; exit 1; }
+      [ -f "$embedded/${bareModuleName}" ] || { echo "error: $embedded has no binary" >&2; exit 1; }
+      echo "==> embedded framework: $embedded"
+      # Only on a real signing identity. A simulator build is put together
+      # with CODE_SIGNING_ALLOWED=NO and still ends up carrying an ad-hoc
+      # signature with no _CodeSignature/CodeResources beside it, so
+      # --verify --deep fails there for a reason that has nothing to do with
+      # the framework ("code has no resources but signature indicates they
+      # must be present"). Making the check conditional on the DEVICE runner
+      # is what keeps it meaningful rather than routinely ignored.
+      if [ -n "''${LOGOS_IOS_VERIFY_SIGNATURE:-}" ]; then
+        codesign --verify --deep --strict --verbose=2 "$app" \
+          || { echo "error: codesign --verify --deep failed" >&2; exit 1; }
+        codesign -dv "$embedded" 2>&1 | grep -E 'Identifier|TeamIdentifier|Signature' || true
+        echo "==> codesign --verify --deep: ok (app and every nested bundle)"
+      else
+        echo "==> unsigned simulator build; codesign --verify --deep is not meaningful here"
+      fi
     }
   '';
 
@@ -125,7 +213,7 @@ let
       [ -n "$device" ] || { echo "LOGOS_IOS_DEVICE is unset (xcrun devicectl list devices)" >&2; exit 1; }
       ${buildApp}
       configure_app "-DLOGOS_IOS_DEVELOPMENT_TEAM=$team"
-      xcodebuild_app -allowProvisioningUpdates
+      LOGOS_IOS_VERIFY_SIGNATURE=1 xcodebuild_app -allowProvisioningUpdates
       echo "==> install + launch on $device (console attached)"
       xcrun devicectl device install app --device "$device" "$app"
       xcrun devicectl device process launch --activate --console --terminate-existing \

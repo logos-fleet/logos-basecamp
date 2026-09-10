@@ -20,10 +20,15 @@ set(LOGOS_INCLUDE_ROOTS "" CACHE STRING "Prefixes holding include/ to compile ag
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 qt_add_executable(LiblogosSmoke
     ${SRC}/main.cpp
-    ${SRC}/SmokeRunner.cpp ${SRC}/SmokeRunner.h)
+    ${SRC}/SmokeRunner.cpp ${SRC}/SmokeRunner.h
+    ${SRC}/BundledModuleRunner.cpp ${SRC}/BundledModuleRunner.h)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(LiblogosSmoke PRIVATE "${LOGOS_INCLUDE_ROOTS}")
+
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosBundledManifest.cmake)
+logos_bundled_manifest(LiblogosSmoke
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bare_counter/manifest.json)
 
 # Every .so under the roots travels in the APK; only the three the host calls
 # directly are on the link line. A shared library that is merely dlopened by
@@ -45,8 +50,23 @@ if(NOT _link MATCHES "liblogos_core")
 endif()
 message(STATUS "Logos link: ${_link}")
 message(STATUS "APK extra libs: ${_extra}")
+# spdlog too, and it has to be the SAME libspdlog.so liblogos_core links: the
+# host attaches a logcat sink to the core's channels (BundledModuleRunner), and
+# that only reaches them if there is one registry in the process. Compiled-lib
+# mode is what makes the registry live in the .so rather than in each image.
+set(_spdlog "")
+foreach(_so IN LISTS _extra)
+    if(_so MATCHES "libspdlog\\.so$")
+        set(_spdlog ${_so})
+    endif()
+endforeach()
+if(NOT _spdlog)
+    message(FATAL_ERROR "libspdlog.so not found under LOGOS_LIB_ROOTS: ${LOGOS_LIB_ROOTS}")
+endif()
+target_compile_definitions(LiblogosSmoke PRIVATE SPDLOG_COMPILED_LIB)
+
 target_link_libraries(LiblogosSmoke PRIVATE
-    ${_link} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::RemoteObjects)
+    ${_link} ${_spdlog} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::RemoteObjects)
 
 set_target_properties(LiblogosSmoke PROPERTIES
     QT_ANDROID_PACKAGE_NAME "co.logos.liblogos.smoke"

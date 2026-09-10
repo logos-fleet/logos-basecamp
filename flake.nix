@@ -59,6 +59,37 @@
     # signer-binding fix.
     logos-package-manager-ui.inputs.package_manager.follows = "logos-package-manager-module";
     logos-package-manager-ui.inputs.package_downloader.follows = "logos-package-downloader-module";
+    # The BUNDLED module's builder. mobile/bare-counter is built through
+    # `logos-module-builder.lib.mkLogosModule`, and the app embeds its `bare`
+    # output -- an iOS framework, an Android .so.
+    #
+    # Every shared input is cut to this flake's copy, and the reason is the
+    # same one the block above states for logos-qt-host: a Bare module is
+    # compiled against logos-protocol's headers and stamped with the protocol
+    # version it saw, and the host gates that stamp at load
+    # (bareModuleProtocolCompatible). Two protocol pins in one closure means
+    # the app either refuses its own bundled module or -- worse, on a MINOR
+    # skew -- loads it and disagrees about the wire.
+    #
+    # LOCKED TO THE logos-fleet FORK, not to this URL: `bareCounter` reaches for
+    # `legacyPackages.<buildSystem>.mobile.<target>.bare`, which upstream does
+    # not publish. A bare `nix flake update` walks the lock back to logos-co and
+    # the mobile smoke apps stop EVALUATING. Re-pin with
+    #   nix flake lock --override-input logos-module-builder \
+    #     github:logos-fleet/logos-module-builder/<rev>
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+    logos-module-builder.inputs.logos-nix.follows = "logos-nix";
+    logos-module-builder.inputs.logos-protocol.follows = "logos-protocol";
+    logos-module-builder.inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
+    logos-module-builder.inputs.logos-qt-sdk.follows = "logos-qt-sdk";
+    logos-module-builder.inputs.logos-plugin-qt.follows = "logos-plugin-qt";
+    # Not a typo: the builder carries a SECOND alias of the same repo
+    # (github:logos-co/logos-plugin-qt) under the pre-rename name, and it must
+    # land on the same rev as the alias above or the two backends disagree.
+    logos-module-builder.inputs.logos-plugin-core.follows = "logos-plugin-qt";
+    logos-module-builder.inputs.logos-module.follows = "logos-module";
+    logos-module-builder.inputs.nix-bundle-logos-module-install.follows =
+      "nix-bundle-logos-module-install";
     logos-design-system.url = "github:logos-co/logos-design-system";
     logos-view-module-runtime.url = "github:logos-co/logos-view-module-runtime";
     # ui-host links the same qt-host and protocol the app does.
@@ -81,7 +112,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -215,6 +246,18 @@
       #
       # The smoke host builds against the package set the chain itself was
       # built from (`chain.pkgs`) rather than instantiating a second one.
+      #
+      # bareCounter is the app's ONE Bundled module (mobile/bare-counter), and
+      # the host embeds its `bare` output: an iOS framework in
+      # <App>.app/Frameworks/, an Android .so in the native library directory.
+      # It is built by logos-module-builder from THIS flake's logos-protocol
+      # and logos-cpp-sdk (see the `follows` block at the top), so the protocol
+      # version stamped into the artifact is the one the host gates it against.
+      bareCounter = logos-module-builder.lib.mkLogosModule {
+        src = ./mobile/bare-counter;
+        configFile = ./mobile/bare-counter/metadata.json;
+      };
+
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
         nixpkgs.lib.mapAttrs
           (system: chain:
@@ -222,7 +265,17 @@
               if system == "aarch64-android"
               then ./nix/liblogos-smoke-android.nix
               else ./nix/liblogos-smoke-ios.nix
-            ) { inherit (chain) pkgs; inherit chain; src = ./.; })
+            ) {
+              inherit (chain) pkgs;
+              inherit chain;
+              src = ./.;
+              # legacyPackages, not packages: `packages.aarch64-android` is
+              # keyed to the builder's canonical Android build platform, and
+              # the whole point of threading androidBuildSystem through here is
+              # that a Mac needs the other one.
+              bareModule =
+                bareCounter.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
+            })
           (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; });
 
       # One smoke set per Android build platform; `packages`, `apps` and
