@@ -9,7 +9,6 @@
 #include <logos_mode.h>
 #include <logos_protocol.h>
 
-#include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QVariant>
@@ -171,7 +170,6 @@ bool BundledModuleRunner::run()
         }
         return false;
     }
-    m_loaded = true;
     emit log(QStringLiteral("loaded %1 in %2 ms (Native container)").arg(m_moduleName).arg(t.elapsed()));
 
     // The call. A LogosAPI of the host's own, exactly as any other consumer

@@ -48,6 +48,5 @@ signals:
     void log(const QString& line);
 
 private:
-    bool m_loaded = false;
     QString m_moduleName;
 };

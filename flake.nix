@@ -70,12 +70,22 @@
     # (bareModuleProtocolCompatible). Two protocol pins in one closure means
     # the app either refuses its own bundled module or -- worse, on a MINOR
     # skew -- loads it and disagrees about the wire.
+    #
+    # LOCKED TO THE logos-fleet FORK, not to this URL: `bareCounter` reaches for
+    # `legacyPackages.<buildSystem>.mobile.<target>.bare`, which upstream does
+    # not publish. A bare `nix flake update` walks the lock back to logos-co and
+    # the mobile smoke apps stop EVALUATING. Re-pin with
+    #   nix flake lock --override-input logos-module-builder \
+    #     github:logos-fleet/logos-module-builder/<rev>
     logos-module-builder.url = "github:logos-co/logos-module-builder";
     logos-module-builder.inputs.logos-nix.follows = "logos-nix";
     logos-module-builder.inputs.logos-protocol.follows = "logos-protocol";
     logos-module-builder.inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
     logos-module-builder.inputs.logos-qt-sdk.follows = "logos-qt-sdk";
     logos-module-builder.inputs.logos-plugin-qt.follows = "logos-plugin-qt";
+    # Not a typo: the builder carries a SECOND alias of the same repo
+    # (github:logos-co/logos-plugin-qt) under the pre-rename name, and it must
+    # land on the same rev as the alias above or the two backends disagree.
     logos-module-builder.inputs.logos-plugin-core.follows = "logos-plugin-qt";
     logos-module-builder.inputs.logos-module.follows = "logos-module";
     logos-module-builder.inputs.nix-bundle-logos-module-install.follows =
