@@ -69,8 +69,12 @@ signals:
 
 private:
     void registerBundledSet();
-    // The bundle-relative image path of a member, or empty if the set has no
-    // such member.
+    // Where THIS platform's loader will find a member's image. The manifest
+    // records the path inside the SET, and the two platforms do different
+    // things with it: iOS preserves the layout inside <App>.app, Android
+    // flattens it into the native library directory. See the definition.
+    QString imagePathFor(const QJsonObject& entry) const;
+    // The same, looked up by name, or empty if the set has no such member.
     QString imagePathOf(const QString& name) const;
 
     ICoreRuntime::Config m_config;

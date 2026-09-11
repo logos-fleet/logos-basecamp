@@ -155,7 +155,7 @@ void BundledSetCoreRuntime::registerBundledSet()
         if (m_registered.contains(name))
             continue;
 
-        const QString imagePath = m_imageDir + QStringLiteral("/") + entry["image"].toString();
+        const QString imagePath = imagePathFor(entry);
         if (!QFileInfo::exists(imagePath)) {
             emit log(QStringLiteral("  %1: no image at %2 (embed step did not run?)")
                          .arg(name, imagePath));
@@ -264,12 +264,34 @@ QVariantList BundledSetCoreRuntime::bundledSet() const
     return out;
 }
 
+QString BundledSetCoreRuntime::imagePathFor(const QJsonObject& entry) const
+{
+    const QString image = entry["image"].toString();
+    if (image.isEmpty())
+        return {};
+#if defined(Q_OS_ANDROID)
+    // The APK FLATTENS the set. `image` is the path INSIDE the set --
+    // `lib/lib<stem>.so`, which is what a variant payload is laid out as -- but
+    // gradle packages every member as `lib<stem>.so` in the app's native
+    // library directory, and since API 29 that directory is the only place
+    // Android will dlopen from at all. m_imageDir IS that directory, so it is
+    // the set's `lib/` rather than its parent: keeping the prefix asks for
+    // <nativeLibDir>/lib/lib<stem>.so, which is nowhere. Measured on an
+    // SM-G990B, as five consecutive "no image at ..." lines and an empty set.
+    return m_imageDir + QLatin1Char('/') + image.section(QLatin1Char('/'), -1);
+#else
+    // iOS PRESERVES it: `Frameworks/<stem>.framework/<stem>` is a real path
+    // inside <App>.app, which is what m_imageDir points at.
+    return m_imageDir + QLatin1Char('/') + image;
+#endif
+}
+
 QString BundledSetCoreRuntime::imagePathOf(const QString& name) const
 {
     for (const QJsonValue& value : m_set["modules"].toArray()) {
         const QJsonObject entry = value.toObject();
         if (entry["name"].toString() == name)
-            return m_imageDir + QStringLiteral("/") + entry["image"].toString();
+            return imagePathFor(entry);
     }
     return {};
 }
