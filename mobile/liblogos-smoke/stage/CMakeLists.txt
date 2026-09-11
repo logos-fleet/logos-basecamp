@@ -28,8 +28,10 @@ set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 add_library(liblogos_smoke_host STATIC
     ${SRC}/SmokeRunner.cpp
     ${SRC}/SmokeRunner.h
-    ${SRC}/BundledModuleRunner.cpp
-    ${SRC}/BundledModuleRunner.h
+    ${SRC}/BundledSetRunner.cpp
+    ${SRC}/BundledSetRunner.h
+    ${SRC}/BundledSetCoreRuntime.cpp
+    ${SRC}/BundledSetCoreRuntime.h
     ${SRC}/ViewModuleRunner.cpp
     ${SRC}/ViewModuleRunner.h
 )
@@ -46,12 +48,19 @@ if(NOT LOGOS_VIEW_RUNTIME_INCLUDE)
 endif()
 target_include_directories(liblogos_smoke_host PRIVATE ${LOGOS_VIEW_RUNTIME_INCLUDE})
 
-# Which framework the runner dlopens. The nix expression that EMBEDS the
-# bundle names it too; one string, passed in, so the two cannot disagree.
-set(LOGOS_VIEW_MODULE_STEM "" CACHE STRING "Basename of the embedded view framework")
-if(NOT LOGOS_VIEW_MODULE_STEM)
-    message(FATAL_ERROR "LOGOS_VIEW_MODULE_STEM is unset.")
-endif()
+# ICoreRuntime.h -- Basecamp's own runtime seam, header-only. This host
+# implements it (BundledSetCoreRuntime), which is what makes "the Modules tab
+# over a Bundled set" the same interface the desktop shell already codes
+# against rather than a mobile-only lookalike.
+target_include_directories(liblogos_smoke_host PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../app/interfaces>
+    $<INSTALL_INTERFACE:include/liblogos-smoke-host>)
+
+# Which framework the view runner dlopens. Derived by nix from the SAME
+# Bundled-set resolution that produced the embed list, so the two cannot
+# disagree. Empty is legal and means this set carries no view module --
+# `--bundle bare_counter` alone is a perfectly good Bundled set, and the host
+# asks the manifest rather than assuming one is there.
 target_compile_definitions(liblogos_smoke_host
     PRIVATE LOGOS_VIEW_MODULE_STEM="${LOGOS_VIEW_MODULE_STEM}")
 target_include_directories(liblogos_smoke_host PUBLIC
@@ -61,10 +70,18 @@ target_include_directories(liblogos_smoke_host PUBLIC
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(liblogos_smoke_host PUBLIC "${LOGOS_IOS_INCLUDE_ROOTS}")
 
-# The bundled module's manifest, compiled in -- see the header it generates.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosBundledManifest.cmake)
-logos_bundled_manifest(liblogos_smoke_host
-    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bare_counter/manifest.json)
+# The Bundled SET's manifest, compiled in -- see the header it generates. It is
+# the host's whole knowledge of what it carries, so it is passed in by nix
+# rather than read from the source tree: `--bundle` changes the set and must
+# change no file here.
+set(LOGOS_BUNDLED_SET_MANIFEST "" CACHE STRING "bundled-set.json for this build")
+if(NOT LOGOS_BUNDLED_SET_MANIFEST)
+    message(FATAL_ERROR
+        "LOGOS_BUNDLED_SET_MANIFEST is unset; the host would compile in an empty "
+        "set and report every module as missing at runtime.")
+endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosBundledSetManifest.cmake)
+logos_bundled_set_manifest(liblogos_smoke_host ${LOGOS_BUNDLED_SET_MANIFEST})
 
 # A flat list of archives is enough: ld-prime resolves across archives in any
 # order. liblogos_core goes first anyway, so its undefined symbols are what
@@ -101,7 +118,9 @@ target_link_libraries(liblogos_smoke_host PUBLIC
 
 set_target_properties(liblogos_smoke_host PROPERTIES EXPORT_NAME LiblogosSmokeHost)
 install(TARGETS liblogos_smoke_host EXPORT LiblogosSmokeHostTargets ARCHIVE DESTINATION lib)
-install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledModuleRunner.h ${SRC}/ViewModuleRunner.h
+install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledSetRunner.h
+        ${SRC}/BundledSetCoreRuntime.h ${SRC}/ViewModuleRunner.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../app/interfaces/ICoreRuntime.h
         DESTINATION include/liblogos-smoke-host)
 install(EXPORT LiblogosSmokeHostTargets
     FILE LiblogosSmokeHostTargets.cmake NAMESPACE Logos::

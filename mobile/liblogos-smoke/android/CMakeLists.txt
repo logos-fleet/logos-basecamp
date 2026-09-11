@@ -21,14 +21,27 @@ set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 qt_add_executable(LiblogosSmoke
     ${SRC}/main.cpp
     ${SRC}/SmokeRunner.cpp ${SRC}/SmokeRunner.h
-    ${SRC}/BundledModuleRunner.cpp ${SRC}/BundledModuleRunner.h)
+    ${SRC}/BundledSetRunner.cpp ${SRC}/BundledSetRunner.h
+    ${SRC}/BundledSetCoreRuntime.cpp ${SRC}/BundledSetCoreRuntime.h)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(LiblogosSmoke PRIVATE "${LOGOS_INCLUDE_ROOTS}")
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosBundledManifest.cmake)
-logos_bundled_manifest(LiblogosSmoke
-    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bare_counter/manifest.json)
+# ICoreRuntime.h -- Basecamp's own runtime seam, header-only. This host
+# implements it (BundledSetCoreRuntime).
+target_include_directories(LiblogosSmoke
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../app/interfaces)
+
+# The Bundled SET's manifest, compiled in. Passed by nix, never read from the
+# source tree: `--bundle` changes the set and must change no file here.
+set(LOGOS_BUNDLED_SET_MANIFEST "" CACHE STRING "bundled-set.json for this build")
+if(NOT LOGOS_BUNDLED_SET_MANIFEST)
+    message(FATAL_ERROR
+        "LOGOS_BUNDLED_SET_MANIFEST is unset; the host would compile in an empty "
+        "set and report every module as missing at runtime.")
+endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosBundledSetManifest.cmake)
+logos_bundled_set_manifest(LiblogosSmoke ${LOGOS_BUNDLED_SET_MANIFEST})
 
 # Every .so under the roots travels in the APK; only the three the host calls
 # directly are on the link line. A shared library that is merely dlopened by
@@ -51,7 +64,7 @@ endif()
 message(STATUS "Logos link: ${_link}")
 message(STATUS "APK extra libs: ${_extra}")
 # spdlog too, and it has to be the SAME libspdlog.so liblogos_core links: the
-# host attaches a logcat sink to the core's channels (BundledModuleRunner), and
+# host attaches a logcat sink to the core's channels (BundledSetRunner), and
 # that only reaches them if there is one registry in the process. Compiled-lib
 # mode is what makes the registry live in the .so rather than in each image.
 set(_spdlog "")

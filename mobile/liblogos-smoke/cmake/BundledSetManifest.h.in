@@ -1,0 +1,12 @@
+// GENERATED from the Bundled set's bundled-set.json (nix/bundled-set.nix).
+//
+// The manifest is compiled in rather than shipped as a file because there is
+// nowhere to ship it TO: a module image lives in <App>.app/Frameworks/ on iOS
+// and in the app's native library directory on Android, both of which are flat,
+// read-only, and the only places their platform will dlopen from. The manifest
+// therefore travels with the app -- which is also what makes it the host's
+// whole knowledge of its set: names, versions, dependencies and the
+// bundle-relative path of every image, in load order.
+#pragma once
+
+inline constexpr const char* kBundledSetManifest = R"LOGOSJSON(@LOGOS_BUNDLED_SET_MANIFEST_JSON@)LOGOSJSON";
