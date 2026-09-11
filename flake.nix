@@ -258,6 +258,16 @@
         configFile = ./mobile/bare-counter/metadata.json;
       };
 
+      # viewCounter is the app's ONE Bundled VIEW module (mobile/view-counter):
+      # a `type: ui_qml` module whose iOS `view` output is one embedded
+      # framework carrying its Qt backend and its QML, with Qt and LogosAPI
+      # bound upward into the app. Same builder, same follows block, same
+      # protocol pin as bareCounter.
+      viewCounter = logos-module-builder.lib.mkLogosQmlModule {
+        src = ./mobile/view-counter;
+        configFile = ./mobile/view-counter/metadata.json;
+      };
+
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
         nixpkgs.lib.mapAttrs
           (system: chain:
@@ -265,7 +275,7 @@
               if system == "aarch64-android"
               then ./nix/liblogos-smoke-android.nix
               else ./nix/liblogos-smoke-ios.nix
-            ) {
+            ) ({
               inherit (chain) pkgs;
               inherit chain;
               src = ./.;
@@ -275,7 +285,23 @@
               # that a Mac needs the other one.
               bareModule =
                 bareCounter.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
-            })
+            }
+            # INSIDE the parentheses: `import f a // b` is `(import f a) // b`,
+            # which merges an attribute into the RESULT that no build phase
+            # ever reads.
+            #
+            # The view framework is iOS-only, and so are these two arguments:
+            # on Android Qt is a set of shared objects, so a ui_qml module
+            # there is a different artifact with a different gate and
+            # logos-module-builder publishes no `view` key at all.
+            // nixpkgs.lib.optionalAttrs (system != "aarch64-android") {
+              viewModule = viewCounter.packages.${system}.view;
+              # LogosViewPlugin.h — the HOST side of the view-plugin
+              # interface, header-only. The runtime's library and its ui-host
+              # binary are a desktop concern; on a phone the host holds the
+              # view object itself and only needs the declaration to cast to.
+              viewRuntimeSrc = logos-view-module-runtime;
+            }))
           (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; });
 
       # One smoke set per Android build platform; `packages`, `apps` and
