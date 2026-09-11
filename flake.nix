@@ -49,7 +49,27 @@
     logos-liblogos.inputs.logos-module.follows = "logos-module";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
+    # The trust root, and a MEMBER of the mobile dev catalog (mobileCatalogFor):
+    # the catalog carries its `bare` output, reached as
+    # `legacyPackages.<buildSystem>.mobile.<target>.bare`.
+    #
+    # LOCKED TO THE logos-fleet FORK, for the same reason and with the same
+    # consequence as logos-module-builder below: upstream publishes no mobile
+    # keys, so a bare `nix flake update` walks the lock back to logos-co and
+    # the mobile outputs stop EVALUATING ("attribute 'legacyPackages' missing").
+    # Re-pin with
+    #   nix flake lock --override-input logos-capability-module \
+    #     github:logos-fleet/logos-capability-module/<rev>
     logos-capability-module.url = "github:logos-co/logos-capability-module";
+    # ONE builder in the closure, for the reason the logos-module-builder block
+    # below states for bare_counter and which now applies here too: the app
+    # embeds capability_module's `bare` artifact, a Bare module is stamped with
+    # the logos-protocol version it was compiled against, and the host gates
+    # that stamp at load. Two builders means two protocol pins and an app that
+    # refuses its own bundled module -- and without the follows the mobile keys
+    # do not exist at all, because this module's OWN pin predates them
+    # ("attribute 'legacyPackages' missing").
+    logos-capability-module.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-modules-state-module.url = "github:logos-co/logos-modules-state-module";
     logos-package.url = "github:logos-co/logos-package";
     logos-package-manager-ui.url = "github:logos-co/logos-package-manager-ui";
