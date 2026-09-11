@@ -47,11 +47,14 @@ Rectangle {
         readonly property int sectionModuleInspector: 2
         readonly property int sectionRepositories:    3
 
+        // `key` is an automation handle and nothing else: the labels are
+        // translated and their order is a layout decision, so neither is
+        // something a test may match on.
         readonly property var sections: [
-            { label: qsTr("Dashboard") },
-            { label: qsTr("Apps Inspector") },
-            { label: qsTr("Module Inspector") },
-            { label: qsTr("Package Repositories") }
+            { key: "dashboard",         label: qsTr("Dashboard") },
+            { key: "apps_inspector",    label: qsTr("Apps Inspector") },
+            { key: "module_inspector",  label: qsTr("Module Inspector") },
+            { key: "repositories",      label: qsTr("Package Repositories") }
         ]
 
         property int selectedIndex: 0
@@ -160,6 +163,7 @@ Rectangle {
 
                 delegate: LogosItemDelegate {
                     id: cell
+                    objectName: "settings.section." + modelData.key
                     width: ListView.view.width
                     text: modelData.label
                     highlighted: ListView.isCurrentItem

@@ -9,10 +9,12 @@ QML renders in this process's own engine, bound to a backend that also lives in
 this process.
 
 This is a bring-up probe, not a product: nothing is *installed* at runtime and
-no capability_module is loaded. What it proves is that the core and the eight
-repos it links run on iOS and Android, that a protocol-free module image loads
-in the Native container there, and that the whole path from a signed catalog
-package to a loadable image inside an app bundle works.
+no capability_module is loaded. Basecamp's real UI shell runs on the same host,
+over the same set — see [`../basecamp-shell`](../basecamp-shell/README.md), and
+`--app shell`. What it proves is that the core and the eight repos it links run
+on iOS and Android, that a protocol-free module image loads in the Native
+container there, and that the whole path from a signed catalog package to a
+loadable image inside an app bundle works.
 
 ## The Bundled set
 
@@ -88,9 +90,8 @@ Three things on that path are iOS facts rather than choices:
 **How the module reaches the host's `lp_*`.** The iOS framework is linked
 `-undefined dynamic_lookup` and the app force-loads and exports the symbols it
 needs, computed from the module's own `nm -u` intersected with what the app's
-archives define (see `nix/liblogos-smoke-ios.nix`). The view framework widens
-that intersection to **Qt**: it is nothing but Qt calls and carries none of
-them, which only works because logos-nix builds the iOS Qt with
+archives define (see `nix/ios-apps.nix`). The view framework widens that
+intersection to **Qt**: it is nothing but Qt calls and carries none of them, which only works because logos-nix builds the iOS Qt with
 `reduce_exports` off. On Android the artifact records
 `NEEDED liblogos_protocol.so`, which is the only mechanism bionic has: it
 resolves a dlopen'd library against its own DT_NEEDED closure and the linker
@@ -182,7 +183,7 @@ Measured: 4.7 ms on the iPhone 16 Pro simulator, 20.5 ms on an iPad Air,
 | `../bare-counter/` | the Bare module the catalog publishes |
 | `../view-counter/` | the view module the catalog publishes |
 | `../catalog/` | the local catalog's test signing key and icon |
-| `stage/` | iOS **pure** half: everything but `main.cpp`, built by nix as one static archive with the whole Logos closure attached (`nix/liblogos-smoke-ios.nix`) |
+| `stage/` | iOS **pure** half: everything but `main.cpp`, built by nix as one static archive with the whole Logos closure attached (`nix/ios-apps.nix`) |
 | `app/` | iOS **impure** half: the Xcode-generator link, run outside the nix sandbox because that is where an `.app` is signed |
 | `android/` | the whole Android app -- androiddeployqt and gradle run inside the sandbox, so there is no split (`nix/liblogos-smoke-android.nix`) |
 

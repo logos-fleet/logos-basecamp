@@ -426,7 +426,7 @@
             import (
               if system == "aarch64-android"
               then ./nix/liblogos-smoke-android.nix
-              else ./nix/liblogos-smoke-ios.nix
+              else ./nix/ios-apps.nix
             ) ({
               inherit (chain) pkgs;
               inherit chain;
@@ -442,16 +442,37 @@
             # which merges an attribute into the RESULT that no build phase
             # ever reads.
             #
-            # The view framework is iOS-only, and so are these two arguments:
-            # on Android Qt is a set of shared objects, so a ui_qml module
-            # there is a different artifact with a different gate and
-            # logos-module-builder publishes no `view` key at all.
+            # The view framework is iOS-only, and so are these arguments: on
+            # Android Qt is a set of shared objects, so a ui_qml module there
+            # is a different artifact with a different gate and
+            # logos-module-builder publishes no `view` key at all -- and
+            # main_ui there is the desktop plugin with another suffix rather
+            # than a static import, which is a slice of its own.
             // nixpkgs.lib.optionalAttrs (system != "aarch64-android") {
               # LogosViewPlugin.h — the HOST side of the view-plugin
               # interface, header-only. The runtime's library and its ui-host
               # binary are a desktop concern; on a phone the host holds the
               # view object itself and only needs the declaration to cast to.
               viewRuntimeSrc = logos-view-module-runtime;
+
+              # The Shell's own images: the design system and main_ui, cross
+              # built as static archives. Pure UI -- no logos input reaches
+              # them -- so they are keyed off the chain's package set alone.
+              shellUi = import ./nix/shell-ui-ios.nix {
+                inherit (chain) pkgs;
+                src = ./.;
+                # Only `.version` is read; no logos input reaches these
+                # stages, and the nulls are what says so.
+                version = (import ./nix/default.nix {
+                  inherit (chain) pkgs;
+                  logosSdk = null;
+                  logosProtocolPkg = null;
+                  logosQtHost = null;
+                  logosModule = null;
+                  logosLiblogos = null;
+                }).version;
+                designSystemSrc = logos-design-system;
+              };
             }))
           (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; });
 
@@ -712,7 +733,7 @@
           # Catalog-driven Bundled set (ADR 0007, slice 20). The library is
           # instantiated here so `packages` can expose the test; the mobile app
           # builds its own set from the same two files against a cross package
-          # set (nix/liblogos-smoke-ios.nix).
+          # set (nix/ios-apps.nix).
           bundledSetPublisher =
             nix-bundle-lgx.lib.${system}.mkMobileCatalog { lgx = logosLgx; };
 
@@ -978,6 +999,16 @@
             run-liblogos-smoke-ios-device = {
               type = "app";
               program = "${mobileSmoke.aarch64-ios.run-liblogos-smoke-ios-device}/bin/run-liblogos-smoke-ios-device";
+            };
+            # Basecamp's real UI shell on a phone, over the same Bundled set:
+            #   nix run .#run-basecamp-shell-ios-sim
+            run-basecamp-shell-ios-sim = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-ios-simulator.run-basecamp-shell-ios-sim}/bin/run-basecamp-shell-ios-sim";
+            };
+            run-basecamp-shell-ios-device = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-ios.run-basecamp-shell-ios-device}/bin/run-basecamp-shell-ios-device";
             };
             run-liblogos-smoke-android = {
               type = "app";
