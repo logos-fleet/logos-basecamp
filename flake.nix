@@ -49,7 +49,16 @@
     logos-liblogos.inputs.logos-module.follows = "logos-module";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
+    # The capability broker. It is a BUNDLED module now (mobile catalog, below),
+    # so it is compiled against logos-protocol's headers and stamped with the
+    # version it saw, exactly like the three networking modules -- and the host
+    # gates that stamp at load. Its builder has to be this flake's.
+    #
+    # LOCKED TO THE logos-fleet FORK, like the rest of the mobile chain: the
+    # `bare` outputs the catalog reaches for do not exist upstream, and neither
+    # does the module's own Bare build (it included boost/uuid until the fork).
     logos-capability-module.url = "github:logos-co/logos-capability-module";
+    logos-capability-module.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-modules-state-module.url = "github:logos-co/logos-modules-state-module";
     logos-package.url = "github:logos-co/logos-package";
     logos-package-manager-ui.url = "github:logos-co/logos-package-manager-ui";
