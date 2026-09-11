@@ -472,15 +472,15 @@
             packages = nixpkgs.lib.mapAttrsToList
               (n: spec: { inherit spec; drv = drvs.${n}; }) specs;
           };
+          # On iOS ONE name is enough: view_counter's own declared
+          # dependencies resolve the rest, so the set comes out as
+          # view_counter -> bare_counter -> capability_module.
+          #
           # Android's Qt is shared objects, so a ui_qml module there is a
-          # different artifact that logos-module-builder does not publish yet --
-          # which is exactly the case `--bundle view_counter --target
-          # android-arm64` must refuse by name rather than half-build.
-          # On iOS the ONE name is enough: view_counter's closure is
-          # bare_counter and capability_module. On Android there is no ui_qml
-          # artifact yet, so the two core members are named directly -- which is
-          # also the case `--bundle view_counter --target android-arm64` must
-          # refuse by name rather than half-build.
+          # different artifact that logos-module-builder does not publish yet.
+          # The two core members are named directly instead, and
+          # `--bundle view_counter --target android-arm64` is exactly the case
+          # the set must refuse by name rather than half-build.
           defaultApps =
             if isAndroid then [ "capability_module" "bare_counter" ] else [ "view_counter" ];
         };

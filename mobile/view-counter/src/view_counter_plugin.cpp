@@ -1,3 +1,13 @@
+// The count lives in bare_counter, not here. That is the point: a `ui_qml`
+// module is a VIEW, and the state it renders belongs to a core module — so
+// this is the ordinary shape, not a contrivance to make a closure come out at
+// three members. It is also what makes view_counter's dependencies REAL, and
+// the Bundled set then has to satisfy them: see the table in ../README.md for
+// why capability_module is one of them.
+//
+// The dependencies are named in metadata.json and nowhere else, so
+// `--bundle view_counter` resolves the whole closure with no list restated.
+
 #include "view_counter_plugin.h"
 
 #include <logos_api.h>
@@ -29,26 +39,6 @@ void ViewCounterPlugin::initLogos(LogosAPI* api)
     setStatus(QStringLiteral("Connected"));
 }
 
-// ── why this module calls another one ───────────────────────────────────────
-//
-// The count lives in bare_counter, not here. That is the point: a `ui_qml`
-// module is a VIEW, and the state it renders belongs to a core module — so
-// this is the ordinary shape, not a contrivance to make a closure come out at
-// three members.
-//
-// It is also what makes view_counter's dependencies REAL, which the Bundled
-// set then has to satisfy:
-//
-//   bare_counter       the target of the call;
-//   capability_module  how the call is authorised. A module-to-module call
-//                      mints its token through capability_module's
-//                      requestModule (logos-protocol, LogosAPIClient's
-//                      auto-`requestModule` path) — the host's own calls
-//                      skip that because the host is the trust root, a
-//                      module's do not.
-//
-// Both are named in metadata.json, so `--bundle view_counter` resolves a
-// three-member closure out of the catalog with no list restated anywhere.
 QVariant ViewCounterPlugin::callCounter(const QString& method, const QVariantList& args)
 {
     if (!m_logosAPI) {
@@ -78,20 +68,21 @@ QVariant ViewCounterPlugin::callCounter(const QString& method, const QVariantLis
 
 void ViewCounterPlugin::increment()
 {
-    const QVariant value = callCounter(QStringLiteral("increment"), QVariantList{ QVariant(1) });
-    if (!value.isValid())
+    const QVariant reply = callCounter(QStringLiteral("increment"), QVariantList{ QVariant(1) });
+    if (!reply.isValid())
         return;
-    setCount(value.toInt());
-    setStatus(QStringLiteral("count = %1").arg(count()));
+    const int total = reply.toInt();
+    setCount(total);
+    setStatus(QStringLiteral("count = %1").arg(total));
 }
 
 int ViewCounterPlugin::add(int a, int b)
 {
-    const QVariant result =
+    const QVariant reply =
         callCounter(QStringLiteral("add"), QVariantList{ QVariant(a), QVariant(b) });
-    if (!result.isValid())
+    if (!reply.isValid())
         return 0;
-    const int value = result.toInt();
-    setStatus(QStringLiteral("%1 + %2 = %3").arg(a).arg(b).arg(value));
-    return value;
+    const int sum = reply.toInt();
+    setStatus(QStringLiteral("%1 + %2 = %3").arg(a).arg(b).arg(sum));
+    return sum;
 }

@@ -9,10 +9,10 @@ QML renders in this process's own engine, bound to a backend that also lives in
 this process.
 
 This is a bring-up probe, not a product: nothing is *installed* at runtime.
-Basecamp's real UI shell runs on the same host,
-over the same set — see [`../basecamp-shell`](../basecamp-shell/README.md), and
-`--app shell`. What it proves is that the core and the eight repos it links run
-on iOS and Android, that a protocol-free module image loads in the Native
+Basecamp's real UI shell runs on the same host, over the same set — see
+[`../basecamp-shell`](../basecamp-shell/README.md), and `--app shell`. What it
+proves is that the core and the eight repos it links run on iOS and Android,
+that a protocol-free module image loads in the Native
 container there, and that the whole path from a signed catalog package to a
 loadable image inside an app bundle works.
 
@@ -40,8 +40,8 @@ The catalog the smoke host builds against is local (`mobileCatalogFor` in
 `flake.nix`), signed with the test key in `mobile/catalog/keys/`. It carries
 this repo's own two mobile modules plus a real cross build of
 `capability_module` out of logos-capability-module — the trust root every
-module-to-module call mints its token through. A Store shell build points the same
-function at a pinned release instead; nothing else changes.
+module-to-module call mints its token through. A Store shell build points the
+same function at a pinned release instead; nothing else changes.
 
 `ICoreRuntime` — Basecamp's own runtime seam — is answered from that manifest
 by `BundledSetCoreRuntime`. `known`, `loaded`, `load`, `unload`, `refresh` and
