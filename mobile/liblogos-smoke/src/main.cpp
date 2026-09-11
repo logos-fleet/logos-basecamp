@@ -6,20 +6,33 @@
 // process exits, so a hung shutdown is visible as a hang and not as a kill.
 #include <QtGlobal>
 
+// The Bundled VIEW module is iOS-only, so everything that reaches it is behind
+// this one name. On Android Qt is a set of SHARED objects, so a ui_qml module
+// there is a different artifact with a different gate and logos-module-builder
+// publishes no `view` output for it -- and android/CMakeLists.txt accordingly
+// neither compiles ViewModuleRunner nor finds Qt Quick.
+#if defined(Q_OS_IOS)
+#  define LOGOS_SMOKE_WITH_VIEW_MODULE 1
+#endif
+
 #include "BundledModuleRunner.h"
 #include "SmokeRunner.h"
+#if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
 #include "ViewModuleRunner.h"
+#endif
 
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QQuickWidget>
 #include <QSocketNotifier>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+#if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
+#include <QQuickWidget>
+#endif
 
 #include <csignal>
 #include <cstdio>
@@ -83,6 +96,7 @@ int main(int argc, char* argv[])
     QMainWindow window;
     auto* central = new QWidget;
     auto* layout = new QVBoxLayout(central);
+#if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
     // The VIEW module's surface: a Qt Quick scene inside this Widgets host,
     // so the log below it stays on screen. The module's QML is loaded into
     // THIS engine -- the host's own -- which is the whole shape of a Bundled
@@ -90,10 +104,11 @@ int main(int argc, char* argv[])
     auto* viewSurface = new QQuickWidget;
     viewSurface->setResizeMode(QQuickWidget::SizeRootObjectToView);
     viewSurface->setMinimumHeight(240);
+    layout->addWidget(viewSurface, 2);
+#endif
     auto* logView = new QPlainTextEdit;
     logView->setReadOnly(true);
     auto* quit = new QPushButton(QStringLiteral("Quit"));
-    layout->addWidget(viewSurface, 2);
     layout->addWidget(logView, 1);
     layout->addWidget(quit, 0);
     g_log = logView;
@@ -122,6 +137,7 @@ int main(int argc, char* argv[])
     say(bundledOk ? QStringLiteral("bundled module: PASS")
                   : QStringLiteral("bundled module: FAIL"));
 
+#if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
     // ...and the app's ONE Bundled VIEW module, brought up the same way and
     // for the same reason: on screen and on the console before the first
     // frame, so an automated run reads the verdict off the console.
@@ -137,6 +153,7 @@ int main(int argc, char* argv[])
     // number change on screen and can press it again.
     if (viewOk)
         QTimer::singleShot(1500, &view, &ViewModuleRunner::driveViewOnce);
+#endif
 
     auto shutdown = [&]() {
         runner.stop();

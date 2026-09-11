@@ -5,17 +5,16 @@
 
 #include <LogosViewPlugin.h>
 
+#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QGuiApplication>
+#include <QLocalSocket>
+#include <QMouseEvent>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWidget>
-#include <QTimer>
-#include <QMouseEvent>
-#include <QPointer>
-#include <QGuiApplication>
-#include <QLocalSocket>
 #include <QRemoteObjectHost>
 #include <QRemoteObjectNode>
 #include <QRemoteObjectReplica>
@@ -47,7 +46,7 @@ constexpr unsigned kSupportedViewAbi = 1;
 // than being spelled here: it is the same string the nix expression uses to
 // find the framework to embed.
 #ifndef LOGOS_VIEW_MODULE_STEM
-#  define LOGOS_VIEW_MODULE_STEM "view_counter_view"
+#  error "LOGOS_VIEW_MODULE_STEM must be defined by the build (see stage/CMakeLists.txt)"
 #endif
 
 QString viewImageSuffix()
@@ -179,6 +178,12 @@ bool ViewModuleRunner::run(QQuickWidget* surface)
                                   Q_ARG(LogosAPI*, m_api));
     }
 
+    // Both casts, because either can be the one that works. qobject_cast finds
+    // the interface only if the plugin class named it in Q_INTERFACES (what
+    // logos-qt-sdk's ui generator emits); a hand-written plugin that just
+    // inherits the generated base needs the C++ cast. And LogosViewPlugin is
+    // declared twice -- once in this host, once inside the framework -- so the
+    // dynamic_cast is matching typeinfo across the dlopen boundary by name.
     auto* viewPlugin = qobject_cast<LogosViewPlugin*>(m_plugin);
     if (!viewPlugin)
         viewPlugin = dynamic_cast<LogosViewPlugin*>(m_plugin);
@@ -255,10 +260,10 @@ bool ViewModuleRunner::run(QQuickWidget* surface)
     m_bridge->publish(name, m_replica);
     surface->engine()->rootContext()->setContextProperty(QStringLiteral("logos"), m_bridge);
 
-    QElapsedTimer qt_;
-    qt_.start();
+    QElapsedTimer qmlTimer;
+    qmlTimer.start();
     surface->setSource(QUrl(qmlUrl));
-    const qint64 qmlMs = qt_.elapsed();
+    const qint64 qmlMs = qmlTimer.elapsed();
     if (surface->status() == QQuickWidget::Error) {
         for (const QQmlError& e : surface->errors())
             emit log(QStringLiteral("qml: %1").arg(e.toString()));

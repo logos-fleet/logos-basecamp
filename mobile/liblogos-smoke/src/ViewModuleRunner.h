@@ -22,7 +22,6 @@
 
 #include <QObject>
 #include <QString>
-#include <QVariant>
 
 class QQuickWidget;
 class QRemoteObjectHost;
