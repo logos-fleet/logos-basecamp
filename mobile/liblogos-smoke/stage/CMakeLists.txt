@@ -12,7 +12,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network RemoteObjects)
+# Qml/Quick/QuickWidgets are here for the VIEW module: its QML is rendered in
+# THIS process's engine (there is no ui-host subprocess on a phone), and the
+# Qt symbols the module leaves undefined are resolved against these archives
+# once the app force-loads and exports them.
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network RemoteObjects Qml Quick QuickWidgets)
 
 # Prefixes whose lib/*.a are linked into the app and whose include/ this
 # compiles against. Passed by nix as ;-lists -- naming store paths here would
@@ -26,7 +30,30 @@ add_library(liblogos_smoke_host STATIC
     ${SRC}/SmokeRunner.h
     ${SRC}/BundledModuleRunner.cpp
     ${SRC}/BundledModuleRunner.h
+    ${SRC}/ViewModuleRunner.cpp
+    ${SRC}/ViewModuleRunner.h
 )
+
+# LogosViewPlugin.h — the HOST side of the view-plugin interface, from
+# logos-view-module-runtime. Header only: the host constructs the view object
+# itself, so there is nothing from that repo to link.
+set(LOGOS_VIEW_RUNTIME_INCLUDE "" CACHE STRING "logos-view-module-runtime include/")
+if(NOT LOGOS_VIEW_RUNTIME_INCLUDE)
+    message(FATAL_ERROR
+        "LOGOS_VIEW_RUNTIME_INCLUDE is unset; without LogosViewPlugin.h the host "
+        "cannot cast the view plugin it constructs and the view module would "
+        "silently never appear.")
+endif()
+target_include_directories(liblogos_smoke_host PRIVATE ${LOGOS_VIEW_RUNTIME_INCLUDE})
+
+# Which framework the runner dlopens. The nix expression that EMBEDS the
+# bundle names it too; one string, passed in, so the two cannot disagree.
+set(LOGOS_VIEW_MODULE_STEM "" CACHE STRING "Basename of the embedded view framework")
+if(NOT LOGOS_VIEW_MODULE_STEM)
+    message(FATAL_ERROR "LOGOS_VIEW_MODULE_STEM is unset.")
+endif()
+target_compile_definitions(liblogos_smoke_host
+    PRIVATE LOGOS_VIEW_MODULE_STEM="${LOGOS_VIEW_MODULE_STEM}")
 target_include_directories(liblogos_smoke_host PUBLIC
     $<BUILD_INTERFACE:${SRC}>
     $<INSTALL_INTERFACE:include/liblogos-smoke-host>)
@@ -66,6 +93,7 @@ message(STATUS "Logos archives: ${_archives}")
 target_link_libraries(liblogos_smoke_host PUBLIC
     ${_archives}
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::RemoteObjects
+    Qt6::Qml Qt6::Quick Qt6::QuickWidgets
     z                            # lgx's gzip handler; libz is in the iOS SDK
     "-framework CoreFoundation"  # LGX_UNICODE_COREFOUNDATION
     "-framework Foundation"
@@ -73,14 +101,14 @@ target_link_libraries(liblogos_smoke_host PUBLIC
 
 set_target_properties(liblogos_smoke_host PROPERTIES EXPORT_NAME LiblogosSmokeHost)
 install(TARGETS liblogos_smoke_host EXPORT LiblogosSmokeHostTargets ARCHIVE DESTINATION lib)
-install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledModuleRunner.h
+install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledModuleRunner.h ${SRC}/ViewModuleRunner.h
         DESTINATION include/liblogos-smoke-host)
 install(EXPORT LiblogosSmokeHostTargets
     FILE LiblogosSmokeHostTargets.cmake NAMESPACE Logos::
     DESTINATION lib/cmake/LiblogosSmokeHost)
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/LiblogosSmokeHostConfig.cmake CONTENT [[
 include(CMakeFindDependencyMacro)
-find_dependency(Qt6 COMPONENTS Core Gui Widgets Network RemoteObjects)
+find_dependency(Qt6 COMPONENTS Core Gui Widgets Network RemoteObjects Qml Quick QuickWidgets)
 include("${CMAKE_CURRENT_LIST_DIR}/LiblogosSmokeHostTargets.cmake")
 ]] @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/LiblogosSmokeHostConfig.cmake

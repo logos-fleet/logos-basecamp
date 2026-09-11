@@ -7,12 +7,32 @@ project(LiblogosSmokeIos LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network RemoteObjects)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network RemoteObjects Qml Quick QuickWidgets)
 qt_standard_project_setup(REQUIRES 6.5)
 find_package(LiblogosSmokeHost CONFIG REQUIRED)
 
 qt_add_executable(LiblogosSmoke MACOSX_BUNDLE ${CMAKE_CURRENT_SOURCE_DIR}/../src/main.cpp)
-target_link_libraries(LiblogosSmoke PRIVATE Logos::LiblogosSmokeHost Qt6::Widgets)
+target_link_libraries(LiblogosSmoke PRIVATE Logos::LiblogosSmokeHost Qt6::Widgets Qt6::QuickWidgets)
+
+# ── the QML plugins, imported at LINK time ────────────────────────────────
+# Qt for iOS is static, so `import QtQuick` resolves against plugins that are
+# in the EXECUTABLE, not against anything on a plugin path. Linking a Qt6 static
+# QML plugin target also emits its Q_IMPORT_PLUGIN, which is what makes the
+# import visible to the engine. The view module's Main.qml imports QtQuick and
+# nothing else, which is why this list is three entries and not thirty.
+foreach(_qml_plugin
+        Qt6::qmlplugin              # QtQml
+        Qt6::modelsplugin           # QtQml.Models, which QtQuick requires
+        Qt6::qtquick2plugin)        # QtQuick
+    if(NOT TARGET ${_qml_plugin})
+        message(FATAL_ERROR
+            "${_qml_plugin} is not available in this Qt. A statically linked iOS "
+            "app resolves `import QtQuick` against plugins linked INTO it, so "
+            "without this one the view module's QML fails to load at runtime "
+            "with `module \"QtQuick\" is not installed`.")
+    endif()
+    target_link_libraries(LiblogosSmoke PRIVATE ${_qml_plugin})
+endforeach()
 
 # ── the Bundled Bare module ───────────────────────────────────────────────
 # The counter's iOS framework, embedded and signed with the app's identity by
@@ -39,6 +59,24 @@ else()
     message(WARNING
         "LiblogosSmoke: no LOGOS_IOS_BARE_MODULE_FRAMEWORK -- the app will start "
         "the core and then report the bundled module as missing.")
+endif()
+
+# ── the Bundled VIEW module ───────────────────────────────────────────────
+# The same embed-and-sign arrangement, for the ui_qml counter: its framework
+# holds the Qt backend and the QML, and binds Qt upward into this app.
+set(LOGOS_IOS_VIEW_MODULE_FRAMEWORK "" CACHE STRING
+    "Path to the view module's .framework bundle to embed")
+if(LOGOS_IOS_VIEW_MODULE_FRAMEWORK)
+    if(NOT IS_DIRECTORY "${LOGOS_IOS_VIEW_MODULE_FRAMEWORK}")
+        message(FATAL_ERROR
+            "LOGOS_IOS_VIEW_MODULE_FRAMEWORK is not a directory: ${LOGOS_IOS_VIEW_MODULE_FRAMEWORK}")
+    endif()
+    set_property(TARGET LiblogosSmoke APPEND PROPERTY
+        XCODE_EMBED_FRAMEWORKS "${LOGOS_IOS_VIEW_MODULE_FRAMEWORK}")
+else()
+    message(WARNING
+        "LiblogosSmoke: no LOGOS_IOS_VIEW_MODULE_FRAMEWORK -- the app will start "
+        "and then report the view module as missing.")
 endif()
 
 # ── the symbols the module resolves upward ────────────────────────────────

@@ -17615,11 +17615,11 @@
         "rust-overlay": "rust-overlay_8"
       },
       "locked": {
-        "lastModified": 1789059252,
-        "narHash": "sha256-Kcq3CSJRNX2TtNPGyaKQB3a32luVZ1yGgCIvFHbtj3Y=",
+        "lastModified": 1789087415,
+        "narHash": "sha256-lM91XevTtdLFPZ0KApmi4fI3FkeCm7qr3r5mqCTn2gM=",
         "owner": "logos-fleet",
         "repo": "logos-module-builder",
-        "rev": "d20f604f4fd59115ab2135b6cc2dfc99a1387443",
+        "rev": "6e6534731799061d2ad35bbaad665f09c12f21f1",
         "type": "github"
       },
       "original": {

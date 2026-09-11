@@ -8,13 +8,16 @@
 
 #include "BundledModuleRunner.h"
 #include "SmokeRunner.h"
+#include "ViewModuleRunner.h"
 
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QQuickWidget>
 #include <QSocketNotifier>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -80,9 +83,17 @@ int main(int argc, char* argv[])
     QMainWindow window;
     auto* central = new QWidget;
     auto* layout = new QVBoxLayout(central);
+    // The VIEW module's surface: a Qt Quick scene inside this Widgets host,
+    // so the log below it stays on screen. The module's QML is loaded into
+    // THIS engine -- the host's own -- which is the whole shape of a Bundled
+    // view module on a phone.
+    auto* viewSurface = new QQuickWidget;
+    viewSurface->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    viewSurface->setMinimumHeight(240);
     auto* logView = new QPlainTextEdit;
     logView->setReadOnly(true);
     auto* quit = new QPushButton(QStringLiteral("Quit"));
+    layout->addWidget(viewSurface, 2);
     layout->addWidget(logView, 1);
     layout->addWidget(quit, 0);
     g_log = logView;
@@ -110,6 +121,22 @@ int main(int argc, char* argv[])
     const bool bundledOk = bundled.run();
     say(bundledOk ? QStringLiteral("bundled module: PASS")
                   : QStringLiteral("bundled module: FAIL"));
+
+    // ...and the app's ONE Bundled VIEW module, brought up the same way and
+    // for the same reason: on screen and on the console before the first
+    // frame, so an automated run reads the verdict off the console.
+    ViewModuleRunner view;
+    QObject::connect(&view, &ViewModuleRunner::log, &say);
+    const bool viewOk = view.run(viewSurface);
+    say(viewOk ? QStringLiteral("view module: PASS")
+               : QStringLiteral("view module: FAIL"));
+
+    // Then press the view's own button once, after the first frame -- the
+    // scene has no geometry before it, so there is no button to press yet.
+    // An automated run reads the round trip off the console; a human sees the
+    // number change on screen and can press it again.
+    if (viewOk)
+        QTimer::singleShot(1500, &view, &ViewModuleRunner::driveViewOnce);
 
     auto shutdown = [&]() {
         runner.stop();

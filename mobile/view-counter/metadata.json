@@ -1,0 +1,25 @@
+{
+  "name": "view_counter",
+  "version": "1.0.0",
+  "type": "ui_qml",
+  "category": "misc",
+  "description": "The smoke host's ONE Bundled view module: a QML counter over a .rep backend",
+  "main": "view_counter_plugin",
+  "view": "qml/Main.qml",
+  "icon": null,
+  "dependencies": [],
+
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}
