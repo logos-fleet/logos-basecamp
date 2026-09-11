@@ -419,6 +419,31 @@
               inherit signingKey;
             };
 
+            # The capability broker. Not a networking module, and here for what
+            # the three of them NEED: a module-to-module call mints its token
+            # through `capability_module` (LogosAPIClient::mintAndCacheToken),
+            # and without it in the set the call goes out with no token, the
+            # target's ModuleProxy refuses it and the caller is told "token not
+            # recognized". Measured on the iOS simulator: chat_module's
+            # `delivery_module.createNode` failed exactly that way and the chat
+            # core came up with delivery_state "error".
+            #
+            # liblogos already knows this module by name -- the in-process
+            # container grants it `token_registry` / `token_delivery`
+            # (hostServicesJsonFor) -- so bundling it is the whole of the wiring.
+            capability_module = {
+              name = "capability_module";
+              version = "1.0.0";
+              type = "core";
+              category = "system";
+              description = "The capability broker, as a Bundled Bare module";
+              dependencies = [ ];
+              variants.${target} = barePayloadFor {
+                module = logos-capability-module; name = "capability_module";
+              };
+              inherit signingKey;
+            };
+
             # The three networking modules. `dependencies` is the module's own
             # metadata.json answer, not a convenience: the Bundled set resolves
             # a CLOSURE out of it, so `--bundle chat_module` has to bring
