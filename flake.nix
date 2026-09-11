@@ -733,7 +733,7 @@
           # Catalog-driven Bundled set (ADR 0007, slice 20). The library is
           # instantiated here so `packages` can expose the test; the mobile app
           # builds its own set from the same two files against a cross package
-          # set (nix/liblogos-smoke-ios.nix).
+          # set (nix/ios-apps.nix).
           bundledSetPublisher =
             nix-bundle-lgx.lib.${system}.mkMobileCatalog { lgx = logosLgx; };
 

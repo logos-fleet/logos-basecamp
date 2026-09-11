@@ -87,16 +87,11 @@ public:
     bool repositoriesLoading() const { return false; }
     bool appsLoading() const { return false; }
 
-    // The Modules tab, as the model holds it right now: one name per row, in
-    // row order. The acceptance check reads the SHELL's rows through this
-    // rather than re-asking the runtime, which would prove only that the
-    // runtime agrees with itself.
-    QStringList moduleRowNames() const;
-
-    // The set the app SHIPS, by name, straight off the manifest. The rows
-    // above are derived from it, so the two agreeing proves nothing -- what
-    // this is for is the view: every shipped module must have a rendered row,
-    // and no row may exist that the manifest does not account for.
+    // The set the app SHIPS, by name, straight off the manifest. The model's
+    // rows are derived from it, so reading it back off the model would prove
+    // nothing -- what this is for is the view: every shipped module must have
+    // a rendered row, and no row may exist that the manifest does not account
+    // for. ShellModulesDriver checks that against the scene.
     QStringList bundledSetNames() const;
 
     // ── the Modules tab ──

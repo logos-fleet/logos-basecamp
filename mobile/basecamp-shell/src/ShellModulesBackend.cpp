@@ -13,6 +13,10 @@ namespace {
 // policy is written against the name that calls it.
 const char* kApiName = "basecamp_shell";
 
+// A Bundled member of this type is the HOST's to instantiate, not the core's
+// to load (ADR 0006). Two places ask, and they must agree.
+const QLatin1String kViewModuleType("ui_qml");
+
 } // namespace
 
 ShellModulesBackend::ShellModulesBackend(BundledSetCoreRuntime* core, QObject* parent)
@@ -56,7 +60,7 @@ bool ShellModulesBackend::isHostLoaded(const QString& name) const
     for (const QVariant& row : m_core->bundledSet()) {
         const QVariantMap entry = row.toMap();
         if (entry.value(QStringLiteral("name")).toString() == name)
-            return entry.value(QStringLiteral("type")).toString() == QLatin1String("ui_qml");
+            return entry.value(QStringLiteral("type")).toString() == kViewModuleType;
     }
     return false;
 }
@@ -76,7 +80,7 @@ QVariantList ShellModulesBackend::snapshot() const
         const QVariantMap entry = value.toMap();
         const QString name = entry.value(QStringLiteral("name")).toString();
         const QString type = entry.value(QStringLiteral("type")).toString();
-        const bool hostLoaded = type == QLatin1String("ui_qml");
+        const bool hostLoaded = type == kViewModuleType;
 
         QVariantMap row;
         row[QStringLiteral("name")] = name;
@@ -106,15 +110,6 @@ QVariantList ShellModulesBackend::snapshot() const
 void ShellModulesBackend::rebuildRows()
 {
     m_coreModulesModel->replaceRows(snapshot());
-}
-
-QStringList ShellModulesBackend::moduleRowNames() const
-{
-    QStringList names;
-    for (int i = 0; i < m_coreModulesModel->rowCount(); ++i)
-        names << m_coreModulesModel->data(m_coreModulesModel->index(i, 0),
-                                          ModuleInstanceRoles::NameRole).toString();
-    return names;
 }
 
 QStringList ShellModulesBackend::bundledSetNames() const

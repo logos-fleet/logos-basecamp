@@ -18,6 +18,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 class BundledSetShellHost;
 class QQuickItem;
 class QQuickWidget;
@@ -39,9 +41,17 @@ signals:
     void log(const QString& line);
 
 private:
-    // The item with this objectName anywhere under the shell's QQuickWidgets,
-    // or nullptr. Several widgets, because MainContainer puts the sidebar, the
-    // content stack and the overlay layer in separate scenes.
+    // Every item in every scene the shell owns. Several scenes, because
+    // MainContainer puts the sidebar, the content stack and the overlay layer
+    // in separate QQuickWidgets.
+    //
+    // The VISUAL tree, not the QObject tree: QQuickItem::setParentItem does
+    // not reparent the QObject, and a view's delegates are created by the
+    // delegate model rather than by the contentItem -- so QObject::findChild
+    // reaches `moduleInspector.table` and never reaches a single one of its
+    // rows. Every handle this driver wants is a delegate.
+    void forEachItem(const std::function<void(QQuickItem*)>& visit) const;
+    // The item with this objectName in any of those scenes, or nullptr.
     QQuickItem* find(const QString& objectName) const;
     // Every named item in every scene, for when a lookup failed.
     void dumpNames(const QString& why);

@@ -19,12 +19,6 @@
 
 namespace {
 
-// The VISUAL tree, not the QObject tree.
-//
-// QQuickItem::setParentItem does not reparent the QObject, and a view's
-// delegates are created by the delegate model rather than by the contentItem
-// -- so QObject::findChild reaches `moduleInspector.table` and never reaches
-// a single one of its rows. Every handle this driver wants is a delegate.
 void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
 {
     if (!item) return;
@@ -69,19 +63,21 @@ void ShellModulesDriver::dumpNames(const QString& why)
     }
 }
 
+void ShellModulesDriver::forEachItem(const std::function<void(QQuickItem*)>& visit) const
+{
+    if (!m_shell) return;
+    for (QQuickWidget* surface : m_shell->findChildren<QQuickWidget*>())
+        walkItems(surface->rootObject(), visit);
+}
+
 QQuickItem* ShellModulesDriver::find(const QString& objectName) const
 {
-    if (!m_shell) return nullptr;
-    const QList<QQuickWidget*> surfaces = m_shell->findChildren<QQuickWidget*>();
-    for (QQuickWidget* surface : surfaces) {
-        QQuickItem* found = nullptr;
-        walkItems(surface->rootObject(), [&found, &objectName](QQuickItem* item) {
-            if (!found && item->objectName() == objectName)
-                found = item;
-        });
-        if (found) return found;
-    }
-    return nullptr;
+    QQuickItem* found = nullptr;
+    forEachItem([&found, &objectName](QQuickItem* item) {
+        if (!found && item->objectName() == objectName)
+            found = item;
+    });
+    return found;
 }
 
 QQuickWidget* ShellModulesDriver::surfaceOf(QQuickItem* item) const
@@ -131,9 +127,10 @@ bool ShellModulesDriver::tap(QQuickItem* item)
     // -- which is silence, and looks exactly like a button that does nothing.
     //
     // This is not hypothetical on a phone: the Module Inspector's table is the
-    // desktop's, about 700 logical pixels of columns, and the action column is
-    // the last of them. Making the Shell's tables narrow enough for a handset
-    // is a slice of its own; until then, say which of the two happened.
+    // desktop's, about a thousand logical pixels of columns, and the action
+    // column is the last of them. Making the Shell's tables narrow enough for
+    // a handset is a slice of its own; until then, say which of the two
+    // happened.
     if (!QRectF(QPointF(0, 0), QSizeF(surface->size())).contains(centre)) {
         emit log(QStringLiteral("drive: '%1' is at (%2, %3), outside the %4x%5 viewport "
                                 "-- the Shell's desktop table is wider than this screen; "
@@ -205,12 +202,10 @@ void ShellModulesDriver::run()
         // One delegate at a time: the table keeps every row instantiated
         // (cacheBuffer), but not necessarily by the tick the view appeared in.
         waitFor(prefix + set.value(0), 5000);
-        for (QQuickWidget* surface : m_shell->findChildren<QQuickWidget*>()) {
-            walkItems(surface->rootObject(), [&rows, &prefix](QQuickItem* item) {
-                if (item->objectName().startsWith(prefix))
-                    rows << item->objectName().mid(prefix.size());
-            });
-        }
+        forEachItem([&rows, &prefix](QQuickItem* item) {
+            if (item->objectName().startsWith(prefix))
+                rows << item->objectName().mid(prefix.size());
+        });
         rows.removeDuplicates();
         rows.sort();
     }
@@ -246,14 +241,13 @@ void ShellModulesDriver::run()
         return;
     }
 
+    // The row's own badge, not the backend: what the user sees is the claim,
+    // and a model that moved without the view following is the failure this is
+    // looking for.
     const auto isLoaded = [this, &driven]() -> bool {
         QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(driven));
-        // The row's own badge, not the backend: what the user sees is the
-        // claim, and a model that moved without the view following is the
-        // failure this is looking for.
-        return badge && badge->property("row").value<QObject*>()
-                   ? badge->property("row").value<QObject*>()->property("isLoaded").toBool()
-                   : false;
+        QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
+        return row && row->property("isLoaded").toBool();
     };
 
     const bool before = isLoaded();
