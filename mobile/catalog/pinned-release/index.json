@@ -1,0 +1,99 @@
+{
+  "catalogVersion": "1",
+  "packages": [
+    {
+      "dependencies": [],
+      "file": "packages/capability_module.lgx",
+      "name": "capability_module",
+      "rootHash": "4bd727893075da6f779db6fb7a4b367e6b4eff233839227d9750373ce1895d44",
+      "sha256": "sha256-x+7jZT5O5id7ydzUZzD37w+5aYuOUbI3e+m4HVLrzNM=",
+      "type": "core",
+      "variants": {
+        "android-arm64": {
+          "main": "lib/libcapability_module_bare.so"
+        },
+        "ios-arm64": {
+          "main": "Frameworks/capability_module_bare.framework/capability_module_bare"
+        },
+        "ios-sim-arm64": {
+          "main": "Frameworks/capability_module_bare.framework/capability_module_bare"
+        }
+      },
+      "version": "1.0.0"
+    },
+    {
+      "dependencies": [
+        "capability_module"
+      ],
+      "file": "packages/counter.lgx",
+      "name": "counter",
+      "rootHash": "cba9a5108e5d3dda717a3b8c3f3863407f0e85c05668038835502b8b458cd898",
+      "sha256": "sha256-N4Ag02GaFoBeyFnWZ3eshVDLyol59DvMgQaomiuHelM=",
+      "type": "core",
+      "variants": {
+        "ios-arm64": {
+          "main": "Frameworks/counter_bare.framework/counter_bare"
+        },
+        "ios-sim-arm64": {
+          "main": "Frameworks/counter_bare.framework/counter_bare"
+        }
+      },
+      "version": "1.0.0"
+    },
+    {
+      "dependencies": [
+        "counter"
+      ],
+      "file": "packages/counter_ui.lgx",
+      "name": "counter_ui",
+      "rootHash": "4e14d3a16b2f03015f81d1b81d38ccb333d0f84cb17fd9e23086f7d97f798bf8",
+      "sha256": "sha256-DEBkJEwo/St8pgt50YUXbrupi7SNCtzg8HiuN1OnGsI=",
+      "type": "ui_qml",
+      "variants": {
+        "ios-sim-arm64": {
+          "main": "Frameworks/counter_ui_view.framework/counter_ui_view",
+          "view": "qml/Main.qml"
+        }
+      },
+      "version": "1.0.0"
+    },
+    {
+      "dependencies": [],
+      "file": "packages/desktop_only.lgx",
+      "name": "desktop_only",
+      "rootHash": "19c113e16fb72ccd0baf1415993bcef4e0c629df4ec977a4b092fb6b3ac38907",
+      "sha256": "sha256-/RqTsPC2wfLvBEcJuWReuN46p7f6JGLOWaYLbWTmx/k=",
+      "type": "core",
+      "variants": {
+        "darwin-arm64": {
+          "main": "lib/libdesktop_only.dylib"
+        },
+        "linux-x86_64": {
+          "main": "lib/libdesktop_only.dylib"
+        }
+      },
+      "version": "2.1.0"
+    },
+    {
+      "dependencies": [
+        "desktop_only"
+      ],
+      "file": "packages/stale_ui.lgx",
+      "name": "stale_ui",
+      "rootHash": "ad8069dc14c8c7156b10bcb1ecddde139d88b6d4158e4cf92395457a3db972af",
+      "sha256": "sha256-dYZgen25hvbehL5pZOYXid70yzN6yjVaLm3FsKPkKsk=",
+      "type": "core",
+      "variants": {
+        "ios-sim-arm64": {
+          "main": "Frameworks/stale_ui_bare.framework/stale_ui_bare"
+        }
+      },
+      "version": "1.0.0"
+    }
+  ],
+  "pinned": true,
+  "release": "fixture",
+  "signers": [
+    "did:jwk:eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IkNQbGd5VFR3a1d0bmVtV3BkQXMwRVd0OXY4SHZyYVBTdmtuYXBPOC1hVlEifQ"
+  ]
+}
