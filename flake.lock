@@ -55738,11 +55738,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1782152420,
-        "narHash": "sha256-dNZsL+qE+NFCHlpgUzlhbmXu13goEwgdJGbEbw5uOEM=",
-        "owner": "logos-co",
+        "lastModified": 1789156829,
+        "narHash": "sha256-K+XzS/oz7NOgKJPZslMbCWEIGoCPChng1b+AGEoV5U8=",
+        "owner": "logos-fleet",
         "repo": "logos-qt-mcp",
-        "rev": "1fea509485a48ab185fafae8dc21bdbcc808a07e",
+        "rev": "a9d0e586db5a46c2095939694ca2681443e1fc88",
         "type": "github"
       },
       "original": {
