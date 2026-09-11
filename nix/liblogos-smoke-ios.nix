@@ -13,17 +13,18 @@
   chain,
   # The basecamp source tree (this flake's ./.).
   src,
-  # The Bundled Bare module for THIS target: an .framework bundle under
-  # Library/Frameworks/ (logos-module-builder's `bare` output on an iOS
-  # package set).
-  bareModule,
-  # The Bundled VIEW module for THIS target: logos-module-builder's `view`
-  # output — one embedded framework carrying a ui_qml module's Qt backend and
-  # its QML, with Qt and LogosAPI bound upward into this app.
-  viewModule,
+  # The app's Bundled set (nix/bundled-set.nix): every module named on
+  # --bundle plus its closure, pulled out of the catalog, signature- and
+  # Merkle-checked, and staged as
+  #     Frameworks/<stem>.framework/...
+  #     bundled-set.json
+  # Its `modules` passthru is the same resolution AT EVAL, which is what lets
+  # the embed list, the symbol scan and the view module's stem all be derived
+  # from one answer instead of three.
+  bundledSet,
   # logos-view-module-runtime's source tree. Headers only: the host needs
   # LogosViewPlugin.h to cast the plugin it constructs, and nothing else from
-  # that repo — ui-host and its library are a desktop concern.
+  # that repo -- ui-host and its library are a desktop concern.
   viewRuntimeSrc,
 }:
 
@@ -38,21 +39,32 @@ let
   roots = chain.all;
   joined = lib.concatMapStringsSep ";" toString;
 
-  # ── the Bundled modules ─────────────────────────────────────────────────
-  bareModuleName = "bare_counter_bare";
-  bareFramework = "${bareModule}/Library/Frameworks/${bareModuleName}.framework";
-  viewModuleName = "view_counter_view";
-  viewFramework = "${viewModule}/Library/Frameworks/${viewModuleName}.framework";
+  # ── the Bundled set ─────────────────────────────────────────────────────
+  # Resolved at eval by mkBundledSet, so nothing here globs the result: the
+  # list the app embeds and the list the manifest records are the same list.
+  bundledModules = bundledSet.modules;
+  bundleDirs = map (m: "${bundledSet}/${m.bundle}") bundledModules;
+  bundleImages = map (m: "${bundledSet}/${m.image}") bundledModules;
+  viewModules = lib.filter (m: m.type == "ui_qml") bundledModules;
+  # <stem>.framework -> <stem>. The runner dlopens by stem.
+  stemOf = m: lib.removeSuffix ".framework" (baseNameOf m.bundle);
+  viewModuleName =
+    if viewModules == [ ] then ""
+    else if lib.length viewModules == 1 then stemOf (lib.head viewModules)
+    else throw ("logos-basecamp: the iOS smoke host renders ONE view module "
+      + "into its single QQuickWidget, and this Bundled set carries "
+      + lib.toString (lib.length viewModules) + ": "
+      + lib.concatMapStringsSep ", " (m: m.name) viewModules);
 
-  # The symbols the app must FORCE-LOAD and EXPORT so the module resolves them
+  # The symbols the app must FORCE-LOAD and EXPORT so the modules resolve them
   # upward at dlopen (ADR 0006).
   #
-  # Computed, never listed. It is the module image's own undefined symbols
+  # Computed, never listed. It is the module images' own undefined symbols
   # INTERSECTED with what the Logos archives define -- so it is exactly the set
-  # that has to come from the app and nothing else. Everything the module gets
+  # that has to come from the app and nothing else. Everything the modules get
   # from /usr/lib (libc++, libSystem) drops out of the intersection on its own,
   # because no archive here defines it. A hand-written list would be right
-  # until the module gained a call.
+  # until a module gained a call.
   #
   # AND QT IS IN THE INTERSECTION NOW, not just the Logos archives. A Bare
   # module contains no Qt by definition, so `chain.all` was the whole universe
@@ -80,7 +92,7 @@ let
   } ''
     set -euo pipefail
     : > undefined.txt
-    for image in "${bareFramework}/${bareModuleName}" "${viewFramework}/${viewModuleName}"; do
+    for image in ${lib.escapeShellArgs bundleImages}; do
       nm -guj "$image" >> undefined.txt
     done
     sort -u -o undefined.txt undefined.txt
@@ -108,14 +120,15 @@ let
 
     comm -12 undefined.txt defined.txt > $out
     if [ ! -s $out ]; then
-      echo "error: the Bundled modules resolve NOTHING upward from the app." >&2
-      echo "That cannot be right for a module that speaks the logos-protocol" >&2
+      echo "error: the Bundled set resolves NOTHING upward from the app." >&2
+      echo "That cannot be right for modules that speak the logos-protocol" >&2
       echo "C ABI -- it means the intersection is being computed against the" >&2
       echo "wrong archives, and the app would export nothing." >&2
-      echo "--- undefined in the modules:" >&2; cat undefined.txt >&2
+      echo "--- undefined in the set:" >&2; cat undefined.txt >&2
       exit 1
     fi
-    echo "app must export $(wc -l < $out) symbol(s) for ${bareModuleName} + ${viewModuleName}" >&2
+    echo "app must export $(wc -l < $out) symbol(s) for ${
+      lib.concatMapStringsSep " + " (m: m.name) bundledModules}" >&2
   '';
 
   stage = pkgs.mkIosCmakeStage {
@@ -131,6 +144,10 @@ let
       # LogosViewPlugin.h, and the stem the runner dlopens.
       "-DLOGOS_VIEW_RUNTIME_INCLUDE=${viewRuntimeSrc}/include"
       "-DLOGOS_VIEW_MODULE_STEM=${viewModuleName}"
+      # The Bundled-set manifest, compiled into the host: what it carries, in
+      # load order, with each image's bundle-relative path. It is the ONLY
+      # thing the host knows about its set -- see mobile/liblogos-smoke/cmake.
+      "-DLOGOS_BUNDLED_SET_MANIFEST=${bundledSet}/bundled-set.json"
     ];
     # Carried by the stage only so its passthru hands the app the two flags
     # logos_ios_export_symbols() needs; the stage is a static archive and
@@ -151,27 +168,27 @@ let
     # Xcode's copy phase signs the framework IN PLACE after copying it, and a
     # store path is read-only all the way down -- ditto preserves that, so
     # codesign would fail on the copy. Stage a writable one first.
-    stage_framework() {
+    stage_frameworks() {
       rm -rf "$build_dir/embed"
       mkdir -p "$build_dir/embed"
-      cp -R "${bareFramework}" "${viewFramework}" "$build_dir/embed/"
+      cp -R ${lib.escapeShellArgs bundleDirs} "$build_dir/embed/"
       chmod -R u+w "$build_dir/embed"
-      embed_fw="$build_dir/embed/$(basename ${bareFramework})"
-      embed_view_fw="$build_dir/embed/$(basename ${viewFramework})"
-      echo "==> bundled Bare module: $embed_fw"
-      echo "==> bundled view module: $embed_view_fw"
+      embed_fws=""
+      for fw in ${lib.escapeShellArgs (map baseNameOf bundleDirs)}; do
+        embed_fws="''${embed_fws:+$embed_fws;}$build_dir/embed/$fw"
+        echo "==> bundled: $fw"
+      done
     }
 
     configure_app() {
       mkdir -p "$build_dir"
-      stage_framework
+      stage_frameworks
       echo "==> configure ($build_dir)"
       cmake -S "$app_src" -B "$build_dir" -G Xcode \
         -DCMAKE_TOOLCHAIN_FILE=${pkgs.logosQtCrossToolchainFile} \
         ${lib.escapeShellArgs pkgs.logosQtCrossCmakeFlags} \
         ${lib.escapeShellArgs stage.logosIosSymbolExports.cmakeFlags} \
-        "-DLOGOS_IOS_BARE_MODULE_FRAMEWORK=$embed_fw" \
-        "-DLOGOS_IOS_VIEW_MODULE_FRAMEWORK=$embed_view_fw" \
+        "-DLOGOS_IOS_BUNDLED_FRAMEWORKS=$embed_fws" \
         "-DCMAKE_PREFIX_PATH=${stage}" \
         "-DCMAKE_FIND_ROOT_PATH=${stage};${joined roots}" \
         "$@"
@@ -201,18 +218,26 @@ let
       fi
       echo "==> no /nix/store reference in the executable"
 
-      # AC: the framework is INSIDE <App>.app/Frameworks/ and signed. Asserted
-      # here rather than trusted, because a copy phase that silently did
-      # nothing leaves an app that starts, runs the core and only then reports
-      # a missing module -- three steps from the cause.
-      embedded="$app/Frameworks/$(basename ${bareFramework})"
-      [ -d "$embedded" ] || { echo "error: no $embedded in the app bundle" >&2; exit 1; }
-      [ -f "$embedded/${bareModuleName}" ] || { echo "error: $embedded has no binary" >&2; exit 1; }
-      echo "==> embedded framework: $embedded"
-      embedded_view="$app/Frameworks/$(basename ${viewFramework})"
-      [ -d "$embedded_view" ] || { echo "error: no $embedded_view in the app bundle" >&2; exit 1; }
-      [ -f "$embedded_view/${viewModuleName}" ] || { echo "error: $embedded_view has no binary" >&2; exit 1; }
-      echo "==> embedded view framework: $embedded_view"
+      # AC: the app's Frameworks/ directory IS the resolved closure -- every
+      # member of the Bundled set, and nothing else. Asserted here rather than
+      # trusted, because a copy phase that silently did nothing leaves an app
+      # that starts, runs the core and only then reports a missing module --
+      # three steps from the cause. And an EXTRA framework is worse than a
+      # missing one: it is native code in the app image that the manifest does
+      # not account for.
+      find "$app/Frameworks" -mindepth 1 -maxdepth 1 -exec basename {} \; \
+        | sort > "$build_dir/got-frameworks.txt"
+      printf '%s\n' ${lib.escapeShellArgs (map baseNameOf bundleDirs)} \
+        | sort > "$build_dir/want-frameworks.txt"
+      if ! diff -u "$build_dir/want-frameworks.txt" "$build_dir/got-frameworks.txt"; then
+        echo "error: <App>.app/Frameworks does not match the Bundled set" >&2
+        exit 1
+      fi
+      for fw in ${lib.escapeShellArgs (map baseNameOf bundleDirs)}; do
+        bin="$app/Frameworks/$fw/''${fw%.framework}"
+        [ -f "$bin" ] || { echo "error: $fw has no binary at $bin" >&2; exit 1; }
+      done
+      echo "==> embedded, and matching bundled-set.json: $(tr '\n' ' ' < "$build_dir/got-frameworks.txt")"
       # Only on a real signing identity. A simulator build is put together
       # with CODE_SIGNING_ALLOWED=NO and still ends up carrying an ad-hoc
       # signature with no _CodeSignature/CodeResources beside it, so
@@ -223,8 +248,9 @@ let
       if [ -n "''${LOGOS_IOS_VERIFY_SIGNATURE:-}" ]; then
         codesign --verify --deep --strict --verbose=2 "$app" \
           || { echo "error: codesign --verify --deep failed" >&2; exit 1; }
-        for bundle in "$embedded" "$embedded_view"; do
-          codesign -dv "$bundle" 2>&1 | grep -E 'Identifier|TeamIdentifier|Signature' || true
+        for fw in ${lib.escapeShellArgs (map baseNameOf bundleDirs)}; do
+          codesign -dv "$app/Frameworks/$fw" 2>&1 \
+            | grep -E 'Identifier|TeamIdentifier|Signature' || true
         done
         echo "==> codesign --verify --deep: ok (app and every nested bundle)"
       else
@@ -282,6 +308,11 @@ let
 in
 {
   liblogos-smoke-host-ios = stage;
+  # The resolved, verified, embedded Bundled set on its own -- what `ws build
+  # <repo> --target <variant> --bundle <apps>` builds. An .app needs Xcode and
+  # cannot be a nix derivation (ADR 0002), so this is the part of the app image
+  # that IS one, and the runners below embed exactly it.
+  bundled-set = bundledSet;
 }
 // lib.optionalAttrs (appleSdk == "iphonesimulator") {
   run-liblogos-smoke-ios-sim = runSim;

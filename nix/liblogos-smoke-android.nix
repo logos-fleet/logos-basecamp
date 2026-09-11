@@ -8,12 +8,14 @@
   # logos-liblogos's mobile chain for the aarch64-android set.
   chain,
   src,
-  # The Bundled Bare module for aarch64-android: lib/lib<name>_bare.so
-  # (logos-module-builder's `bare` output on the Android package set). It
-  # travels in the APK like every other Logos .so and lands in the app's
-  # native library directory, which since API 29 is the only place Android
-  # will dlopen from at all.
-  bareModule,
+  # The app's Bundled set for aarch64-android (nix/bundled-set.nix): every
+  # module named on --bundle, pulled out of the catalog and verified, staged as
+  #     lib/lib<stem>.so
+  #     bundled-set.json
+  # Each .so travels in the APK like every other Logos one and lands in the
+  # app's native library directory, which since API 29 is the only place
+  # Android will dlopen from at all.
+  bundledSet,
 }:
 
 let
@@ -21,10 +23,11 @@ let
   packageName = "co.logos.liblogos.smoke";
   activity = "org.qtproject.qt.android.bindings.QtActivity";
 
-  # The Bundled Bare module's file name. `lib` prefix because an APK carries
-  # only lib*.so; `_bare` stem suffix because that is how liblogos tells a Bare
-  # module from a Qt plugin.
-  bareModuleSo = "libbare_counter_bare.so";
+  # The Bundled set's .so names. `lib` prefix because an APK carries only
+  # lib*.so; the `_bare` stem suffix is how liblogos tells a Bare module from a
+  # Qt plugin. Read off the SAME eval-time resolution the manifest was written
+  # from -- nothing here globs the staged set.
+  bundledSos = map (m: baseNameOf m.image) bundledSet.modules;
 
   # lib.getLib: nixpkgs' openssl, fmt and icu default to their bin or dev
   # output, and an APK built from those carries no .so at all -- mkQtAndroidApk
@@ -113,6 +116,7 @@ let
       "-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=${pkgs.qt6.qtremoteobjects}"
       "-DLOGOS_LIB_ROOTS=${apkLibs}"
       "-DLOGOS_INCLUDE_ROOTS=${joined includeRoots}"
+      "-DLOGOS_BUNDLED_SET_MANIFEST=${bundledSet}/bundled-set.json"
     ];
     meta.description = "liblogos_core smoke host, packaged as an Android APK";
   }).overrideAttrs (old: {
@@ -136,35 +140,38 @@ let
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.pkgsBuildBuild.patchelf ];
 
     preBuild = (old.preBuild or "") + ''
-      install -Dm755 ${bareModule}/lib/${bareModuleSo} \
-        android-build/libs/${pkgs.androidPkgs.abi}/${bareModuleSo}
+      for so in ${lib.escapeShellArgs bundledSos}; do
+        install -Dm755 "${bundledSet}/lib/$so" \
+          "android-build/libs/${pkgs.androidPkgs.abi}/$so"
 
-      # The module names the host's protocol image in its own DT_NEEDED
-      # (logos-module-builder does that at link time -- on Android bionic
-      # offers a dlopen'd library no other way to reach an app library's
-      # symbols). Assert both halves here, because the APK is where they have
-      # to meet: a module whose dependency the APK does not carry is
-      # unloadable, and the device says so only at load.
-      needed=$(patchelf --print-needed \
-        android-build/libs/${pkgs.androidPkgs.abi}/${bareModuleSo})
-      grep -qx liblogos_protocol.so <<< "$needed" || {
-        echo "error: ${bareModuleSo} does not name liblogos_protocol.so in DT_NEEDED;" >&2
-        echo "its lp_* would resolve against nothing on this platform. NEEDED was:" >&2
-        printf '  %s\n' $needed >&2
-        exit 1
-      }
+        # A module names the host's protocol image in its own DT_NEEDED
+        # (logos-module-builder does that at link time -- on Android bionic
+        # offers a dlopen'd library no other way to reach an app library's
+        # symbols). Assert both halves here, because the APK is where they have
+        # to meet: a module whose dependency the APK does not carry is
+        # unloadable, and the device says so only at load.
+        needed=$(patchelf --print-needed \
+          "android-build/libs/${pkgs.androidPkgs.abi}/$so")
+        grep -qx liblogos_protocol.so <<< "$needed" || {
+          echo "error: $so does not name liblogos_protocol.so in DT_NEEDED;" >&2
+          echo "its lp_* would resolve against nothing on this platform. NEEDED was:" >&2
+          printf '  %s\n' $needed >&2
+          exit 1
+        }
+
+        # libs.xml is what QtLoader reads. If a module ever appears in it, the
+        # app is back to the crash above -- and it would look like a Qt problem.
+        if grep -q "$so" android-build/res/values/libs.xml; then
+          echo "error: $so is in libs.xml; QtLoader would load it eagerly" >&2
+          exit 1
+        fi
+      done
+
       [ -f "android-build/libs/${pkgs.androidPkgs.abi}/liblogos_protocol.so" ] || {
-        echo "error: liblogos_protocol.so is not in the APK, and ${bareModuleSo} needs it" >&2
+        echo "error: liblogos_protocol.so is not in the APK, and the Bundled set needs it" >&2
         exit 1
       }
-
-      # libs.xml is what QtLoader reads. If the module ever appears in it, the
-      # app is back to the crash above -- and it would look like a Qt problem.
-      if grep -q "${bareModuleSo}" android-build/res/values/libs.xml; then
-        echo "error: ${bareModuleSo} is in libs.xml; QtLoader would load it eagerly" >&2
-        exit 1
-      fi
-      echo "==> bundled Bare module packaged, not auto-loaded: ${bareModuleSo}"
+      echo "==> Bundled set packaged, not auto-loaded: ${lib.concatStringsSep " " bundledSos}"
     '';
   });
   apkFile = "${apk}/${apk.apkName}";
@@ -186,5 +193,9 @@ let
 in
 {
   liblogos-smoke-android = apk;
+  # The resolved, verified, staged Bundled set on its own -- what `ws build
+  # <repo> --target android-arm64 --bundle <apps>` builds. The APK above
+  # packages exactly it.
+  bundled-set = bundledSet;
   run-liblogos-smoke-android = runner;
 }

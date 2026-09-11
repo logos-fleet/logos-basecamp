@@ -1,9 +1,13 @@
-// The liblogos smoke host: liblogos_core running on a phone, with nothing
-// loaded. It starts the core against an empty modules directory and a
-// persistence path inside the app sandbox, prints the modules listing and the
-// protocol version to the screen and to the platform console, and stays alive
-// until Quit is pressed -- at which point the core is cleaned up before the
-// process exits, so a hung shutdown is visible as a hang and not as a kill.
+// The liblogos smoke host: liblogos_core running on a phone with the app's
+// Bundled set in it. It starts the core against a persistence path inside the
+// app sandbox, registers and loads every member of the set, prints the verdicts
+// and the protocol version to the screen and to the platform console, and stays
+// alive until Quit is pressed -- at which point the core is cleaned up before
+// the process exits, so a hung shutdown is visible as a hang and not as a kill.
+//
+// WHICH modules the set holds is `ws build --bundle`'s answer, resolved from
+// the catalog at build time and recorded in the manifest compiled into this
+// host. Nothing in this file names one.
 #include <QtGlobal>
 
 // The Bundled VIEW module is iOS-only, so everything that reaches it is behind
@@ -15,7 +19,8 @@
 #  define LOGOS_SMOKE_WITH_VIEW_MODULE 1
 #endif
 
-#include "BundledModuleRunner.h"
+#include "BundledSetCoreRuntime.h"
+#include "BundledSetRunner.h"
 #include "SmokeRunner.h"
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
 #include "ViewModuleRunner.h"
@@ -28,7 +33,11 @@
 #include <QPushButton>
 #include <QSocketNotifier>
 #include <QTimer>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QVector>
 #include <QVBoxLayout>
+#include <QVariantMap>
 #include <QWidget>
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
 #include <QQuickWidget>
@@ -106,6 +115,12 @@ int main(int argc, char* argv[])
     viewSurface->setMinimumHeight(240);
     layout->addWidget(viewSurface, 2);
 #endif
+    // The Modules list sits above the log, filled in once the set is known.
+    auto* modulesPanel = new QWidget;
+    auto* modulesLayout = new QVBoxLayout(modulesPanel);
+    modulesLayout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(modulesPanel, 0);
+
     auto* logView = new QPlainTextEdit;
     logView->setReadOnly(true);
     auto* quit = new QPushButton(QStringLiteral("Quit"));
@@ -118,34 +133,54 @@ int main(int argc, char* argv[])
     SmokeRunner runner;
     QObject::connect(&runner, &SmokeRunner::log, &say);
 
-    // Measured from main(), not from run(): on a phone the interesting number
-    // is how long the user waits, and that includes QApplication and the
-    // window. logos_core_start()'s own time is reported separately by run().
+    // Measured from main(), not from the runtime: on a phone the interesting
+    // number is how long the user waits, and that includes QApplication and
+    // the window. logos_core_start()'s own time is reported separately.
     QElapsedTimer sinceMain;
     sinceMain.start();
-    runner.run(argc, argv);
+
+    // The runtime seam. Everything below asks THIS about modules -- what is
+    // known, what is loaded, load, unload -- and never the C API, exactly as
+    // Basecamp does on the desktop. What is different on a phone is where the
+    // installed set comes from: a manifest compiled in at build time rather
+    // than a directory scanned at runtime.
+    BundledSetCoreRuntime core(runner.prepare(argc, argv));
+    QObject::connect(&core, &BundledSetCoreRuntime::log, &say);
+    core.start();
+    runner.report();
     say(QStringLiteral("core up, %1 ms since main()").arg(sinceMain.elapsed()));
 
-    // The app's ONE Bundled module, brought up in the Native container. It is
-    // run after the core is up and before the event loop, so the verdict is on
+    // The app's Bundled SET, brought up in the Native container. It is run
+    // after the core is up and before the event loop, so the verdict is on
     // screen and in the platform console by the time the first frame is drawn
     // -- an automated run reads it off the console and never has to tap
     // anything.
-    BundledModuleRunner bundled;
-    QObject::connect(&bundled, &BundledModuleRunner::log, &say);
-    const bool bundledOk = bundled.run();
+    //
+    // WHICH modules these are is `ws build --bundle`'s answer, resolved from
+    // the catalog and recorded in the manifest compiled into this host. Nothing
+    // here names one.
+    BundledSetRunner bundled(&core);
+    QObject::connect(&bundled, &BundledSetRunner::log, &say);
+    const bool bundledOk = bundled.run() && bundled.callCounter();
     say(bundledOk ? QStringLiteral("bundled module: PASS")
                   : QStringLiteral("bundled module: FAIL"));
 
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
-    // ...and the app's ONE Bundled VIEW module, brought up the same way and
-    // for the same reason: on screen and on the console before the first
-    // frame, so an automated run reads the verdict off the console.
+    // ...and the app's Bundled VIEW module, if --bundle put one in the set,
+    // brought up the same way and for the same reason: on screen and on the
+    // console before the first frame, so an automated run reads the verdict
+    // off the console.
     ViewModuleRunner view;
     QObject::connect(&view, &ViewModuleRunner::log, &say);
-    const bool viewOk = view.run(viewSurface);
-    say(viewOk ? QStringLiteral("view module: PASS")
-               : QStringLiteral("view module: FAIL"));
+    const bool hasView = bundled.hasViewModule();
+    const bool viewOk = hasView && view.run(viewSurface);
+    if (!hasView) {
+        viewSurface->hide();
+        say(QStringLiteral("view module: none in this Bundled set"));
+    } else {
+        say(viewOk ? QStringLiteral("view module: PASS")
+                   : QStringLiteral("view module: FAIL"));
+    }
 
     // Then press the view's own button once, after the first frame -- the
     // scene has no geometry before it, so there is no button to press yet.
@@ -154,6 +189,81 @@ int main(int argc, char* argv[])
     if (viewOk)
         QTimer::singleShot(1500, &view, &ViewModuleRunner::driveViewOnce);
 #endif
+
+    // ── the Modules list ──────────────────────────────────────────────────
+    // What a Shell's Modules tab shows, in the smallest form a Widgets host
+    // can: one row per member of the Bundled set, its state read back from the
+    // runtime, and a button that loads or unloads it through the Native
+    // container. The set is fixed -- a Store shell cannot gain a native module
+    // at runtime (ADR 0003) -- but what is RUNNING is the user's to change.
+    struct ModuleRow { QString name; QLabel* state; QPushButton* toggle; };
+    QVector<ModuleRow> rows;
+    auto refreshRows = [&rows, &core]() {
+        const QStringList loaded = core.loadedModules();
+        for (const ModuleRow& row : rows) {
+            const bool on = loaded.contains(row.name);
+            row.state->setText(on ? QStringLiteral("loaded") : QStringLiteral("not loaded"));
+            row.toggle->setText(on ? QStringLiteral("Unload") : QStringLiteral("Load"));
+        }
+    };
+    for (const QVariant& value : core.bundledSet()) {
+        const QVariantMap entry = value.toMap();
+        const QString name = entry.value("name").toString();
+        const bool isView = entry.value("type").toString() == QLatin1String("ui_qml");
+
+        auto* line = new QWidget;
+        auto* rowLayout = new QHBoxLayout(line);
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        rowLayout->addWidget(new QLabel(QStringLiteral("%1 %2")
+                                            .arg(name, entry.value("version").toString())), 1);
+        auto* state = new QLabel;
+        rowLayout->addWidget(state, 0);
+        auto* toggle = new QPushButton;
+        rowLayout->addWidget(toggle, 0);
+        modulesLayout->addWidget(line);
+
+        if (isView) {
+            // Host-loaded, not core-registered: the core has no opinion about
+            // it, so neither has this row (ADR 0006, and see ViewModuleRunner).
+            state->setText(QStringLiteral("view, host-loaded"));
+            toggle->setEnabled(false);
+            toggle->setText(QStringLiteral("Load"));
+            continue;
+        }
+        rows.append({ name, state, toggle });
+        QObject::connect(toggle, &QPushButton::clicked, &core, [&core, &refreshRows, name]() {
+            if (core.loadedModules().contains(name))
+                core.unloadModule(name, /*withDependents=*/true);
+            else
+                core.loadModule(name);
+            refreshRows();
+        });
+    }
+    refreshRows();
+
+    // Press the Modules list's own buttons once, after the first frame -- the
+    // button is the Shell's surface, so driving it is the only way to claim
+    // that load/unload FROM THE SHELL works rather than that the C API does.
+    // An automated run reads the two transitions off the console; a human sees
+    // the row change and can press it again.
+    if (!rows.isEmpty()) {
+        QTimer::singleShot(2000, &core, [&core, &rows]() {
+            const ModuleRow& row = rows.first();
+            const bool before = core.loadedModules().contains(row.name);
+            row.toggle->click();
+            const bool afterFirst = core.loadedModules().contains(row.name);
+            row.toggle->click();
+            const bool afterSecond = core.loadedModules().contains(row.name);
+            say(QStringLiteral("drive modules: %1 %2 -> %3 -> %4")
+                    .arg(row.name)
+                    .arg(before ? "loaded" : "not loaded")
+                    .arg(afterFirst ? "loaded" : "not loaded")
+                    .arg(afterSecond ? "loaded" : "not loaded"));
+            say(before && !afterFirst && afterSecond
+                    ? QStringLiteral("MODULES TAB ROUND TRIP OK")
+                    : QStringLiteral("WRONG: unload then load did not round-trip"));
+        });
+    }
 
     auto shutdown = [&]() {
         runner.stop();

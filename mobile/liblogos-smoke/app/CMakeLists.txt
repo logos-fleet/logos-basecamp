@@ -34,49 +34,36 @@ foreach(_qml_plugin
     target_link_libraries(LiblogosSmoke PRIVATE ${_qml_plugin})
 endforeach()
 
-# ── the Bundled Bare module ───────────────────────────────────────────────
-# The counter's iOS framework, embedded and signed with the app's identity by
-# Xcode's copy phase. <App>.app/Frameworks/ is the only directory an iOS app
-# may carry a dylib in, and dyld will not load an image that is not signed --
-# which is why the module cannot be staged into the sandbox at runtime.
-set(LOGOS_IOS_BARE_MODULE_FRAMEWORK "" CACHE STRING
-    "Path to the Bare module's .framework bundle to embed")
-if(LOGOS_IOS_BARE_MODULE_FRAMEWORK)
-    if(NOT IS_DIRECTORY "${LOGOS_IOS_BARE_MODULE_FRAMEWORK}")
-        message(FATAL_ERROR
-            "LOGOS_IOS_BARE_MODULE_FRAMEWORK is not a directory: ${LOGOS_IOS_BARE_MODULE_FRAMEWORK}")
-    endif()
-    set_property(TARGET LiblogosSmoke APPEND PROPERTY
-        XCODE_EMBED_FRAMEWORKS "${LOGOS_IOS_BARE_MODULE_FRAMEWORK}")
+# ── the Bundled set ───────────────────────────────────────────────────────
+# Every module the app carries, as a ;-list of .framework bundles, embedded and
+# signed with the app's identity by Xcode's copy phase. <App>.app/Frameworks/ is
+# the only directory an iOS app may carry a dylib in, and dyld will not load an
+# image that is not signed -- which is why a module cannot be staged into the
+# sandbox at runtime and why the set is fixed at BUILD time (ADR 0003, 0007).
+#
+# A LIST, not two named slots: which modules are here is `--bundle`'s answer,
+# resolved from the catalog, and this file must not have an opinion about how
+# many there are or what they do.
+set(LOGOS_IOS_BUNDLED_FRAMEWORKS "" CACHE STRING
+    "Semicolon-separated .framework bundles making up the Bundled set")
+if(LOGOS_IOS_BUNDLED_FRAMEWORKS)
+    foreach(_fw IN LISTS LOGOS_IOS_BUNDLED_FRAMEWORKS)
+        if(NOT IS_DIRECTORY "${_fw}")
+            message(FATAL_ERROR "Bundled-set member is not a directory: ${_fw}")
+        endif()
+        set_property(TARGET LiblogosSmoke APPEND PROPERTY XCODE_EMBED_FRAMEWORKS "${_fw}")
+    endforeach()
     set_target_properties(LiblogosSmoke PROPERTIES
         XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY TRUE
         XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY TRUE
-        # The framework's own install_name is @rpath/<bundle>/<binary>; without
+        # A framework's own install_name is @rpath/<bundle>/<binary>; without
         # this the app has no @rpath to resolve it against and every dlopen
         # fails with "image not found" no matter where the bundle sits.
         XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks")
 else()
     message(WARNING
-        "LiblogosSmoke: no LOGOS_IOS_BARE_MODULE_FRAMEWORK -- the app will start "
-        "the core and then report the bundled module as missing.")
-endif()
-
-# ── the Bundled VIEW module ───────────────────────────────────────────────
-# The same embed-and-sign arrangement, for the ui_qml counter: its framework
-# holds the Qt backend and the QML, and binds Qt upward into this app.
-set(LOGOS_IOS_VIEW_MODULE_FRAMEWORK "" CACHE STRING
-    "Path to the view module's .framework bundle to embed")
-if(LOGOS_IOS_VIEW_MODULE_FRAMEWORK)
-    if(NOT IS_DIRECTORY "${LOGOS_IOS_VIEW_MODULE_FRAMEWORK}")
-        message(FATAL_ERROR
-            "LOGOS_IOS_VIEW_MODULE_FRAMEWORK is not a directory: ${LOGOS_IOS_VIEW_MODULE_FRAMEWORK}")
-    endif()
-    set_property(TARGET LiblogosSmoke APPEND PROPERTY
-        XCODE_EMBED_FRAMEWORKS "${LOGOS_IOS_VIEW_MODULE_FRAMEWORK}")
-else()
-    message(WARNING
-        "LiblogosSmoke: no LOGOS_IOS_VIEW_MODULE_FRAMEWORK -- the app will start "
-        "and then report the view module as missing.")
+        "LiblogosSmoke: no LOGOS_IOS_BUNDLED_FRAMEWORKS -- the app will start "
+        "the core and then report every module in its manifest as missing.")
 endif()
 
 # ── the symbols the module resolves upward ────────────────────────────────
@@ -90,9 +77,9 @@ set(LOGOS_IOS_EXPORTED_SYMBOLS_FILE "" CACHE STRING "Newline-separated symbols t
 if(LOGOS_IOS_CMAKE_DIR AND LOGOS_IOS_EXPORTED_SYMBOLS_FILE)
     include(${LOGOS_IOS_CMAKE_DIR}/LogosIosSymbolExports.cmake)
     logos_ios_export_symbols(LiblogosSmoke SYMBOL_FILES ${LOGOS_IOS_EXPORTED_SYMBOLS_FILE})
-elseif(LOGOS_IOS_BARE_MODULE_FRAMEWORK)
+elseif(LOGOS_IOS_BUNDLED_FRAMEWORKS)
     message(FATAL_ERROR
-        "LiblogosSmoke embeds a Bare module but was given no exported-symbol list. "
+        "LiblogosSmoke embeds a Bundled set but was given no exported-symbol list. "
         "The app would link and install and then fail at dlopen with undefined lp_*.")
 endif()
 

@@ -5,7 +5,6 @@
 #include <logos_protocol.h>
 
 #include <QDir>
-#include <QElapsedTimer>
 #include <QStandardPaths>
 
 SmokeRunner::SmokeRunner(QObject* parent)
@@ -13,7 +12,7 @@ SmokeRunner::SmokeRunner(QObject* parent)
 {
 }
 
-qint64 SmokeRunner::run(int argc, char* argv[])
+ICoreRuntime::Config SmokeRunner::prepare(int argc, char* argv[])
 {
     // In-process transport for every LogosAPI in this image: no QtRemoteObjects
     // registry, no local sockets. A phone has no second process to talk to.
@@ -42,16 +41,17 @@ qint64 SmokeRunner::run(int argc, char* argv[])
                  .arg(QString::fromUtf8(lp_protocol_version()))
                  .arg(lp_protocol_abi_major()));
 
-    QElapsedTimer t;
-    t.start();
     logos_core_init(argc, argv);
-    logos_core_set_persistence_base_path(persistDir.toUtf8().constData());
-    logos_core_add_modules_dir(modulesDir.toUtf8().constData());
-    logos_core_start();
-    const qint64 ms = t.elapsed();
-    m_started = true;
-    emit log(QStringLiteral("logos_core_start: %1 ms").arg(ms));
+    m_prepared = true;
 
+    ICoreRuntime::Config config;
+    config.modulesDirs = { modulesDir.toStdString() };
+    config.persistenceBasePath = persistDir.toStdString();
+    return config;
+}
+
+void SmokeRunner::report()
+{
     char* info = logos_core_get_modules_info();
     emit log(QStringLiteral("modules_info: %1")
                  .arg(info ? QString::fromUtf8(info) : QStringLiteral("<null>")));
@@ -67,14 +67,13 @@ qint64 SmokeRunner::run(int argc, char* argv[])
         }
         delete[] known;
     }
-    emit log(QStringLiteral("known modules: %1 (an empty modules dir is the point)").arg(n));
-    return ms;
+    emit log(QStringLiteral("known modules: %1 (the Bundled set, registered by the runtime)").arg(n));
 }
 
 void SmokeRunner::stop()
 {
-    if (!m_started) return;
-    m_started = false;
+    if (!m_prepared) return;
+    m_prepared = false;
     logos_core_cleanup();
     emit log(QStringLiteral("logos_core_cleanup: done"));
 }

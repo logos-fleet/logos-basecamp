@@ -191,6 +191,11 @@
         logosCapabilityModule = logos-capability-module.packages.${system}.default;
         logosModulesStateModule = logos-modules-state-module.packages.${system}.default;
         logosPackageLib = logos-package.packages.${system}.lib;
+        # The `lgx` CLI, keyed by BUILD system: it is the tool the Bundled-set
+        # build RUNS (create, add, sign, verify, extract), never something a
+        # target links. Taking it from ${system} would hand an iOS binary to the
+        # builder.
+        logosLgx = logos-package.packages.${buildSystem}.lgx;
         # Headers-only output (include/ with logos/semver.hpp + semver/, no
         # library). The app's AppsModel includes the shared semver comparator;
         # it links nothing from lgx, so the headers output keeps liblgx out of
@@ -226,6 +231,18 @@
         installPortable = nix-bundle-logos-module-install.bundlers.${system}.portable;
         dirBundler = nix-bundle-dir.bundlers.${buildSystem}.qtApp;
       });
+
+      # The key the LOCAL catalogs in this repo are signed with -- the fixture
+      # catalog the Bundled-set tests build, and the mobile dev catalog the
+      # simulator app is assembled from. It is a TEST key: its secret half is in
+      # the repo, so a signature by it proves only that the catalog builder ran,
+      # and nothing in this tree ever adds it to a device keyring. A published
+      # catalog is signed by a key that is not in a git repository.
+      catalogTestKey = {
+        name = "logos-catalog-test";
+        jwk = ./mobile/catalog/keys/logos-catalog-test.jwk;
+        did = nixpkgs.lib.fileContents ./mobile/catalog/keys/logos-catalog-test.did;
+      };
 
       # ── Mobile: the liblogos smoke host ───────────────────────────────────
       # liblogos_core running on a phone with nothing loaded. The core, and
@@ -268,6 +285,118 @@
         configFile = ./mobile/view-counter/metadata.json;
       };
 
+      # ── the Bundled set ───────────────────────────────────────────────────
+      # Which modules the app carries is a LIST, and a list cannot be a flake
+      # attribute name: `--bundle a,b` and `--bundle b,a` would be two outputs
+      # of a flake that can enumerate neither. So `ws build --bundle` reaches
+      # here through the environment instead, read under `--impure`.
+      #
+      # In a PURE evaluation getEnv returns "", so `nix flake check`, CI and a
+      # plain `nix build` all see the fixed default below. The flag widens what
+      # a developer can ask for; it never makes the default build irreproducible.
+      #
+      # AC 5, and the reason this is an env read rather than codegen: adding an
+      # app to --bundle changes no source file. The set is resolved from the
+      # catalog, and the host reads it from a manifest at runtime.
+      requestedBundle = default:
+        let e = builtins.getEnv "LOGOS_BUNDLE_APPS"; in
+        if e == "" then default
+        else builtins.filter (a: a != "") (nixpkgs.lib.splitString "," e);
+
+      # The dev catalog: the two mobile modules in this repo, published as
+      # signed .lgx packages with per-target variants, exactly as a release
+      # catalog publishes them. `ws build --target ... --bundle ...` resolves
+      # against THIS, so the path a Store shell build takes is the path the
+      # smoke app takes -- there is no second, shorter route that only the app
+      # uses and only the app tests.
+      #
+      # Two ROOTS rather than a dependency edge between them: the view counter
+      # does not call the bare counter, and writing a dependency into a signed
+      # manifest to make a closure come out the right size would be a lie the
+      # core would later act on. A real multi-level closure is exercised by
+      # nix/bundled-set-test.nix.
+      mobileCatalogFor = { system, androidBuildSystem }:
+        let
+          chain = (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; }).${system};
+          buildPkgs = chain.pkgs.pkgsBuildBuild;
+          buildSystem = chain.pkgs.stdenv.buildPlatform.system;
+          lgx = logos-package.packages.${buildSystem}.lgx;
+          catalogLib = import ./nix/catalog.nix { pkgs = buildPkgs; inherit lgx; };
+          bundledSetLib = import ./nix/bundled-set.nix { pkgs = buildPkgs; inherit lgx; };
+
+          target = bundledSetLib.variantForSystem.${system};
+          isAndroid = system == "aarch64-android";
+          signingKey = { inherit (catalogTestKey) name jwk; };
+
+          barePayload = catalogLib.mkMobilePayload {
+            drv = bareCounter.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
+            stem = "bare_counter_bare";
+            inherit target;
+          };
+
+          viewPayload = catalogLib.mkMobilePayload {
+            drv = viewCounter.packages.${system}.view;
+            stem = "view_counter_view";
+            inherit target;
+            # The QML the host renders comes out of the framework's qrc (ADR
+            # 0006); this is the same source file, shipped so the PACKAGE is a
+            # valid ui_qml one and a reader that never dlopens the image can
+            # still see the view it declares.
+            extraFiles."qml/Main.qml" = ./mobile/view-counter/src/qml/Main.qml;
+          };
+
+          specs = {
+            bare_counter = {
+              name = "bare_counter";
+              version = "1.0.0";
+              type = "core";
+              category = "testing";
+              description = "The counter, as a Bundled Bare module for the mobile host";
+              dependencies = [ ];
+              variants.${target} = barePayload;
+              inherit signingKey;
+            };
+          } // nixpkgs.lib.optionalAttrs (!isAndroid) {
+            view_counter = {
+              name = "view_counter";
+              version = "1.0.0";
+              type = "ui_qml";
+              category = "misc";
+              description = "A QML counter over a .rep backend, as one embedded framework";
+              view = "qml/Main.qml";
+              icon = ./mobile/catalog/icon.png;
+              dependencies = [ ];
+              variants.${target} = viewPayload;
+              inherit signingKey;
+            };
+          };
+
+          drvs = nixpkgs.lib.mapAttrs (_: catalogLib.mkPackage) specs;
+        in
+        {
+          inherit target bundledSetLib;
+          catalog = catalogLib.mkCatalog {
+            release = "logos-basecamp-mobile-dev";
+            signers = [ catalogTestKey.did ];
+            packages = nixpkgs.lib.mapAttrsToList
+              (n: spec: { inherit spec; drv = drvs.${n}; }) specs;
+          };
+          # Android's Qt is shared objects, so a ui_qml module there is a
+          # different artifact that logos-module-builder does not publish yet --
+          # which is exactly the case `--bundle view_counter --target
+          # android-arm64` must refuse by name rather than half-build.
+          defaultApps =
+            if isAndroid then [ "bare_counter" ] else [ "bare_counter" "view_counter" ];
+        };
+
+      mobileBundledSetFor = { system, androidBuildSystem }:
+        let c = mobileCatalogFor { inherit system androidBuildSystem; }; in
+        c.bundledSetLib.mkBundledSet {
+          inherit (c) catalog target;
+          apps = requestedBundle c.defaultApps;
+          pname = "liblogos-smoke-bundled-set";
+        };
+
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
         nixpkgs.lib.mapAttrs
           (system: chain:
@@ -279,12 +408,12 @@
               inherit (chain) pkgs;
               inherit chain;
               src = ./.;
-              # legacyPackages, not packages: `packages.aarch64-android` is
-              # keyed to the builder's canonical Android build platform, and
-              # the whole point of threading androidBuildSystem through here is
-              # that a Mac needs the other one.
-              bareModule =
-                bareCounter.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
+              # The app's Bundled set: the modules named on --bundle, resolved
+              # out of the mobile catalog, signature- and Merkle-checked, and
+              # laid out in the one directory this platform's loader will open
+              # them from. The host reads bundled-set.json out of it and knows
+              # nothing else about what it carries.
+              bundledSet = mobileBundledSetFor { inherit system androidBuildSystem; };
             }
             # INSIDE the parentheses: `import f a // b` is `(import f a) // b`,
             # which merges an attribute into the RESULT that no build phase
@@ -295,7 +424,6 @@
             # there is a different artifact with a different gate and
             # logos-module-builder publishes no `view` key at all.
             // nixpkgs.lib.optionalAttrs (system != "aarch64-android") {
-              viewModule = viewCounter.packages.${system}.view;
               # LogosViewPlugin.h — the HOST side of the view-plugin
               # interface, header-only. The runtime's library and its ui-host
               # binary are a desktop concern; on a phone the host holds the
@@ -313,7 +441,7 @@
       mobileSmoke = mobileSmokeFor.x86_64-linux;
     in
     {
-      packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, logosQtMcp, installDev, installPortable, dirBundler, ... }:
+      packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosLgx, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, logosQtMcp, installDev, installPortable, dirBundler, ... }:
         let
           # Common configuration
           common = import ./nix/default.nix {
@@ -558,6 +686,19 @@
           binBundleDirMock = withMainProgram (dirBundler appMockPortable);
           binBundleDirInspector = withMainProgram (dirBundler appDistributedWithInspector);
 
+          # Catalog-driven Bundled set (ADR 0007, slice 20). The library is
+          # instantiated here so `packages` can expose the test; the mobile app
+          # builds its own set from the same two files against a cross package
+          # set (nix/liblogos-smoke-ios.nix).
+          bundledSetTests = import ./nix/bundled-set-test.nix {
+            inherit pkgs;
+            lgx = logosLgx;
+            bundledSet = import ./nix/bundled-set.nix { inherit pkgs; lgx = logosLgx; };
+            catalog = import ./nix/catalog.nix { inherit pkgs; lgx = logosLgx; };
+            testKey = catalogTestKey;
+            icon = ./mobile/catalog/icon.png;
+          };
+
           # Hoisted so shutdown-test can read the elapsed time for the combined PR-gate budget.
           integrationTest = import ./nix/integration-test.nix { inherit pkgs src logosQtMcp; appPkg = app; };
           integrationTestBundle = import ./nix/integration-test.nix {
@@ -590,6 +731,12 @@
           # explicit `nix build .#mock-tests -L` step in CI — the checks entry
           # below does not run on its own.
           mock-tests = mockTests;
+
+          # The Bundled-set pipeline over a local fixture catalog: closure,
+          # signature and Merkle admission, the embedded layout, and the
+          # refusals. Seconds, and no cross toolchain -- see
+          # nix/bundled-set-test.nix for why it uses fixture payloads.
+          bundled-set-tests = bundledSetTests;
 
           # nix run .#shell-preview   (see shell-preview/README.md)
           shell-preview = shellPreview;
@@ -805,6 +952,7 @@
         symbol-gate = self.packages.${system}.symbol-gate;
         symbol-gate-negative = self.packages.${system}.symbol-gate-negative;
         mock-tests = self.packages.${system}.mock-tests;
+        bundled-set = self.packages.${system}.bundled-set-tests;
       } // pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isWindows) {
         link-gate = self.packages.${system}.link-gate;
         link-gate-negative = self.packages.${system}.link-gate-negative;
