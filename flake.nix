@@ -808,6 +808,11 @@
           # nix/bundled-set-test.nix for why it uses fixture payloads.
           bundled-set-tests = bundledSetTests;
 
+          # The iOS runners rendered over fixture Bundled sets and linted.
+          # Seconds, no cross toolchain, and the only thing in this repo that
+          # renders a runner at all -- see nix/ios-runner-lint.nix.
+          ios-runner-lint = import ./nix/ios-runner-lint.nix { inherit pkgs; };
+
           # `nix build .#bundled-set-release` -> the fixture catalog as a
           # PINNED release: the same index with every member's sha256 and
           # Merkle root filled in. Copy the result over
@@ -1039,9 +1044,21 @@
         symbol-gate-negative = self.packages.${system}.symbol-gate-negative;
         mock-tests = self.packages.${system}.mock-tests;
         bundled-set = self.packages.${system}.bundled-set-tests;
+        ios-runner-lint = self.packages.${system}.ios-runner-lint;
       } // pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isWindows) {
         link-gate = self.packages.${system}.link-gate;
         link-gate-negative = self.packages.${system}.link-gate-negative;
+      } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+        # The mobile Shell host, LINKED. Everything above it -- the Xcode step,
+        # the .app, the install -- needs a device and cannot be a check (ADR
+        # 0002), but the static archive that carries main_ui, the design system
+        # and the Native container is a derivation, and until now nothing built
+        # it: a break there showed up only in a hand-run `ws run <repo>
+        # --target ios-sim-arm64 --app shell`.
+        #
+        # Darwin only, because it is an iOS cross build: the value is not
+        # evaluated at all on a Linux host.
+        ios-shell-host = mobileSmoke.aarch64-ios-simulator.basecamp-shell-host-ios;
       });
 
       devShells = forAllSystems ({ pkgs, logosSdk, logosProtocolPkg, logosQtHost, logosModule, logosLiblogos, logosPackageManagerLibrary, logosPackageManagerModule, logosCapabilityModule, logosPackageLib, logosDesignSystem, logosCppSdkSrc, logosLiblogosSrc, logosPackageManagerModuleSrc, logosCapabilityModuleSrc, ... }: {

@@ -78,4 +78,16 @@ app/CMakeLists.txt          the impure half — the Xcode link, embed and sign
 ```
 
 Both halves are wired up in [`../../nix/ios-apps.nix`](../../nix/ios-apps.nix),
-which builds this app and the smoke probe from one description.
+which builds this app and the smoke probe from one description. The two
+runners over it -- `run-basecamp-shell-ios-sim` and `-ios-device` -- are
+[`../../nix/ios-runner.nix`](../../nix/ios-runner.nix), a function of plain
+strings so that [`../../nix/ios-runner-lint.nix`](../../nix/ios-runner-lint.nix)
+can render them over fixture Bundled sets of every size and shellcheck the
+result. That check (`nix build .#ios-runner-lint`, seconds, no toolchain) is
+what keeps `--bundle <a single app>` buildable: a one-module set used to make
+the framework loop a single literal word, which is SC2043, and shellcheck
+failed the runner.
+
+`nix build .#checks.<darwin>.ios-shell-host` builds the static archive this
+app links -- main_ui, the design system and the Native container. The Xcode
+step above it needs a Mac and a device and stays a `ws run`.
