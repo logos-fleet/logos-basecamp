@@ -20,8 +20,9 @@
 # THE CATALOG IS DATA, NOT A FLAKE INPUT. `index` is a plain attribute set with
 # the shape below; `root` is the directory the `file` fields are relative to. A
 # pinned release is `readCatalog <dir>`; a locally built one hands its index
-# over directly (see nix/catalog.nix), which is what keeps a Bundled-set build
-# free of import-from-derivation.
+# over directly (nix-bundle-lgx's `lib.<system>.mkMobileCatalog`, which is the
+# publish half of this file), and that is what keeps a Bundled-set build free
+# of import-from-derivation.
 #
 #   { catalogVersion = "1";
 #     release        = "<tag>";          # informational
@@ -37,31 +38,20 @@
 #       sha256       = "sha256-...";     # required with `url`: the FOD's key
 #       rootHash     = "<64 hex>";       # optional Merkle pin, enforced when set
 #     } ]; }
-{ pkgs, lgx }:
+{ pkgs, lgx, publisher }:
 
 let
   inherit (pkgs) lib;
 
-  # The nix pseudo-systems logos-nix keys its mobile package sets by, mapped to
-  # the variant vocabulary logos-package owns (docs/spec.md, "Platform Variant
-  # Vocabulary"). Two namespaces, one target -- and they are spelled
-  # differently, so the mapping is written down once here rather than guessed at
-  # each call site.
-  variantForSystem = {
-    aarch64-ios-simulator = "ios-sim-arm64";
-    aarch64-ios           = "ios-arm64";
-    aarch64-android       = "android-arm64";
-  };
-
-  systemForVariant =
-    lib.listToAttrs (lib.mapAttrsToList (s: v: { name = v; value = s; }) variantForSystem);
-
-  # An iOS module is an embedded framework and an Android one a shared object,
-  # and each platform's loader will look in exactly one place inside the app.
-  # A variant's payload is laid out for that place, so the set's layout follows
-  # from the target alone.
-  embedDirFor = target:
-    if lib.hasPrefix "ios" target then "Frameworks" else "lib";
+  # The variant vocabulary and the payload layout come from the PUBLISHER
+  # (nix-bundle-lgx's lib.<system>.mkMobileCatalog), not from a second copy
+  # here. A consumer that restated them would be free to drift: a set embedded
+  # under `lib/` out of a payload laid out for `Frameworks/` is a build that
+  # succeeds and an app whose loader finds nothing.
+  #
+  #   variantForSystem   aarch64-ios-simulator -> ios-sim-arm64, ...
+  #   embedDirFor        the ONE directory this platform's loader opens from
+  inherit (publisher) variantForSystem systemForVariant embedDirFor;
 
   verifyMemberScript = ./verify-lgx-member.sh;
 

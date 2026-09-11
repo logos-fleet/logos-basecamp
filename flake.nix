@@ -97,6 +97,27 @@
     logos-view-module-runtime.inputs.logos-plugin-qt.follows = "logos-plugin-qt";
     logos-view-module-runtime.inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
     nix-bundle-logos-module-install.url = "github:logos-co/nix-bundle-logos-module-install";
+    # The PUBLISH half of the mobile catalog: nix-bundle-lgx owns `.lgx`, so it
+    # owns restaging a cross-built module image as a variant payload, signing
+    # it, indexing it and pinning a release. This flake is the CONSUMER --
+    # nix/bundled-set.nix resolves and admits -- and the two halves live in
+    # different repos on purpose: a Store shell build consumes a pinned release
+    # it did not produce, and a publisher that ships inside its only consumer
+    # can only ever publish that consumer's own modules.
+    #
+    # LOCKED TO THE logos-fleet FORK: `lib.<system>.mkMobileCatalog` is not
+    # upstream yet. A bare `nix flake update` walks it back to logos-co and the
+    # mobile outputs stop EVALUATING. Re-pin with
+    #   nix flake lock --override-input nix-bundle-lgx \
+    #     github:logos-fleet/nix-bundle-lgx/<rev>
+    nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
+    nix-bundle-lgx.inputs.logos-nix.follows = "logos-nix";
+    # ONE lgx source tree in the closure: the publisher writes the manifest and
+    # the Merkle tree that nix/verify-lgx-member.sh then re-checks, and a
+    # package written by one lgx and admitted by another is two
+    # implementations agreeing by luck.
+    nix-bundle-lgx.inputs.logos-package.follows = "logos-package";
+    nix-bundle-lgx.inputs.nix-bundle-dir.follows = "nix-bundle-dir";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
     logos-qt-mcp.url = "github:logos-co/logos-qt-mcp";
     nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
@@ -112,7 +133,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -321,20 +342,22 @@
           buildPkgs = chain.pkgs.pkgsBuildBuild;
           buildSystem = chain.pkgs.stdenv.buildPlatform.system;
           lgx = logos-package.packages.${buildSystem}.lgx;
-          catalogLib = import ./nix/catalog.nix { pkgs = buildPkgs; inherit lgx; };
-          bundledSetLib = import ./nix/bundled-set.nix { pkgs = buildPkgs; inherit lgx; };
+          catalogLib = nix-bundle-lgx.lib.${buildSystem}.mkMobileCatalog { inherit lgx; };
+          bundledSetLib = import ./nix/bundled-set.nix {
+            pkgs = buildPkgs; inherit lgx; publisher = catalogLib;
+          };
 
           target = bundledSetLib.variantForSystem.${system};
           isAndroid = system == "aarch64-android";
           signingKey = { inherit (catalogTestKey) name jwk; };
 
-          barePayload = catalogLib.mkMobilePayload {
+          barePayload = catalogLib.mkVariantPayload {
             drv = bareCounter.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
             stem = "bare_counter_bare";
             inherit target;
           };
 
-          viewPayload = catalogLib.mkMobilePayload {
+          viewPayload = catalogLib.mkVariantPayload {
             drv = viewCounter.packages.${system}.view;
             stem = "view_counter_view";
             inherit target;
@@ -690,14 +713,40 @@
           # instantiated here so `packages` can expose the test; the mobile app
           # builds its own set from the same two files against a cross package
           # set (nix/liblogos-smoke-ios.nix).
-          bundledSetTests = import ./nix/bundled-set-test.nix {
+          bundledSetPublisher =
+            nix-bundle-lgx.lib.${system}.mkMobileCatalog { lgx = logosLgx; };
+
+          # ONE instantiation, handed to both consumers below. The test and the
+          # release must be the same catalog -- a release published from a
+          # second, parallel set of fixtures would pin bytes nothing tests.
+          bundledSetFixture = import ./nix/bundled-set-fixture.nix {
             inherit pkgs;
-            lgx = logosLgx;
-            bundledSet = import ./nix/bundled-set.nix { inherit pkgs; lgx = logosLgx; };
-            catalog = import ./nix/catalog.nix { inherit pkgs; lgx = logosLgx; };
+            catalog = bundledSetPublisher;
             testKey = catalogTestKey;
             icon = ./mobile/catalog/icon.png;
           };
+
+          bundledSetTests = import ./nix/bundled-set-test.nix {
+            inherit pkgs;
+            lgx = logosLgx;
+            bundledSet = import ./nix/bundled-set.nix {
+              inherit pkgs; lgx = logosLgx; publisher = bundledSetPublisher;
+            };
+            fixture = bundledSetFixture;
+            testKey = catalogTestKey;
+            # A release somebody else published: the index and the .lgx bytes
+            # are committed, so the `url` + `sha256` + `rootHash` path is
+            # exercised over bytes this build did not produce. Regenerate with
+            # `nix build .#bundled-set-release` (see mobile/catalog/README.md).
+            pinnedRelease = ./mobile/catalog/pinned-release;
+          };
+
+          # The fixture catalog, published. Not a check -- it is the PRODUCER
+          # of mobile/catalog/pinned-release/, run by hand when the fixtures
+          # change, and its output is committed so the test consumes bytes
+          # rather than rebuilding them.
+          bundledSetRelease =
+            bundledSetPublisher.mkRelease { catalog = bundledSetFixture.local; };
 
           # Hoisted so shutdown-test can read the elapsed time for the combined PR-gate budget.
           integrationTest = import ./nix/integration-test.nix { inherit pkgs src logosQtMcp; appPkg = app; };
@@ -737,6 +786,12 @@
           # refusals. Seconds, and no cross toolchain -- see
           # nix/bundled-set-test.nix for why it uses fixture payloads.
           bundled-set-tests = bundledSetTests;
+
+          # `nix build .#bundled-set-release` -> the fixture catalog as a
+          # PINNED release: the same index with every member's sha256 and
+          # Merkle root filled in. Copy the result over
+          # mobile/catalog/pinned-release/ when the fixtures change.
+          bundled-set-release = bundledSetRelease;
 
           # nix run .#shell-preview   (see shell-preview/README.md)
           shell-preview = shellPreview;

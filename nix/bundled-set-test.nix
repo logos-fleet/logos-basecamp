@@ -1,126 +1,28 @@
 # The catalog-driven Bundled-set build, over a LOCAL catalog of fixture
-# packages.
+# packages (nix/bundled-set-fixture.nix), and over the same catalog PUBLISHED
+# as a pinned release.
 #
-# Fixture payloads, not real cross-compiled modules, and deliberately so: what
-# is under test here is the resolve / fetch / verify / extract / embed pipeline
-# and its refusals, none of which can tell a framework binary from a text file.
 # The same pipeline over real iOS artifacts is `nix build
 # .#packages.aarch64-ios-simulator.bundled-set`, which needs a Mac and a cross
-# toolchain; this runs anywhere in seconds and is what a regression trips first.
+# toolchain; this runs anywhere in seconds and is what a regression trips
+# first.
 #
-# The catalog is the closure the acceptance criterion names --
-# counter_ui -> counter -> capability_module -- plus two members that exist to
-# be refused: `stale_ui` reaches a dependency with no mobile variant, and
-# `foreign_ui` is signed by a key the catalog does not list.
-{ pkgs, lgx, bundledSet, catalog, testKey, icon }:
+# TWO CATALOGS, because a Bundled set can be handed its members two ways and
+# only one of them was ever exercised:
+#
+#   local     `file` entries into a directory this build just produced. What
+#             the mobile dev set uses.
+#   pinned    `url` + `sha256` + `rootHash` out of a committed release index
+#             (mobile/catalog/pinned-release/) -- bytes this build did NOT
+#             produce, reached through a fixed-output fetch and re-checked
+#             against the Merkle root the index pins. What a Store shell build
+#             uses, and until now dead code.
+{ pkgs, lgx, bundledSet, fixture, testKey, pinnedRelease }:
 
 let
   inherit (pkgs) lib;
 
-  target = "ios-sim-arm64";
-
-  signingKey = { jwk = testKey.jwk; name = testKey.name; };
-
-  # A fixture variant payload, laid out the way the target's loader wants it:
-  # an embedded framework bundle on iOS, a shared object on Android. The BYTES
-  # are a stand-in; the LAYOUT is the contract the Bundled set copies verbatim.
-  iosVariant = { stem, view ? null }: {
-    main = "Frameworks/${stem}.framework/${stem}";
-    payload = pkgs.runCommand "${stem}-ios-payload" { } (''
-      mkdir -p $out/Frameworks/${stem}.framework
-      printf 'fixture image for %s\n' ${stem} > $out/Frameworks/${stem}.framework/${stem}
-      printf '<plist><dict><key>CFBundleExecutable</key><string>%s</string></dict></plist>\n' \
-        ${stem} > $out/Frameworks/${stem}.framework/Info.plist
-    '' + lib.optionalString (view != null) ''
-      # `lgx sign` refuses a ui_qml package whose declared `view` is not a file
-      # in the variant, so a view module's variant carries its QML entry point
-      # beside the framework.
-      mkdir -p "$out/$(dirname ${view})"
-      printf 'import QtQuick\nItem {}\n' > $out/${view}
-    '');
-  };
-
-  androidVariant = stem: {
-    main = "lib/lib${stem}.so";
-    payload = pkgs.runCommand "${stem}-android-payload" { } ''
-      mkdir -p $out/lib
-      printf 'fixture image for %s\n' ${stem} > $out/lib/lib${stem}.so
-    '';
-  };
-
-  darwinVariant = stem: {
-    main = "lib/lib${stem}.dylib";
-    payload = pkgs.runCommand "${stem}-darwin-payload" { } ''
-      mkdir -p $out/lib
-      printf 'fixture image for %s\n' ${stem} > $out/lib/lib${stem}.dylib
-    '';
-  };
-
-  specs = {
-    capability_module = {
-      name = "capability_module";
-      version = "1.0.0";
-      type = "core";
-      dependencies = [ ];
-      variants = {
-        ios-sim-arm64 = iosVariant { stem = "capability_module_bare"; };
-        ios-arm64 = iosVariant { stem = "capability_module_bare"; };
-        android-arm64 = androidVariant "capability_module_bare";
-      };
-      inherit signingKey;
-    };
-    counter = {
-      name = "counter";
-      version = "1.0.0";
-      type = "core";
-      dependencies = [ "capability_module" ];
-      variants = {
-        ios-sim-arm64 = iosVariant { stem = "counter_bare"; };
-        ios-arm64 = iosVariant { stem = "counter_bare"; };
-      };
-      inherit signingKey;
-    };
-    counter_ui = {
-      name = "counter_ui";
-      version = "1.0.0";
-      type = "ui_qml";
-      view = "qml/Main.qml";
-      inherit icon;
-      dependencies = [ "counter" ];
-      variants = { ios-sim-arm64 = iosVariant { stem = "counter_ui_view"; view = "qml/Main.qml"; }; };
-      inherit signingKey;
-    };
-    # Pulls in a member that ships desktop variants only. THE point of this
-    # fixture: the refusal must name `desktop_only` and the variants it does
-    # ship, not the app the user asked for.
-    desktop_only = {
-      name = "desktop_only";
-      version = "2.1.0";
-      type = "core";
-      dependencies = [ ];
-      variants = {
-        darwin-arm64 = darwinVariant "desktop_only";
-        linux-x86_64 = darwinVariant "desktop_only";
-      };
-      inherit signingKey;
-    };
-    stale_ui = {
-      name = "stale_ui";
-      version = "1.0.0";
-      type = "core";
-      dependencies = [ "desktop_only" ];
-      variants = { ios-sim-arm64 = iosVariant { stem = "stale_ui_bare"; }; };
-      inherit signingKey;
-    };
-  };
-
-  drvs = lib.mapAttrs (_: catalog.mkPackage) specs;
-
-  local = catalog.mkCatalog {
-    release = "fixture";
-    signers = [ testKey.did ];
-    packages = lib.mapAttrsToList (n: spec: { inherit spec; drv = drvs.${n}; }) specs;
-  };
+  inherit (fixture) target local;
 
   set = bundledSet.mkBundledSet {
     catalog = local;
@@ -129,7 +31,43 @@ let
     pname = "fixture-bundled-set";
   };
 
+  # ── the same set, out of a PINNED RELEASE ─────────────────────────────────
+  # mobile/catalog/pinned-release/index.json is what nix-bundle-lgx's
+  # `mkRelease` writes: the catalog index with every member's sha256 and Merkle
+  # root filled in. It is COMMITTED, so the bytes here were produced by a
+  # different build on a different day -- which is the only way to exercise the
+  # path a Store shell build actually takes, where the catalog is a release
+  # somebody else published.
+  #
+  # `file` becomes `url` at eval, because a committed index cannot carry an
+  # absolute path into this checkout. That substitution is the only difference
+  # from a real release: the fetch is still a fixed-output derivation keyed by
+  # the index's sha256, its store-path name still carries the Merkle root, and
+  # verify-lgx-member.sh still re-checks that root against the pin before
+  # anything is unpacked. Bytes that do not hash to the pin cannot reach the
+  # app, wherever they came from.
+  pinnedIndex =
+    let raw = builtins.fromJSON (builtins.readFile "${pinnedRelease}/index.json"); in
+    raw // {
+      packages = map (p: (builtins.removeAttrs p [ "file" ]) // {
+        url = "file://${pinnedRelease}/${p.file}";
+      }) raw.packages;
+    };
+
+  pinnedSet = bundledSet.mkBundledSet {
+    catalog = { index = pinnedIndex; root = pinnedRelease; };
+    inherit target;
+    apps = [ "counter_ui" ];
+    pname = "pinned-bundled-set";
+  };
+
   # ── eval-time assertions ───────────────────────────────────────────────────
+  pinnedIsPinned = lib.all (p:
+    if (p.rootHash or "") == "" then throw "FAIL: pinned release entry '${p.name}' has no rootHash"
+    else if (p.sha256 or "") == "" then throw "FAIL: pinned release entry '${p.name}' has no sha256"
+    else true)
+    pinnedIndex.packages;
+
   closureNames = map (e: e.name) (bundledSet.resolveClosure {
     inherit (local) index;
     inherit target;
@@ -187,6 +125,7 @@ let
 
 in
 assert closureOk;
+assert pinnedIsPinned;
 assert missingVariantRefused;
 assert unknownAppRefused;
 assert emptyBundleRefused;
@@ -199,6 +138,7 @@ pkgs.runCommand "bundled-set-tests"
     nativeBuildInputs = [ lgx pkgs.python3 ];
     inherit target;
     set = "${set}";
+    pinnedSet = "${pinnedSet}";
     catalogRoot = "${local.root}";
     verifyScript = "${./verify-lgx-member.sh}";
     goodSigner = testKey.did;
@@ -240,6 +180,21 @@ pkgs.runCommand "bundled-set-tests"
   done
   test -f "$set/bundled-set.json" || fail "no bundled-set.json in the set"
   echo "Frameworks/: $(tr '\n' ' ' < got-fw.txt)"
+
+  # ── the pinned release produces the same set ─────────────────────────────
+  # Same closure, same load order, same recorded roots and signer -- reached
+  # through fetchurl over committed bytes instead of a directory this build
+  # made. That the derivation got this far is itself the assertion for the
+  # fetch: a sha256 that did not match would have failed the fixed-output
+  # derivation, and a rootHash that did not match would have failed admission.
+  manifestOf() {
+    python3 -c 'import json,os,sys; print(json.dumps(json.load(open(os.path.join(sys.argv[1],"bundled-set.json"))),indent=2,sort_keys=True))' "$1"
+  }
+  diff -u <(manifestOf "$set") <(manifestOf "$pinnedSet") \
+    || fail "the pinned release resolves to a different set than the local catalog"
+  diff -r "$set/Frameworks" "$pinnedSet/Frameworks" \
+    || fail "the pinned release embeds different images than the local catalog"
+  echo "pinned release: same set, fetched and root-checked"
 
   # ── a tampered payload is refused at the fetch step ──────────────────────
   # The real admission path (nix/verify-lgx-member.sh), run over a package whose

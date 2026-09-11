@@ -70552,6 +70552,37 @@
     },
     "nix-bundle-lgx_44": {
       "inputs": {
+        "logos-nix": [
+          "logos-nix"
+        ],
+        "logos-package": [
+          "logos-package"
+        ],
+        "nix-bundle-dir": [
+          "nix-bundle-dir"
+        ],
+        "nixpkgs": [
+          "nix-bundle-lgx",
+          "logos-nix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1789110524,
+        "narHash": "sha256-BKIrqDbUFzWvw6uiAQMW9H+7gGoIrin6ojYK0KNEJYU=",
+        "owner": "logos-fleet",
+        "repo": "nix-bundle-lgx",
+        "rev": "25aa9e362983e313c9d6911cca7d96b76d31d543",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "nix-bundle-lgx",
+        "type": "github"
+      }
+    },
+    "nix-bundle-lgx_45": {
+      "inputs": {
         "logos-nix": "logos-nix_893",
         "logos-package": "logos-package_82",
         "nix-bundle-dir": "nix-bundle-dir_139",
@@ -71159,7 +71190,7 @@
       "inputs": {
         "logos-nix": "logos-nix_887",
         "logos-package-manager": "logos-package-manager_34",
-        "nix-bundle-lgx": "nix-bundle-lgx_44",
+        "nix-bundle-lgx": "nix-bundle-lgx_45",
         "nixpkgs": [
           "nix-bundle-logos-module-install",
           "logos-nix",
@@ -100088,6 +100119,7 @@
         "logos-view-module-runtime": "logos-view-module-runtime_23",
         "nix-bundle-appimage": "nix-bundle-appimage_58",
         "nix-bundle-dir": "nix-bundle-dir_136",
+        "nix-bundle-lgx": "nix-bundle-lgx_44",
         "nix-bundle-logos-module-install": "nix-bundle-logos-module-install_22",
         "nix-bundle-macos-app": "nix-bundle-macos-app_24",
         "nixpkgs": [
