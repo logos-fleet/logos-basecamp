@@ -166,6 +166,18 @@ async function visibilityOf(app, objectName) {
   return res.result;
 }
 
+// WelcomePage's own QML `visible` stays true inside its offscreen QQuickWidget
+// host; what observably shows and hides the welcome page is that host —
+// WorkspaceArea (objectName "workspace"), the stack page a section switch
+// leaves. It is a widget rather than a QML item, so its property is read
+// instead of evaluated in scope.
+async function workspaceHostVisibility(app) {
+  const workspace = await findByObjectName(app.inspector, "workspace");
+  if (!workspace) throw new Error("workspace area (welcome page host) not found");
+  const props = await app.inspector.send("getProperties", { objectId: workspace.id });
+  return props.properties?.find((p) => p.name === "visible")?.value;
+}
+
 test("welcome: Recently Closed is hidden until an app has been closed", async (app) => {
   const page = await findWelcomePage(app);
   if (!page) throw new Error("no WelcomePage instance in the QML tree");
@@ -305,26 +317,24 @@ async function assertWelcomePageIsCurrent(app) {
   const page = await findWelcomePage(app);
   if (!page) throw new Error("no WelcomePage instance in the QML tree");
 
-  const section = await app.inspector.send("evaluate", {
+  const sectionRes = await app.inspector.send("evaluate", {
     objectId: page.id, expression: "backend.currentActiveSectionIndex",
   });
-  if (section.error) {
-    throw new Error(`evaluate(backend.currentActiveSectionIndex) failed: ${section.error}`);
+  if (sectionRes.error) {
+    throw new Error(
+      `evaluate(backend.currentActiveSectionIndex) failed: ${sectionRes.error}`);
   }
-  if (section.result !== SHELL_SECTION_WORKSPACE) {
+  if (sectionRes.result !== SHELL_SECTION_WORKSPACE) {
     throw new Error(
       `the app is not on the welcome page at the start of this test: ` +
-      `backend.currentActiveSectionIndex=${section.result} ` +
+      `backend.currentActiveSectionIndex=${sectionRes.result} ` +
       `(expected ${SHELL_SECTION_WORKSPACE}, Workspace). Navigating away from a ` +
       `page that is already gone cannot be tested. The usual cause is a runner ` +
-      `driving an app it did not launch — see the inspector isolation guard.`);
+      `driving an app it did not launch — see the inspector isolation guard, ` +
+      `tests/inspector-isolation-tests.mjs.`);
   }
 
-  const wsHits = await app.findByProperty("objectName", "workspace");
-  const workspace = (wsHits.matches ?? [])[0];
-  if (!workspace) throw new Error("workspace area (welcome page host) not found");
-  const props = await app.inspector.send("getProperties", { objectId: workspace.id });
-  const visible = props.properties?.find((p) => p.name === "visible")?.value;
+  const visible = await workspaceHostVisibility(app);
   if (visible !== true) {
     throw new Error(
       `the welcome page host is already hidden at the start of this test: ` +
@@ -410,14 +420,7 @@ test('welcome: "Discover Applications" navigates to Applications', async (app) =
     }
   }, { timeout: 10000, interval: 500, description: "active section to become Applications" });
 
-  // WelcomePage's own QML `visible` stays true inside its offscreen
-  // QQuickWidget host; what observably hides it is that host — WorkspaceArea
-  // (objectName "workspace"), the stack page the section switch left.
-  const wsHits = await app.findByProperty("objectName", "workspace");
-  const workspace = (wsHits.matches ?? [])[0];
-  if (!workspace) throw new Error("workspace area (welcome page host) not found");
-  const props = await app.inspector.send("getProperties", { objectId: workspace.id });
-  const visible = props.properties?.find((p) => p.name === "visible")?.value;
+  const visible = await workspaceHostVisibility(app);
   if (visible !== false) {
     throw new Error(
       `welcome page still visible: workspace visible=` +
