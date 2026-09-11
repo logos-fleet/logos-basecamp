@@ -7,10 +7,34 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QGuiApplication>
+#include <QMetaObject>
 #include <QMouseEvent>
+#include <QRectF>
 #include <QQuickItem>
 #include <QQuickWidget>
+#include <QUrl>
 #include <QWidget>
+
+#include <functional>
+
+namespace {
+
+// The VISUAL tree, not the QObject tree.
+//
+// QQuickItem::setParentItem does not reparent the QObject, and a view's
+// delegates are created by the delegate model rather than by the contentItem
+// -- so QObject::findChild reaches `moduleInspector.table` and never reaches
+// a single one of its rows. Every handle this driver wants is a delegate.
+void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
+{
+    if (!item) return;
+    visit(item);
+    const QList<QQuickItem*> children = item->childItems();
+    for (QQuickItem* child : children)
+        walkItems(child, visit);
+}
+
+} // namespace
 
 ShellModulesDriver::ShellModulesDriver(BundledSetShellHost* host, QWidget* shellWidget,
                                        QObject* parent)
@@ -20,30 +44,56 @@ ShellModulesDriver::ShellModulesDriver(BundledSetShellHost* host, QWidget* shell
 {
 }
 
+void ShellModulesDriver::dumpNames(const QString& why)
+{
+    // Every named item in every scene the shell owns. Printed only when a
+    // lookup has already failed, and it is the whole diagnosis: a handle that
+    // is absent, one that is spelled differently, or a scene this host cannot
+    // see into are three different bugs with the same symptom.
+    emit log(QStringLiteral("drive: %1 -- named items in the shell's scenes:").arg(why));
+    if (!m_shell) return;
+    for (QQuickWidget* surface : m_shell->findChildren<QQuickWidget*>()) {
+        QQuickItem* root = surface->rootObject();
+        emit log(QStringLiteral("  scene '%1' (root %2)")
+                     .arg(surface->source().toString(),
+                          root ? root->objectName() : QStringLiteral("<none>")));
+        if (!root) continue;
+        QStringList named;
+        walkItems(root, [&named](QQuickItem* item) {
+            if (!item->objectName().isEmpty())
+                named << item->objectName();
+        });
+        emit log(QStringLiteral("    %1")
+                     .arg(named.isEmpty() ? QStringLiteral("(nothing named)")
+                                          : named.join(QStringLiteral(", "))));
+    }
+}
+
 QQuickItem* ShellModulesDriver::find(const QString& objectName) const
 {
     if (!m_shell) return nullptr;
     const QList<QQuickWidget*> surfaces = m_shell->findChildren<QQuickWidget*>();
     for (QQuickWidget* surface : surfaces) {
-        QQuickItem* root = surface->rootObject();
-        if (!root) continue;
-        if (root->objectName() == objectName) return root;
-        if (QQuickItem* found = root->findChild<QQuickItem*>(objectName))
-            return found;
+        QQuickItem* found = nullptr;
+        walkItems(surface->rootObject(), [&found, &objectName](QQuickItem* item) {
+            if (!found && item->objectName() == objectName)
+                found = item;
+        });
+        if (found) return found;
     }
     return nullptr;
 }
 
 QQuickWidget* ShellModulesDriver::surfaceOf(QQuickItem* item) const
 {
-    // Walk up to the scene root, then match it against each QQuickWidget's
-    // rootObject: QQuickItem has no back-pointer to the widget hosting it,
-    // and the shell has more than one scene.
+    // By WINDOW, not by walking up to the root object: a QQuickWidget renders
+    // into an offscreen QQuickWindow whose contentItem sits ABOVE rootObject,
+    // so "walk to the topmost parentItem" lands one level past the root and
+    // matches nothing. The shell has four scenes and every item knows which
+    // window it is in.
     if (!item || !m_shell) return nullptr;
-    QQuickItem* root = item;
-    while (root->parentItem()) root = root->parentItem();
     for (QQuickWidget* surface : m_shell->findChildren<QQuickWidget*>()) {
-        if (surface->rootObject() == root || surface->rootObject() == item)
+        if (surface->quickWindow() == item->window())
             return surface;
     }
     return nullptr;
@@ -74,6 +124,37 @@ bool ShellModulesDriver::tap(QQuickItem* item)
     // centre of the item in the scene is where the press goes.
     const QPointF centre = item->mapToScene(
         QPointF(item->width() / 2.0, item->height() / 2.0));
+
+    // ...but only if the scene actually shows that point. Qt delivers a press
+    // by COORDINATE, so a point outside the viewport is not "a press on a
+    // scrolled-away button", it is a press on whatever is at that coordinate
+    // -- which is silence, and looks exactly like a button that does nothing.
+    //
+    // This is not hypothetical on a phone: the Module Inspector's table is the
+    // desktop's, about 700 logical pixels of columns, and the action column is
+    // the last of them. Making the Shell's tables narrow enough for a handset
+    // is a slice of its own; until then, say which of the two happened.
+    if (!QRectF(QPointF(0, 0), QSizeF(surface->size())).contains(centre)) {
+        emit log(QStringLiteral("drive: '%1' is at (%2, %3), outside the %4x%5 viewport "
+                                "-- the Shell's desktop table is wider than this screen; "
+                                "activating the control instead of pressing it")
+                     .arg(item->objectName())
+                     .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
+                     .arg(surface->width()).arg(surface->height()));
+        // Still the Shell's own control and the Shell's own signal chain --
+        // LogosButton.onClicked -> loadToggleRequested -> ModuleInspectorView
+        // -> SettingsView -> ContentViews -> the backend. The only thing
+        // skipped is UIKit's delivery of the touch to a pixel that is not on
+        // this screen.
+        if (!QMetaObject::invokeMethod(item, "clicked")) {
+            emit log(QStringLiteral("drive: '%1' has no clicked() to activate")
+                         .arg(item->objectName()));
+            return false;
+        }
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        return true;
+    }
+
     const QPointF global = surface->mapToGlobal(centre);
     QMouseEvent press(QEvent::MouseButtonPress, centre, global,
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -98,7 +179,7 @@ void ShellModulesDriver::run()
 
     QQuickItem* section = waitFor(QStringLiteral("settings.section.module_inspector"), 5000);
     if (!section) {
-        emit log(QStringLiteral("drive: no Module Inspector section in the Settings view"));
+        dumpNames(QStringLiteral("no Module Inspector section in the Settings view"));
         return;
     }
     if (!tap(section)) return;
@@ -125,12 +206,10 @@ void ShellModulesDriver::run()
         // (cacheBuffer), but not necessarily by the tick the view appeared in.
         waitFor(prefix + set.value(0), 5000);
         for (QQuickWidget* surface : m_shell->findChildren<QQuickWidget*>()) {
-            QQuickItem* root = surface->rootObject();
-            if (!root) continue;
-            for (QQuickItem* item : root->findChildren<QQuickItem*>()) {
+            walkItems(surface->rootObject(), [&rows, &prefix](QQuickItem* item) {
                 if (item->objectName().startsWith(prefix))
                     rows << item->objectName().mid(prefix.size());
-            }
+            });
         }
         rows.removeDuplicates();
         rows.sort();
@@ -163,7 +242,7 @@ void ShellModulesDriver::run()
         }
     }
     if (!toggle) {
-        emit log(QStringLiteral("drive: no row in the Modules tab has a usable toggle"));
+        dumpNames(QStringLiteral("no row in the Modules tab has a usable toggle"));
         return;
     }
 

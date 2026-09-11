@@ -43,6 +43,8 @@ private:
     // or nullptr. Several widgets, because MainContainer puts the sidebar, the
     // content stack and the overlay layer in separate scenes.
     QQuickItem* find(const QString& objectName) const;
+    // Every named item in every scene, for when a lookup failed.
+    void dumpNames(const QString& why);
     QQuickWidget* surfaceOf(QQuickItem* item) const;
     // A press and a release at the item's centre, entering the scene where a
     // finger's would.
