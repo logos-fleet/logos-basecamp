@@ -119,6 +119,13 @@
     nix-bundle-lgx.inputs.logos-package.follows = "logos-package";
     nix-bundle-lgx.inputs.nix-bundle-dir.follows = "nix-bundle-dir";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
+    # LOCKED TO THE logos-fleet FORK, not to this URL: the test framework's
+    # per-app inspector port (launchAppWithInspector) is not upstream yet, and
+    # without it integration-test, host-services-test and shutdown-test all
+    # serve their app's inspector on 3768 -- so whichever two nix happens to
+    # build in parallel end up driving the same app. Re-pin with
+    #   nix flake lock --override-input logos-qt-mcp \
+    #     github:logos-fleet/logos-qt-mcp/<rev>
     logos-qt-mcp.url = "github:logos-co/logos-qt-mcp";
     nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
     nix-bundle-macos-app = {
@@ -929,6 +936,13 @@
             inherit pkgs src logosQtMcp; appPkg = app;
           };
 
+          # Two apps at once, one inspector each. The guard that the
+          # app-driving checks above can run in parallel -- which is how nix
+          # runs them. Build: nix build .#inspector-isolation-test
+          inspector-isolation-test = import ./nix/inspector-isolation-test.nix {
+            inherit pkgs src logosQtMcp; appPkg = app;
+          };
+
           # Shutdown tests (SIGTERM, SIGINT, Ctrl+Q / ⌘Q). Spawns a fresh
           # app per case and asserts orderly exit (code 0).
           shutdown-test = import ./nix/shutdown-test.nix {
@@ -1040,6 +1054,7 @@
         integration-test = self.packages.${system}.integration-test;
         shutdown-test = self.packages.${system}.shutdown-test;
         host-services-test = self.packages.${system}.host-services-test;
+        inspector-isolation-test = self.packages.${system}.inspector-isolation-test;
         symbol-gate = self.packages.${system}.symbol-gate;
         symbol-gate-negative = self.packages.${system}.symbol-gate-negative;
         mock-tests = self.packages.${system}.mock-tests;

@@ -38,7 +38,8 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
 const qtMcpRoot = process.env.LOGOS_QT_MCP || resolve(projectRoot, "result-mcp");
-const { Inspector } = await import(resolve(qtMcpRoot, "test-framework/framework.mjs"));
+const { Inspector, reserveInspectorPort } = await import(
+  resolve(qtMcpRoot, "test-framework/framework.mjs"));
 
 const APP_BIN = process.argv[2];
 if (!APP_BIN) {
@@ -47,28 +48,36 @@ if (!APP_BIN) {
 }
 
 const HOST = process.env.QML_INSPECTOR_HOST || "localhost";
-const PORT = parseInt(process.env.QML_INSPECTOR_PORT || "3768", 10);
 const INSPECTOR_WAIT_MS = 15000;
 const SHUTDOWN_WAIT_MS = 10000;
 const APP_WARMUP_MS = 2000;
 
-function spawnApp() {
+// Each spawned app gets its own inspector port, from the framework's reserver.
+// A fixed port (3768 was the default) is shared with every OTHER app-driving
+// suite on the machine -- and nix builds integration-test, host-services-test
+// and this one in parallel. The loser of that race does not fail its own
+// listen() loudly: it goes on to drive the winner's app, and then reports
+// "Cannot connect to inspector" for every case once that app exits.
+let currentPort = null;
+
+function spawnApp(port) {
   return spawn(APP_BIN, ["-platform", "offscreen"], {
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
       QT_QPA_PLATFORM: "offscreen",
       QT_FORCE_STDERR_LOGGING: "1",
+      QML_INSPECTOR_PORT: String(port),
     },
   });
 }
 
-async function waitForInspector() {
+async function waitForInspector(port) {
   const deadline = Date.now() + INSPECTOR_WAIT_MS;
   while (Date.now() < deadline) {
     try {
       await new Promise((resolve, reject) => {
-        const sock = net.createConnection({ host: HOST, port: PORT });
+        const sock = net.createConnection({ host: HOST, port });
         sock.once("connect", () => { sock.destroy(); resolve(); });
         sock.once("error", reject);
       });
@@ -77,7 +86,7 @@ async function waitForInspector() {
       await new Promise((r) => setTimeout(r, 300));
     }
   }
-  throw new Error(`inspector never came up on ${HOST}:${PORT}`);
+  throw new Error(`inspector never came up on ${HOST}:${port}`);
 }
 
 // Body-return protocol: throw = FAIL; return {skip: reason} = SKIP; else PASS.
@@ -95,7 +104,8 @@ async function runTest(name, body, opts = {}) {
     console.log(`\x1b[33mSKIP\x1b[0m — tier "full" test under SHUTDOWN_TIER=${SHUTDOWN_TIER}`);
     return "skip";
   }
-  const child = spawnApp();
+  currentPort = await reserveInspectorPort();
+  const child = spawnApp(currentPort);
   const logChunks = [];
   child.stdout.on("data", (d) => logChunks.push(d));
   child.stderr.on("data", (d) => logChunks.push(d));
@@ -109,7 +119,7 @@ async function runTest(name, body, opts = {}) {
   let err = null;
   let skipReason = null;
   try {
-    await waitForInspector();
+    await waitForInspector(currentPort);
     // Give plugins time to finish loading so shutdown exercises the full teardown path.
     await new Promise((r) => setTimeout(r, APP_WARMUP_MS));
     // G-ERR scans only startup output — teardown legitimately emits noise.
@@ -187,7 +197,7 @@ results.push(await runTest("SIGINT triggers graceful shutdown", async (child) =>
 
 if (process.platform === "linux") {
   results.push(await runTest("Linux: Ctrl+Q QShortcut is wired and quits", async (child) => {
-    const inspector = new Inspector();
+    const inspector = new Inspector(currentPort);
     await inspector.connect();
     const shortcut = await findByObjectName(inspector, "logosQuitShortcut");
     if (!shortcut) {
@@ -210,7 +220,7 @@ if (process.platform === "linux") {
 
 if (process.platform === "darwin") {
   results.push(await runTest("macOS: Quit QAction (⌘Q / QuitRole) is wired and quits", async (child) => {
-    const inspector = new Inspector();
+    const inspector = new Inspector(currentPort);
     await inspector.connect();
     const action = await findByObjectName(inspector, "logosQuitAction");
     if (!action) {
@@ -232,7 +242,7 @@ if (process.platform === "darwin") {
 
 // Since 3a73d33 closing the window never quits on any platform (tray/dock convention).
 results.push(await runTest("Window.close() does not quit; app keeps running (tray/dock convention)", async (child) => {
-  const inspector = new Inspector();
+  const inspector = new Inspector(currentPort);
   await inspector.connect();
   const win = await findByObjectName(inspector, "logosMainWindow");
   if (!win) {
@@ -253,7 +263,7 @@ results.push(await runTest("Window.close() does not quit; app keeps running (tra
 // Tray "Quit" action: must terminate the process. Same wiring as ⌘Q on mac
 // / Ctrl+Q on Linux, but a distinct connection worth guarding.
 results.push(await runTest("Tray Quit QAction is wired and quits", async (child) => {
-  const inspector = new Inspector();
+  const inspector = new Inspector(currentPort);
   await inspector.connect();
   const action = await findByObjectName(inspector, "logosTrayQuitAction");
   if (!action) {

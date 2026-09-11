@@ -39,7 +39,8 @@ logos-basecamp/
 ├── tests/                                # Integration tests
 │   ├── ui-tests.mjs                      # Node.js test suite (logos-qt-mcp)
 │   ├── host-services-tests.mjs           # Capability trust-root guard (spec)
-│   └── host-services-assert.mjs          # ...its assertion, shared with ui-tests
+│   ├── host-services-assert.mjs          # ...its assertion, shared with ui-tests
+│   └── inspector-isolation-tests.mjs     # Two apps at once, one inspector each
 ├── src/                                  # The main_ui UI shell plugin
 │   ├── CMakeLists.txt                    # Plugin build (Qt only, no logos runtime)
 │   ├── MainShellView.h/cpp               # IShellView entry point
@@ -53,6 +54,7 @@ logos-basecamp/
 │   ├── smoke-test.nix                    # Smoke test derivation
 │   ├── integration-test.nix              # UI integration test harness
 │   ├── host-services-test.nix            # Host-services grant guard
+│   ├── inspector-isolation-test.nix      # Parallel-suite guard (one port per app)
 │   ├── symbol-gate.nix                   # One-runtime gate + its negative control
 │   ├── unit-tests.nix                    # C++ unit tests
 │   ├── qml-tests.nix                     # QML tests
@@ -593,7 +595,7 @@ cmake --build . -j$(nproc)
 | Variable | Purpose |
 |----------|---------|
 | `LOGOS_USER_DIR` | Override application base directory as-is (also settable via `--user-dir`) |
-| `QML_INSPECTOR_PORT` | QML inspector server port (default: 3768) |
+| `QML_INSPECTOR_PORT` | QML inspector server port. Default 3768; `0` means any free port. The test framework sets it per app it launches, so two suites can run at once |
 
 ## Testing
 
@@ -629,7 +631,9 @@ node tests/ui-tests.mjs --ci ./result/bin/LogosBasecamp
 ### QML Inspector
 
 Development tool for inspecting the running QML tree over TCP:
-- Default port: 3768 (localhost)
+- Default port: 3768 (localhost); `QML_INSPECTOR_PORT` overrides it, and the
+  test framework gives every app it launches a free port of its own — a shared
+  fixed port makes one suite drive another's app (`nix/inspector-isolation-test.nix`)
 - Tools: `qml_find_and_click`, `qml_screenshot`, `qml_get_tree`, `qml_list_interactive`
 - Used by integration tests and AI agents for UI automation
 
