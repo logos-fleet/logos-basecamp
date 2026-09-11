@@ -246,16 +246,18 @@ let
       modules = []
       for m in members:
           info = json.load(open(os.path.join(m, "info.json")))
-          main = info.pop("main")
-          if not main:
+          # `main` is bundle-relative and already starts with the embed dir --
+          # that is what mkMobilePayload lays a variant out for -- so it names
+          # the image in the set directly.
+          image = info.pop("main")
+          if not image:
               raise SystemExit("error: %s ships no main for %s" % (info["name"], target))
-          image = os.path.join(embed, os.path.relpath(main, embed)) if main.startswith(embed + "/") else main
           if not os.path.exists(os.path.join(out, image)):
               raise SystemExit(
                   "error: %s declares main '%s' for %s, and it is not in the embedded set.\n"
                   "       A mobile variant's payload must be laid out as %s/<image>, which is\n"
                   "       the only directory the platform loader will look in." % (
-                      info["name"], main, target, embed))
+                      info["name"], image, target, embed))
           info["image"] = image
           modules.append(info)
 

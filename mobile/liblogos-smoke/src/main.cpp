@@ -1,9 +1,13 @@
-// The liblogos smoke host: liblogos_core running on a phone, with nothing
-// loaded. It starts the core against an empty modules directory and a
-// persistence path inside the app sandbox, prints the modules listing and the
-// protocol version to the screen and to the platform console, and stays alive
-// until Quit is pressed -- at which point the core is cleaned up before the
-// process exits, so a hung shutdown is visible as a hang and not as a kill.
+// The liblogos smoke host: liblogos_core running on a phone with the app's
+// Bundled set in it. It starts the core against a persistence path inside the
+// app sandbox, registers and loads every member of the set, prints the verdicts
+// and the protocol version to the screen and to the platform console, and stays
+// alive until Quit is pressed -- at which point the core is cleaned up before
+// the process exits, so a hung shutdown is visible as a hang and not as a kill.
+//
+// WHICH modules the set holds is `ws build --bundle`'s answer, resolved from
+// the catalog at build time and recorded in the manifest compiled into this
+// host. Nothing in this file names one.
 #include <QtGlobal>
 
 // The Bundled VIEW module is iOS-only, so everything that reaches it is behind
@@ -162,11 +166,10 @@ int main(int argc, char* argv[])
                   : QStringLiteral("bundled module: FAIL"));
 
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
-    // ...and the app's ONE Bundled VIEW module, brought up the same way and
-    // for the same reason: on screen and on the console before the first
-    // frame, so an automated run reads the verdict off the console.
     // ...and the app's Bundled VIEW module, if --bundle put one in the set,
-    // brought up the same way and for the same reason.
+    // brought up the same way and for the same reason: on screen and on the
+    // console before the first frame, so an automated run reads the verdict
+    // off the console.
     ViewModuleRunner view;
     QObject::connect(&view, &ViewModuleRunner::log, &say);
     const bool hasView = bundled.hasViewModule();

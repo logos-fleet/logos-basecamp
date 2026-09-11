@@ -76,6 +76,10 @@ private:
     ICoreRuntime::Config m_config;
     QString m_imageDir;
     QJsonObject m_set;
+    // Why m_set is empty, when it is empty because the manifest would not
+    // parse. Reported from start(), the first point at which anyone can be
+    // listening to log().
+    QString m_manifestError;
     QStringList m_registered;
     qint64 m_startMs = -1;
     bool m_started = false;

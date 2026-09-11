@@ -73,12 +73,12 @@ BundledSetCoreRuntime::BundledSetCoreRuntime(const ICoreRuntime::Config& config,
         : manifestJson.toUtf8();
     QJsonParseError parseError{};
     const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
-    if (!doc.isObject()) {
-        emit log(QStringLiteral("bundled set: manifest is not JSON (%1)")
-                     .arg(parseError.errorString()));
-        return;
-    }
-    m_set = doc.object();
+    // Recorded, not emitted: nothing can be connected to log() from inside the
+    // constructor, so the one place this can be reported is start().
+    if (doc.isObject())
+        m_set = doc.object();
+    else
+        m_manifestError = QStringLiteral("manifest is not JSON (%1)").arg(parseError.errorString());
 }
 
 BundledSetCoreRuntime::~BundledSetCoreRuntime() = default;
@@ -121,6 +121,11 @@ void BundledSetCoreRuntime::start()
 
 void BundledSetCoreRuntime::registerBundledSet()
 {
+    if (!m_manifestError.isEmpty()) {
+        emit log(QStringLiteral("bundled set: %1").arg(m_manifestError));
+        return;
+    }
+
     const QJsonArray modules = m_set["modules"].toArray();
     emit log(QStringLiteral("bundled set: %1 module(s) for %2")
                  .arg(modules.size())
