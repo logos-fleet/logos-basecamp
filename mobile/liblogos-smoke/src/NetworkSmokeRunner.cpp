@@ -276,14 +276,27 @@ bool NetworkSmokeRunner::runChat()
 
     // Storage lives under the instance directory the host assigned; the smoke
     // host assigns one inside the app sandbox (SmokeRunner::prepare).
-    QJsonObject cfg;
-    cfg["delivery_preset"] = QStringLiteral("logos.test");
-    cfg["log_level"] = QStringLiteral("info");
-    if (!call(client, mod, QStringLiteral("init"), QVariantList{ jsonCompact(cfg) }, &out, 60000)) {
+    //
+    // A MAP, not a JSON string. `init(config: ChatConfig)` takes a RECORD, and
+    // the Native container marshals each argument as its own JSON value -- so a
+    // string argument arrives as a JSON string and the record decoder refuses
+    // it. libp2p's `createNode` is the opposite case and takes the string,
+    // because its parameter really is a `tstr` the module parses itself.
+    QVariantMap chatConfig;
+    chatConfig["delivery_preset"] = QStringLiteral("logos.test");
+    chatConfig["log_level"] = QStringLiteral("info");
+    if (!call(client, mod, QStringLiteral("init"), QVariantList{ chatConfig }, &out, 60000)) {
         emit log(QStringLiteral("chat_module: init failed"));
         return false;
     }
     emit log(QStringLiteral("chat_module: init ok"));
+
+    // Where the chat core is writing its own account of this run, inside the
+    // instance directory the host assigned. Printed because it is the only way
+    // to see what the Rust core thought when a later call goes wrong, and on a
+    // phone nobody can go looking for it without being told the path.
+    if (call(client, mod, QStringLiteral("get_log_path"), QVariantList{}, &out))
+        emit log(QStringLiteral("  chat log: %1").arg(out.toString()));
 
     // This installation's own address. Printed because it is the thing a
     // desktop peer needs in order to open a conversation the OTHER way round.
