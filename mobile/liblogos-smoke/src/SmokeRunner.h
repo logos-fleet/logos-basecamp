@@ -1,7 +1,8 @@
 // Brings liblogos_core up inside the app sandbox and reports what it sees.
-// No modules are installed and no capability_module is loaded: this is the
-// first moment Logos runtime code runs on a phone, and what it has to prove
-// is that the core starts, finds its directories, and answers.
+// No modules are installed and none are loaded YET -- the Bundled set is
+// BundledSetRunner's business: this is the first moment Logos runtime code
+// runs on a phone, and what it has to prove is that the core starts, finds its
+// directories, and answers.
 #pragma once
 
 #include "ICoreRuntime.h"

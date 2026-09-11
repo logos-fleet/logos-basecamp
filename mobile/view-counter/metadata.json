@@ -7,7 +7,7 @@
   "main": "view_counter_plugin",
   "view": "qml/Main.qml",
   "icon": null,
-  "dependencies": [],
+  "dependencies": ["bare_counter", "capability_module"],
 
   "nix": {
     "packages": {

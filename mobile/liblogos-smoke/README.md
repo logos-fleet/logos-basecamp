@@ -8,8 +8,8 @@ ships inside the app and calls `add(1, 2)` — and then the ui_qml counter, whos
 QML renders in this process's own engine, bound to a backend that also lives in
 this process.
 
-This is a bring-up probe, not a product: nothing is *installed* at runtime and
-no capability_module is loaded. Basecamp's real UI shell runs on the same host,
+This is a bring-up probe, not a product: nothing is *installed* at runtime.
+Basecamp's real UI shell runs on the same host,
 over the same set — see [`../basecamp-shell`](../basecamp-shell/README.md), and
 `--app shell`. What it proves is that the core and the eight repos it links run
 on iOS and Android, that a protocol-free module image loads in the Native
@@ -19,9 +19,16 @@ loadable image inside an app bundle works.
 ## The Bundled set
 
 ```bash
-ws build logos-basecamp --target ios-sim-arm64 --bundle bare_counter,view_counter
+ws build logos-basecamp --target ios-sim-arm64 --bundle view_counter
 ws run   logos-basecamp --target ios-sim-arm64 --bundle bare_counter
 ```
+
+`--bundle view_counter` is one name and three modules: the closure is
+`view_counter -> bare_counter -> capability_module`, because the view really
+calls the counter and a module-to-module call is authorised by
+capability_module. Naming members explicitly (`--bundle
+capability_module,bare_counter`) works too and is what the Android leg does,
+where there is no `ui_qml` artifact yet.
 
 `--bundle` names modules; `nix/bundled-set.nix` resolves their dependency
 closure out of the catalog index, fetches each `.lgx`, checks its Ed25519
@@ -29,9 +36,11 @@ signature and Merkle root, extracts the `--target` variant and writes a
 `bundled-set.json` beside the images. The host reads that manifest and nothing
 else — which is why adding a module to `--bundle` changes no source file here.
 
-The catalog the smoke host builds against is local and built from this repo's
-own two mobile modules (`mobileCatalogFor` in `flake.nix`), signed with the
-test key in `mobile/catalog/keys/`. A Store shell build points the same
+The catalog the smoke host builds against is local (`mobileCatalogFor` in
+`flake.nix`), signed with the test key in `mobile/catalog/keys/`. It carries
+this repo's own two mobile modules plus a real cross build of
+`capability_module` out of logos-capability-module — the trust root every
+module-to-module call mints its token through. A Store shell build points the same
 function at a pinned release instead; nothing else changes.
 
 `ICoreRuntime` — Basecamp's own runtime seam — is answered from that manifest

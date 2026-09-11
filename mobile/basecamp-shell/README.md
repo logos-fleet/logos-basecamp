@@ -5,7 +5,7 @@ built from — running on iOS over the app's **Bundled set**. Its Modules tab
 lists the set, and its Load/Unload buttons go through the Native container.
 
 ```bash
-ws run logos-basecamp --target ios-sim-arm64 --bundle bare_counter,view_counter --app shell
+ws run logos-basecamp --target ios-sim-arm64 --bundle view_counter --app shell
 ```
 
 ## What is and is not different from the desktop
@@ -34,8 +34,8 @@ run reads the verdicts off the console:
 ```
 [shell] shell: IShellHost ABI 3 (host 3)
 [shell] shell: Settings -> Module Inspector is on screen
-[shell] modules tab rows: bare_counter, view_counter
-[shell] bundled set:      bare_counter, view_counter
+[shell] modules tab rows: bare_counter, capability_module, view_counter
+[shell] bundled set:      bare_counter, capability_module, view_counter
 [shell] SHELL MODULES TAB LISTS THE BUNDLED SET
 [shell] load bare_counter
 [shell]   bare_counter loaded in 6 ms (Native container)

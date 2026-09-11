@@ -304,6 +304,15 @@
       viewCounter = logos-module-builder.lib.mkLogosQmlModule {
         src = ./mobile/view-counter;
         configFile = ./mobile/view-counter/metadata.json;
+        # The two modules it calls, by the name metadata.json declares them
+        # under (snake_case, not the flake spelling) -- that is what
+        # collectAllModuleDeps matches on. Each publishes a LIDL contract, which
+        # is what a declared dependency has to do since the copy-headers-out-of-
+        # the-built-plugin fallback was removed.
+        flakeInputs = {
+          bare_counter = bareCounter;
+          capability_module = logos-capability-module;
+        };
       };
 
       # ── the Bundled set ───────────────────────────────────────────────────
@@ -331,11 +340,22 @@
       # smoke app takes -- there is no second, shorter route that only the app
       # uses and only the app tests.
       #
-      # Two ROOTS rather than a dependency edge between them: the view counter
-      # does not call the bare counter, and writing a dependency into a signed
-      # manifest to make a closure come out the right size would be a lie the
-      # core would later act on. A real multi-level closure is exercised by
-      # nix/bundled-set-test.nix.
+      # THREE PACKAGES, TWO ROOTS. capability_module is the third, and it is a
+      # REAL cross build of repos/logos-capability-module rather than a fixture:
+      # the trust root every module-to-module call mints its token through
+      # (logos-protocol's LogosAPIClient auto-`requestModule` path), published
+      # here so the set the app carries is not limited to the two demo modules
+      # that live in this repo. It cross-builds because logos-module-builder now
+      # puts a module's own `nix.packages` on the mobile Bare build's CMake
+      # roots and include path -- capability_module's only third-party use is
+      # header-only boost/uuid, which logos-nix does cross-build for both mobile
+      # sets, and nothing was naming it to the compile.
+      #
+      # bare_counter and view_counter stay two ROOTS rather than gaining a
+      # dependency edge between them: the view counter does not call the bare
+      # counter, and writing a dependency into a signed manifest to make a
+      # closure come out the right size would be a lie the core would later act
+      # on. A real multi-level closure is exercised by nix/bundled-set-test.nix.
       mobileCatalogFor = { system, androidBuildSystem }:
         let
           chain = (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; }).${system};
@@ -350,6 +370,17 @@
           target = bundledSetLib.variantForSystem.${system};
           isAndroid = system == "aarch64-android";
           signingKey = { inherit (catalogTestKey) name jwk; };
+
+          # The trust root, cross-built for this target out of its own repo.
+          # `legacyPackages.<buildSystem>.mobile`, not `packages.<system>`, for
+          # the same reason bareCounter uses it: a cross derivation's `system`
+          # is its BUILD platform, and the Android leg has to be the one this
+          # machine can realise.
+          capabilityPayload = catalogLib.mkVariantPayload {
+            drv = logos-capability-module.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
+            stem = "capability_module_bare";
+            inherit target;
+          };
 
           barePayload = catalogLib.mkVariantPayload {
             drv = bareCounter.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
@@ -369,6 +400,16 @@
           };
 
           specs = {
+            capability_module = {
+              name = "capability_module";
+              version = logos-capability-module.config.version;
+              type = "core";
+              category = "security";
+              description = "Coordinates permissions between modules";
+              dependencies = [ ];
+              variants.${target} = capabilityPayload;
+              inherit signingKey;
+            };
             bare_counter = {
               name = "bare_counter";
               version = "1.0.0";
@@ -388,7 +429,14 @@
               description = "A QML counter over a .rep backend, as one embedded framework";
               view = "qml/Main.qml";
               icon = ./mobile/catalog/icon.png;
-              dependencies = [ ];
+              # THE CLOSURE, and it is the module's own -- read off
+              # mobile/view-counter/metadata.json rather than listed here, so
+              # the signed manifest cannot drift from what the code does.
+              # ViewCounterPlugin renders bare_counter's count by calling it,
+              # and a module-to-module call mints its token through
+              # capability_module. `--bundle view_counter` therefore resolves
+              # all three.
+              dependencies = viewCounter.config.dependencies;
               variants.${target} = viewPayload;
               inherit signingKey;
             };
@@ -408,8 +456,13 @@
           # different artifact that logos-module-builder does not publish yet --
           # which is exactly the case `--bundle view_counter --target
           # android-arm64` must refuse by name rather than half-build.
+          # On iOS the ONE name is enough: view_counter's closure is
+          # bare_counter and capability_module. On Android there is no ui_qml
+          # artifact yet, so the two core members are named directly -- which is
+          # also the case `--bundle view_counter --target android-arm64` must
+          # refuse by name rather than half-build.
           defaultApps =
-            if isAndroid then [ "bare_counter" ] else [ "bare_counter" "view_counter" ];
+            if isAndroid then [ "capability_module" "bare_counter" ] else [ "view_counter" ];
         };
 
       mobileBundledSetFor = { system, androidBuildSystem }:
