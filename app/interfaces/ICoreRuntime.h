@@ -1,4 +1,11 @@
-#pragma once
+// A NAMED guard, not `#pragma once`: this header is shipped into more than one
+// install prefix (mobile/liblogos-smoke/stage installs it beside
+// BundledSetCoreRuntime.h, and mobile/basecamp-shell/stage compiles against
+// app/interfaces directly), and `#pragma once` keys on the FILE -- two copies
+// at two paths are two files to it, and the second one is a redefinition
+// error naming a class that is only defined once in the repo.
+#ifndef LOGOS_BASECAMP_ICORERUNTIME_H
+#define LOGOS_BASECAMP_ICORERUNTIME_H
 
 #include <QString>
 #include <QStringList>
@@ -78,3 +85,5 @@ public:
     // into N calls and N parses per tick.
     virtual QVariantList allStats() const = 0;
 };
+
+#endif // LOGOS_BASECAMP_ICORERUNTIME_H

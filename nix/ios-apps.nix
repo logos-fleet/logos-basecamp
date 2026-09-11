@@ -1,10 +1,21 @@
-# The liblogos smoke host for iOS: its pure half as a static archive
-# (pkgs.mkIosCmakeStage), plus run-liblogos-smoke-ios-sim /
-# run-liblogos-smoke-ios-device -- the impure Xcode-generator link and the
-# simctl / devicectl step.
+# The iOS apps built out of this repo's Bundled set, and the runners that put
+# them on a simulator or a device.
 #
-# The split is forced by the platform: an iOS .app is linked and signed by
-# Xcode, which cannot run inside the nix sandbox. Everything up to
+# Two apps, one pipeline:
+#
+#   LiblogosSmoke   the bring-up probe -- liblogos_core with the Bundled set
+#                   in it, a log on screen and the verdicts on the console.
+#   BasecampShell   the same host with Basecamp's REAL UI shell on top of it:
+#                   main_ui linked in statically, driven through IShellHost,
+#                   its Modules tab listing the set.
+#
+# They share everything below the UI: the same stage, the same embedded
+# frameworks, the same computed export list, the same Xcode step. That is the
+# point of having both -- when the Shell cannot see a module, the probe says
+# whether the module or the Shell is the reason.
+#
+# The pure/impure split is forced by the platform: an iOS .app is linked and
+# signed by Xcode, which cannot run inside the nix sandbox. Everything up to
 # "one static archive with everything in it" is pure and cached; the impure
 # runner does the link, the install and the launch.
 {
@@ -26,13 +37,16 @@
   # LogosViewPlugin.h to cast the plugin it constructs, and nothing else from
   # that repo -- ui-host and its library are a desktop concern.
   viewRuntimeSrc,
+  # nix/shell-ui-ios.nix: the design system and main_ui as static archives,
+  # plus the QML source roots qmlimportscanner has to walk to find the Qt
+  # plugins the Shell's compiled-in bytecode imports.
+  shellUi,
 }:
 
 let
   inherit (pkgs) lib;
   buildPkgs = pkgs.pkgsBuildBuild;
   appleSdk = pkgs.qt6.qtbase.appleSdk;
-  bundleId = "co.logos.liblogos.smoke";
 
   # `chain.all` is the whole link set, third-party tail included: every
   # prefix whose lib/*.a is linked and whose include/ is compiled against.
@@ -131,7 +145,7 @@ let
       lib.concatMapStringsSep " + " (m: m.name) bundledModules}" >&2
   '';
 
-  stage = pkgs.mkIosCmakeStage {
+  smokeStage = pkgs.mkIosCmakeStage {
     pname = "liblogos-smoke-host-ios";
     version = "0.1.0";
     inherit src;
@@ -155,15 +169,45 @@ let
     exportedSymbolFiles = [ exportedSymbols ];
   };
 
-  # Shared by both runners. The build dir is keyed on the stage's store path,
-  # so a rebuilt stage never reuses an Xcode cache from the previous one.
-  buildApp = ''
+
+  # The Shell host: the same Native-container host with Basecamp's real UI
+  # shell on top. It LINKS smokeStage rather than rebuilding it, so the core,
+  # its archives and the Bundled-set manifest compiled into it are one build
+  # shared by both apps -- there is no second answer to "what is in the set".
+  shellStage = pkgs.mkIosCmakeStage {
+    pname = "basecamp-shell-host-ios";
+    version = "0.1.0";
+    inherit src;
+    sourceDir = "mobile/basecamp-shell/stage";
+    buildInputs = [ smokeStage ] ++ shellUi.prefixes ++ roots;
+    cmakeFlags = [
+      "-DCMAKE_FIND_ROOT_PATH=${joined ([ smokeStage ] ++ shellUi.prefixes ++ roots)}"
+      "-DCMAKE_PREFIX_PATH=${joined ([ smokeStage ] ++ shellUi.prefixes)}"
+    ];
+    # Same list, same reason as the smoke stage: the archive exports nothing
+    # itself, and carries the flags so the Xcode link can force-load and
+    # export what the Bundled set resolves upward.
+    exportedSymbolFiles = [ exportedSymbols ];
+  };
+
+  # One app: the Xcode half, and the two runners over it. Everything that
+  # differs between LiblogosSmoke and BasecampShell is an argument here, and
+  # everything that does not -- the embed list, the exported symbols, the
+  # /nix/store scan, the Frameworks-versus-manifest diff -- is below and is
+  # therefore the same check on both.
+  #
+  # The build dir is keyed on the stage's store path, so a rebuilt stage never
+  # reuses an Xcode cache from the previous one.
+  mkApp = { pname, appName, project, bundleId, appSrcDir, stage, prefixes ? [ ],
+            configureFlags ? [ ] }:
+    let
+    buildApp = ''
     ${pkgs.xcodeWrapper.versionGate}
 
-    app_src=${src}/mobile/liblogos-smoke/app
+    app_src=${src}/${appSrcDir}
     bundle_id=${bundleId}
-    build_dir="''${LOGOS_IOS_SMOKE_BUILD_DIR:-''${TMPDIR:-/tmp}/liblogos-smoke-ios/$(basename ${stage})}"
-    app="$build_dir/Debug-${appleSdk}/LiblogosSmoke.app"
+    build_dir="''${LOGOS_IOS_BUILD_DIR:-''${TMPDIR:-/tmp}/${pname}/$(basename ${stage})}"
+    app="$build_dir/Debug-${appleSdk}/${appName}.app"
 
     # Xcode's copy phase signs the framework IN PLACE after copying it, and a
     # store path is read-only all the way down -- ditto preserves that, so
@@ -189,8 +233,9 @@ let
         ${lib.escapeShellArgs pkgs.logosQtCrossCmakeFlags} \
         ${lib.escapeShellArgs stage.logosIosSymbolExports.cmakeFlags} \
         "-DLOGOS_IOS_BUNDLED_FRAMEWORKS=$embed_fws" \
-        "-DCMAKE_PREFIX_PATH=${stage}" \
-        "-DCMAKE_FIND_ROOT_PATH=${stage};${joined roots}" \
+        "-DCMAKE_PREFIX_PATH=${joined ([ stage ] ++ prefixes)}" \
+        "-DCMAKE_FIND_ROOT_PATH=${joined ([ stage ] ++ prefixes ++ roots)}" \
+        ${lib.escapeShellArgs configureFlags} \
         "$@"
     }
 
@@ -198,7 +243,7 @@ let
       echo "==> xcodebuild (${appleSdk}; full log: $build_dir/xcodebuild.log)"
       rm -rf "$app"
       set +e
-      xcodebuild -project "$build_dir/LiblogosSmokeIos.xcodeproj" -target LiblogosSmoke \
+      xcodebuild -project "$build_dir/${project}.xcodeproj" -target ${appName} \
         -configuration Debug -sdk ${appleSdk} -arch arm64 "$@" \
         build 2>&1 | tee "$build_dir/xcodebuild.log" | grep -E '^\*\*|error:|warning: .*ld'
       xcode_status=''${PIPESTATUS[0]}
@@ -208,12 +253,12 @@ let
         exit 1
       fi
       [ -d "$app" ] || { echo "xcodebuild produced no $app" >&2; exit 1; }
-      echo "==> app: $app ($(du -sk "$app" | cut -f1) KB; executable $(stat -f %z "$app/LiblogosSmoke") bytes)"
+      echo "==> app: $app ($(du -sk "$app" | cut -f1) KB; executable $(stat -f %z "$app/${appName}") bytes)"
       # ADR 0002's rule for anything that leaves the machine: a store path in a
       # shipped binary is a path that does not exist on the device.
-      if strings "$app/LiblogosSmoke" | grep -q /nix/store; then
+      if strings "$app/${appName}" | grep -q /nix/store; then
         echo "error: /nix/store reference in the app executable" >&2
-        strings "$app/LiblogosSmoke" | grep -m5 /nix/store >&2
+        strings "$app/${appName}" | grep -m5 /nix/store >&2
         exit 1
       fi
       echo "==> no /nix/store reference in the executable"
@@ -259,8 +304,8 @@ let
     }
   '';
 
-  runSim = buildPkgs.writeShellApplication {
-    name = "run-liblogos-smoke-ios-sim";
+    runSim = buildPkgs.writeShellApplication {
+    name = "run-${pname}-ios-sim";
     runtimeInputs = [
       buildPkgs.cmake
       pkgs.xcodeWrapper
@@ -285,8 +330,8 @@ let
     '';
   };
 
-  runDevice = buildPkgs.writeShellApplication {
-    name = "run-liblogos-smoke-ios-device";
+    runDevice = buildPkgs.writeShellApplication {
+    name = "run-${pname}-ios-device";
     runtimeInputs = [
       buildPkgs.cmake
       pkgs.xcodeWrapper
@@ -305,9 +350,38 @@ let
         --device "$device" "$bundle_id" "$@"
     '';
   };
+    in
+    { inherit runSim runDevice; };
+
+  smokeApp = mkApp {
+    pname = "liblogos-smoke";
+    appName = "LiblogosSmoke";
+    project = "LiblogosSmokeIos";
+    bundleId = "co.logos.liblogos.smoke";
+    appSrcDir = "mobile/liblogos-smoke/app";
+    stage = smokeStage;
+  };
+
+  shellApp = mkApp {
+    pname = "basecamp-shell";
+    appName = "BasecampShell";
+    project = "BasecampShellIos";
+    bundleId = "co.logos.basecamp.shell";
+    appSrcDir = "mobile/basecamp-shell/app";
+    stage = shellStage;
+    prefixes = [ smokeStage ] ++ shellUi.prefixes;
+    # qmlimportscanner reads QML SOURCE to decide which static Qt QML plugins
+    # the executable needs; the Shell's QML is compiled bytecode inside the
+    # archives, so the scan has to be pointed at the trees it came from.
+    configureFlags = [
+      "-DBASECAMP_QML_SCAN_ROOTS=${lib.concatStringsSep ";" shellUi.qmlScanRoots}"
+    ];
+  };
 in
-{
-  liblogos-smoke-host-ios = stage;
+shellUi.packages
+// {
+  liblogos-smoke-host-ios = smokeStage;
+  basecamp-shell-host-ios = shellStage;
   # The resolved, verified, embedded Bundled set on its own -- what `ws build
   # <repo> --target <variant> --bundle <apps>` builds. An .app needs Xcode and
   # cannot be a nix derivation (ADR 0002), so this is the part of the app image
@@ -315,8 +389,10 @@ in
   bundled-set = bundledSet;
 }
 // lib.optionalAttrs (appleSdk == "iphonesimulator") {
-  run-liblogos-smoke-ios-sim = runSim;
+  run-liblogos-smoke-ios-sim = smokeApp.runSim;
+  run-basecamp-shell-ios-sim = shellApp.runSim;
 }
 // lib.optionalAttrs (appleSdk == "iphoneos") {
-  run-liblogos-smoke-ios-device = runDevice;
+  run-liblogos-smoke-ios-device = smokeApp.runDevice;
+  run-basecamp-shell-ios-device = shellApp.runDevice;
 }

@@ -1,0 +1,84 @@
+# Pure half of the iOS Basecamp Shell host: everything except main.cpp, built
+# as a static archive by nix (pkgs.mkIosCmakeStage). The Xcode-generated app in
+# ../app only has to link Basecamp::ShellHost.
+#
+# The split is the platform's: an iOS .app is linked and signed by Xcode, which
+# cannot run inside the nix sandbox (ADR 0002). Same shape as
+# mobile/liblogos-smoke/stage, and it reuses that stage rather than restating
+# it -- Logos::LiblogosSmokeHost IS the mobile Native-container host (the core,
+# its eight repos, BundledSetCoreRuntime and the Bundled-set manifest compiled
+# in). What this adds is the Shell on top of it.
+cmake_minimum_required(VERSION 3.24)
+project(BasecampShellHost LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickWidgets QuickControls2)
+find_package(LiblogosSmokeHost CONFIG REQUIRED)
+find_package(LogosDesignSystem CONFIG REQUIRED)
+find_package(BasecampMainUI CONFIG REQUIRED)
+
+set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+set(BASECAMP_APP ${CMAKE_CURRENT_SOURCE_DIR}/../../../app)
+
+# ModuleInstanceModel and CoreModuleManager are the DESKTOP app's, compiled in
+# rather than reimplemented: the Modules tab binds one and drives the other, so
+# a mobile copy of either would be a second definition of what a row is and of
+# what "load" means. Both are plain Qt over ICoreRuntime -- CoreModuleManager's
+# only other input is LogosAPI, for the per-module Interface drill-down.
+add_library(basecamp_shell_host STATIC
+    ${SRC}/ShellModulesBackend.cpp
+    ${SRC}/ShellModulesBackend.h
+    ${SRC}/BundledSetShellHost.cpp
+    ${SRC}/BundledSetShellHost.h
+    ${SRC}/ShellModulesDriver.cpp
+    ${SRC}/ShellModulesDriver.h
+    ${BASECAMP_APP}/ModuleInstanceModel.cpp
+    ${BASECAMP_APP}/ModuleInstanceModel.h
+    ${BASECAMP_APP}/CoreModuleManager.cpp
+    ${BASECAMP_APP}/CoreModuleManager.h
+)
+
+target_include_directories(basecamp_shell_host PUBLIC
+    $<BUILD_INTERFACE:${SRC}>
+    $<BUILD_INTERFACE:${BASECAMP_APP}>
+    $<BUILD_INTERFACE:${BASECAMP_APP}/interfaces>
+    $<INSTALL_INTERFACE:include/basecamp-shell-host>)
+
+target_link_libraries(basecamp_shell_host PUBLIC
+    Logos::LiblogosSmokeHost
+    Basecamp::MainUI
+    Logos::DesignSystem
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickWidgets Qt6::QuickControls2
+)
+
+set_target_properties(basecamp_shell_host PROPERTIES EXPORT_NAME ShellHost)
+install(TARGETS basecamp_shell_host EXPORT BasecampShellHostTargets ARCHIVE DESTINATION lib)
+install(FILES
+    ${SRC}/ShellModulesBackend.h
+    ${SRC}/BundledSetShellHost.h
+    ${SRC}/ShellModulesDriver.h
+    ${BASECAMP_APP}/ModuleInstanceModel.h
+    ${BASECAMP_APP}/CoreModuleManager.h
+    ${BASECAMP_APP}/interfaces/IShellHost.h
+    ${BASECAMP_APP}/interfaces/IShellView.h
+    ${BASECAMP_APP}/interfaces/ICoreRuntime.h
+    ${BASECAMP_APP}/interfaces/ShellSections.h
+    ${BASECAMP_APP}/interfaces/InstallEnums.h
+    ${BASECAMP_APP}/interfaces/BasecampModelRoles.h
+    DESTINATION include/basecamp-shell-host)
+install(EXPORT BasecampShellHostTargets
+    FILE BasecampShellHostTargets.cmake NAMESPACE Basecamp::
+    DESTINATION lib/cmake/BasecampShellHost)
+file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/BasecampShellHostConfig.cmake CONTENT [[
+include(CMakeFindDependencyMacro)
+find_dependency(Qt6 COMPONENTS Core Gui Widgets Qml Quick QuickWidgets QuickControls2)
+find_dependency(LiblogosSmokeHost CONFIG)
+find_dependency(LogosDesignSystem CONFIG)
+find_dependency(BasecampMainUI CONFIG)
+include("${CMAKE_CURRENT_LIST_DIR}/BasecampShellHostTargets.cmake")
+]] @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/BasecampShellHostConfig.cmake
+    DESTINATION lib/cmake/BasecampShellHost)
