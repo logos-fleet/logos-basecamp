@@ -54,8 +54,14 @@ private:
     // A `result`-returning universal method: unwrap the LogosResult the Native
     // container re-materialises from the module's JSON, log its error if it
     // failed, and hand back the value.
+    //
+    // `quiet` is for the calls whose FAILURE is an ordinary outcome -- an empty
+    // gossipsub queue answers "timeout waiting for message", and polling it
+    // thirty times would otherwise bury the run's real lines under thirty
+    // identical ones.
     bool call(LogosAPIClient* client, const QString& module, const QString& method,
-              const QVariantList& args, QVariant* value, int timeoutMs = 30000);
+              const QVariantList& args, QVariant* value, int timeoutMs = 30000,
+              bool quiet = false);
 
     BundledSetCoreRuntime* m_core;
     QString m_peer;        // the whole multiaddr, /p2p/<id> included

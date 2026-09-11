@@ -44,10 +44,15 @@ QString jsonCompact(const QJsonObject& o)
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
-// Any QVariant a module answered, as one line of JSON for the log.
+// Any QVariant a module answered, as one line for the log. QJsonDocument only
+// takes a container, and plenty of these answers are a bare string or number,
+// so a scalar prints as itself rather than as an empty document.
 QString asJson(const QVariant& v)
 {
-    return QString::fromUtf8(QJsonDocument::fromVariant(v).toJson(QJsonDocument::Compact)).trimmed();
+    const QJsonDocument doc = QJsonDocument::fromVariant(v);
+    if (doc.isNull())
+        return v.toString();
+    return QString::fromUtf8(doc.toJson(QJsonDocument::Compact)).trimmed();
 }
 
 } // namespace
@@ -80,13 +85,14 @@ bool NetworkSmokeRunner::hasWork() const
 
 bool NetworkSmokeRunner::call(LogosAPIClient* client, const QString& module,
                               const QString& method, const QVariantList& args,
-                              QVariant* value, int timeoutMs)
+                              QVariant* value, int timeoutMs, bool quiet)
 {
     logos::CallError err;
     const QVariant raw = client->invokeRemoteMethod(module, method, args,
                                                     Timeout(timeoutMs), &err);
     if (!err.ok()) {
-        emit log(QStringLiteral("  %1.%2 failed: %3 (%4)")
+        if (!quiet)
+            emit log(QStringLiteral("  %1.%2 failed: %3 (%4)")
                      .arg(module, method,
                           QString::fromStdString(err.message),
                           QString::fromStdString(err.code)));
@@ -99,8 +105,9 @@ bool NetworkSmokeRunner::call(LogosAPIClient* client, const QString& module,
     if (raw.canConvert<LogosResult>()) {
         const LogosResult lr = raw.value<LogosResult>();
         if (!lr.success) {
-            emit log(QStringLiteral("  %1.%2: %3")
-                         .arg(module, method, lr.error.toString()));
+            if (!quiet)
+                emit log(QStringLiteral("  %1.%2: %3")
+                             .arg(module, method, lr.error.toString()));
             return false;
         }
         if (value) *value = lr.value;
@@ -148,6 +155,11 @@ bool NetworkSmokeRunner::runLibp2p()
     cfg["addrs"] = QJsonArray{ QStringLiteral("/ip4/0.0.0.0/tcp/0") };
     cfg["transport"] = QStringLiteral("tcp");
     cfg["mountGossipsub"] = true;
+    // No self-echo. The default delivers this node's own publishes back to it,
+    // and a message read off the queue would then prove only that the module
+    // can talk to itself -- which is exactly the wrong thing to accept as
+    // evidence of an exchange with a peer.
+    cfg["gossipsubTriggerSelf"] = false;
 
     QElapsedTimer clock;
     clock.start();
@@ -213,25 +225,29 @@ bool NetworkSmokeRunner::exchangeWithPeer(LogosAPIClient* client)
     // receives, and heartbeat is 1 s. Publish repeatedly and read between
     // attempts, so the first heartbeat after the dial is the slowest this can
     // be rather than the only chance it had.
-    for (int attempt = 0; attempt < 20; ++attempt) {
+    for (int attempt = 0; attempt < 30; ++attempt) {
         if (!call(client, mod, QStringLiteral("gossipsubPublish"),
-                  QVariantList{ m_topic, nonce }, &out)) {
-            // Not fatal on its own: the first publishes can fail with
-            // "insufficient peers" before the mesh exists.
-            emit log(QStringLiteral("  publish attempt %1 not accepted yet").arg(attempt + 1));
+                  QVariantList{ m_topic, nonce }, &out, 30000, /*quiet=*/true)) {
+            // Not fatal on its own: a publish before the mesh exists is refused
+            // for want of peers, which is what the retries are for.
+            if (attempt == 0)
+                emit log(QStringLiteral("  publish not accepted yet; retrying while the mesh forms"));
         } else if (attempt == 0) {
             emit log(QStringLiteral("  published '%1' on '%2'").arg(nonce, m_topic));
         }
 
+        // gossipsubNextMessage answers success=false with "timeout waiting for
+        // message" when the queue is empty, so an unsuccessful call here is the
+        // ordinary empty poll and not a failure.
         QVariant msg;
-        if (call(client, mod, QStringLiteral("gossipsubNextMessage"),
-                 QVariantList{ m_topic, qint64(1000) }, &msg, 15000)) {
-            const QString text = asJson(msg);
-            if (!text.isEmpty() && text != QLatin1String("null") && text != QLatin1String("{}")) {
-                emit log(QStringLiteral("  gossipsub message from the desktop: %1").arg(text));
-                return true;
-            }
-        }
+        if (!call(client, mod, QStringLiteral("gossipsubNextMessage"),
+                  QVariantList{ m_topic, qint64(1000) }, &msg, 15000, /*quiet=*/true))
+            continue;
+        const QString text = msg.toString();
+        if (text.isEmpty() || text == nonce)
+            continue;
+        emit log(QStringLiteral("  gossipsub message from the desktop peer: '%1'").arg(text));
+        return true;
     }
     emit log(QStringLiteral("  no gossipsub message arrived from '%1'").arg(m_topic));
     return false;
