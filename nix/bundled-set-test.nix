@@ -17,12 +17,11 @@
 #             produce, reached through a fixed-output fetch and re-checked
 #             against the Merkle root the index pins. What a Store shell build
 #             uses, and until now dead code.
-{ pkgs, lgx, bundledSet, catalog, testKey, icon, pinnedRelease }:
+{ pkgs, lgx, bundledSet, fixture, testKey, pinnedRelease }:
 
 let
   inherit (pkgs) lib;
 
-  fixture = import ./bundled-set-fixture.nix { inherit pkgs catalog testKey icon; };
   inherit (fixture) target local;
 
   set = bundledSet.mkBundledSet {
@@ -47,33 +46,27 @@ let
   # verify-lgx-member.sh still re-checks that root against the pin before
   # anything is unpacked. Bytes that do not hash to the pin cannot reach the
   # app, wherever they came from.
-  pinnedDir = pinnedRelease;
-
   pinnedIndex =
-    let raw = builtins.fromJSON (builtins.readFile "${pinnedDir}/index.json"); in
+    let raw = builtins.fromJSON (builtins.readFile "${pinnedRelease}/index.json"); in
     raw // {
       packages = map (p: (builtins.removeAttrs p [ "file" ]) // {
-        url = "file://${pinnedDir}/${p.file}";
+        url = "file://${pinnedRelease}/${p.file}";
       }) raw.packages;
     };
 
   pinnedSet = bundledSet.mkBundledSet {
-    catalog = { index = pinnedIndex; root = pinnedDir; };
+    catalog = { index = pinnedIndex; root = pinnedRelease; };
     inherit target;
     apps = [ "counter_ui" ];
     pname = "pinned-bundled-set";
   };
 
   # ── eval-time assertions ───────────────────────────────────────────────────
-  pinnedEntries = lib.listToAttrs
-    (map (p: { inherit (p) name; value = p; }) pinnedIndex.packages);
-
-  pinnedIsPinned = lib.all (name:
-    let p = pinnedEntries.${name}; in
-    if (p.rootHash or "") == "" then throw "FAIL: pinned release entry '${name}' has no rootHash"
-    else if (p.sha256 or "") == "" then throw "FAIL: pinned release entry '${name}' has no sha256"
+  pinnedIsPinned = lib.all (p:
+    if (p.rootHash or "") == "" then throw "FAIL: pinned release entry '${p.name}' has no rootHash"
+    else if (p.sha256 or "") == "" then throw "FAIL: pinned release entry '${p.name}' has no sha256"
     else true)
-    (lib.attrNames pinnedEntries);
+    pinnedIndex.packages;
 
   closureNames = map (e: e.name) (bundledSet.resolveClosure {
     inherit (local) index;
@@ -194,8 +187,10 @@ pkgs.runCommand "bundled-set-tests"
   # made. That the derivation got this far is itself the assertion for the
   # fetch: a sha256 that did not match would have failed the fixed-output
   # derivation, and a rootHash that did not match would have failed admission.
-  diff -u <(python3 -c 'import json,os,sys; print(json.dumps(json.load(open(os.path.join(sys.argv[1],"bundled-set.json"))),indent=2,sort_keys=True))' "$set") \
-          <(python3 -c 'import json,os,sys; d=json.load(open(os.path.join(sys.argv[1],"bundled-set.json"))); print(json.dumps(d,indent=2,sort_keys=True))' "$pinnedSet") \
+  manifestOf() {
+    python3 -c 'import json,os,sys; print(json.dumps(json.load(open(os.path.join(sys.argv[1],"bundled-set.json"))),indent=2,sort_keys=True))' "$1"
+  }
+  diff -u <(manifestOf "$set") <(manifestOf "$pinnedSet") \
     || fail "the pinned release resolves to a different set than the local catalog"
   diff -r "$set/Frameworks" "$pinnedSet/Frameworks" \
     || fail "the pinned release embeds different images than the local catalog"

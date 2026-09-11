@@ -4,7 +4,8 @@
 # must be the same catalog: the test, and `nix build .#bundled-set-release`,
 # which publishes it as a PINNED release whose index is then committed under
 # mobile/catalog/pinned-release/. A release generated from a second, parallel
-# set of fixtures would pin bytes nothing tests.
+# set of fixtures would pin bytes nothing tests -- so flake.nix imports this
+# file ONCE and hands the result to both.
 #
 # Fixture payloads, not real cross-compiled modules, and deliberately so: what
 # is under test is the resolve / fetch / verify / extract / embed pipeline and
@@ -19,10 +20,9 @@
 let
   inherit (pkgs) lib;
 
-  signingKey = { jwk = testKey.jwk; name = testKey.name; };
+  signingKey = { inherit (testKey) jwk name; };
 
   target = "ios-sim-arm64";
-
 
   # A fixture variant payload, laid out the way the target's loader wants it:
   # an embedded framework bundle on iOS, a shared object on Android. The BYTES

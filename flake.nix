@@ -716,15 +716,24 @@
           bundledSetPublisher =
             nix-bundle-lgx.lib.${system}.mkMobileCatalog { lgx = logosLgx; };
 
+          # ONE instantiation, handed to both consumers below. The test and the
+          # release must be the same catalog -- a release published from a
+          # second, parallel set of fixtures would pin bytes nothing tests.
+          bundledSetFixture = import ./nix/bundled-set-fixture.nix {
+            inherit pkgs;
+            catalog = bundledSetPublisher;
+            testKey = catalogTestKey;
+            icon = ./mobile/catalog/icon.png;
+          };
+
           bundledSetTests = import ./nix/bundled-set-test.nix {
             inherit pkgs;
             lgx = logosLgx;
             bundledSet = import ./nix/bundled-set.nix {
               inherit pkgs; lgx = logosLgx; publisher = bundledSetPublisher;
             };
-            catalog = bundledSetPublisher;
+            fixture = bundledSetFixture;
             testKey = catalogTestKey;
-            icon = ./mobile/catalog/icon.png;
             # A release somebody else published: the index and the .lgx bytes
             # are committed, so the `url` + `sha256` + `rootHash` path is
             # exercised over bytes this build did not produce. Regenerate with
@@ -737,15 +746,7 @@
           # change, and its output is committed so the test consumes bytes
           # rather than rebuilding them.
           bundledSetRelease =
-            let
-              fixture = import ./nix/bundled-set-fixture.nix {
-                inherit pkgs;
-                catalog = bundledSetPublisher;
-                testKey = catalogTestKey;
-                icon = ./mobile/catalog/icon.png;
-              };
-            in
-            bundledSetPublisher.mkRelease { catalog = fixture.local; };
+            bundledSetPublisher.mkRelease { catalog = bundledSetFixture.local; };
 
           # Hoisted so shutdown-test can read the elapsed time for the combined PR-gate budget.
           integrationTest = import ./nix/integration-test.nix { inherit pkgs src logosQtMcp; appPkg = app; };
