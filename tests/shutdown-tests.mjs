@@ -52,14 +52,13 @@ const INSPECTOR_WAIT_MS = 15000;
 const SHUTDOWN_WAIT_MS = 10000;
 const APP_WARMUP_MS = 2000;
 
-// Each spawned app gets its own inspector port, from the framework's reserver.
-// A fixed port (3768 was the default) is shared with every OTHER app-driving
-// suite on the machine -- and nix builds integration-test, host-services-test
-// and this one in parallel. The loser of that race does not fail its own
-// listen() loudly: it goes on to drive the winner's app, and then reports
-// "Cannot connect to inspector" for every case once that app exits.
-let currentPort = null;
-
+// Each spawned app gets an inspector port of its own, from the framework's
+// reserver, and runTest hands it to the test body. On a fixed port (3768 used
+// to be the default) this suite shares with every other app-driving suite on
+// the machine -- and nix builds integration-test, host-services-test and this
+// one in parallel. The loser of that race does not fail its own listen()
+// loudly: it drives the winner's app instead, then reports "Cannot connect to
+// inspector" for every case once that app exits.
 function spawnApp(port) {
   return spawn(APP_BIN, ["-platform", "offscreen"], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -104,8 +103,8 @@ async function runTest(name, body, opts = {}) {
     console.log(`\x1b[33mSKIP\x1b[0m — tier "full" test under SHUTDOWN_TIER=${SHUTDOWN_TIER}`);
     return "skip";
   }
-  currentPort = await reserveInspectorPort();
-  const child = spawnApp(currentPort);
+  const port = await reserveInspectorPort();
+  const child = spawnApp(port);
   const logChunks = [];
   child.stdout.on("data", (d) => logChunks.push(d));
   child.stderr.on("data", (d) => logChunks.push(d));
@@ -119,12 +118,12 @@ async function runTest(name, body, opts = {}) {
   let err = null;
   let skipReason = null;
   try {
-    await waitForInspector(currentPort);
+    await waitForInspector(port);
     // Give plugins time to finish loading so shutdown exercises the full teardown path.
     await new Promise((r) => setTimeout(r, APP_WARMUP_MS));
     // G-ERR scans only startup output — teardown legitimately emits noise.
     const startupChunkCount = logChunks.length;
-    const ret = await body(child);
+    const ret = await body(child, port);
     if (ret instanceof SkipTest) {
       outcome = "skip";
       skipReason = ret.reason;
@@ -196,8 +195,8 @@ results.push(await runTest("SIGINT triggers graceful shutdown", async (child) =>
 }));
 
 if (process.platform === "linux") {
-  results.push(await runTest("Linux: Ctrl+Q QShortcut is wired and quits", async (child) => {
-    const inspector = new Inspector(currentPort);
+  results.push(await runTest("Linux: Ctrl+Q QShortcut is wired and quits", async (child, port) => {
+    const inspector = new Inspector(port);
     await inspector.connect();
     const shortcut = await findByObjectName(inspector, "logosQuitShortcut");
     if (!shortcut) {
@@ -219,8 +218,8 @@ if (process.platform === "linux") {
 }
 
 if (process.platform === "darwin") {
-  results.push(await runTest("macOS: Quit QAction (⌘Q / QuitRole) is wired and quits", async (child) => {
-    const inspector = new Inspector(currentPort);
+  results.push(await runTest("macOS: Quit QAction (⌘Q / QuitRole) is wired and quits", async (child, port) => {
+    const inspector = new Inspector(port);
     await inspector.connect();
     const action = await findByObjectName(inspector, "logosQuitAction");
     if (!action) {
@@ -241,8 +240,8 @@ if (process.platform === "darwin") {
 }
 
 // Since 3a73d33 closing the window never quits on any platform (tray/dock convention).
-results.push(await runTest("Window.close() does not quit; app keeps running (tray/dock convention)", async (child) => {
-  const inspector = new Inspector(currentPort);
+results.push(await runTest("Window.close() does not quit; app keeps running (tray/dock convention)", async (child, port) => {
+  const inspector = new Inspector(port);
   await inspector.connect();
   const win = await findByObjectName(inspector, "logosMainWindow");
   if (!win) {
@@ -262,8 +261,8 @@ results.push(await runTest("Window.close() does not quit; app keeps running (tra
 
 // Tray "Quit" action: must terminate the process. Same wiring as ⌘Q on mac
 // / Ctrl+Q on Linux, but a distinct connection worth guarding.
-results.push(await runTest("Tray Quit QAction is wired and quits", async (child) => {
-  const inspector = new Inspector(currentPort);
+results.push(await runTest("Tray Quit QAction is wired and quits", async (child, port) => {
+  const inspector = new Inspector(port);
   await inspector.connect();
   const action = await findByObjectName(inspector, "logosTrayQuitAction");
   if (!action) {

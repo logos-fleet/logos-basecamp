@@ -3,16 +3,12 @@
 # Launches two app instances at once through the test framework's own launch
 # path and asserts each one owns the inspector its runner then talks to.
 #
-# ── Why this is a check of its own ──────────────────────────────────────────
-#
-# Nothing else can catch this. Every app-driving check here (integration-test,
-# host-services-test, shutdown-test) is a single app in a single derivation, so
-# each one is green on its own; the defect only exists BETWEEN them, and nix
-# realises them in parallel under max-jobs. When the collision happened, the
-# loser did not report a port clash — it attached to the winner's app and then
-# failed every case with "Cannot connect to inspector" once that app exited,
-# which reads as a broken pin in whichever suite drew the short straw. Four
-# checks were reported failing on the workspace pins for exactly this reason.
+# Why this is a check of its own: nothing else can catch the defect. Every
+# app-driving check here (integration-test, host-services-test, shutdown-test)
+# is a single app in a single derivation, so each is green on its own — the
+# defect only exists BETWEEN them, and nix realises them in parallel under
+# max-jobs. Four checks were reported failing on the workspace pins for exactly
+# this reason. See tests/inspector-isolation-tests.mjs for the full story.
 #
 # Cheap: no compile, no fixtures, two boots and a getTree each.
 { pkgs, src, appPkg, logosQtMcp, appBin ? "${appPkg}/bin/LogosBasecamp", timeoutSec ? 180 }:

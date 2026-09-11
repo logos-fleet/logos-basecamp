@@ -2,21 +2,18 @@
 // ---------------------------------------------------------------------------
 // logos-basecamp inspector isolation guard
 //
-// Two app-driving suites must be able to run at the same time. They do, all
-// the time: `nix build` realises integration-test, host-services-test,
-// shutdown-test and smoke-test in parallel under max-jobs, and one machine
-// hosts several agents doing the same thing.
-//
-// Until this guard existed they could not. Every app served its inspector on
-// the same fixed port (3768), and the collision was SILENT in the worst way:
-// the second app's listen() failed with EADDRINUSE and its runner then
-// connected to -- and drove -- the FIRST app. The failure surfaced later and
-// somewhere else, as "Cannot connect to inspector" on every remaining case of
-// a suite whose own app was healthy, which reads as a broken app or a bad pin
-// rather than as a port clash.
-//
-// So this asserts the property the suites actually depend on: an app launched
+// Asserts the property every app-driving suite depends on: an app launched
 // through the framework owns the inspector the framework then talks to.
+//
+// Two such suites must be able to run at the same time, and they do all the
+// time -- `nix build` realises integration-test, host-services-test,
+// shutdown-test and smoke-test in parallel under max-jobs, and one machine
+// hosts several agents doing the same thing. Until this guard existed they
+// could not: every app served its inspector on the same fixed port (3768), and
+// the collision was silent in the worst way. The second app's listen() failed
+// with EADDRINUSE and its runner then connected to -- and drove -- the FIRST
+// app, so the failure surfaced later and elsewhere, as "Cannot connect to
+// inspector" on every remaining case of a suite whose own app was healthy.
 //
 // Usage:
 //   node tests/inspector-isolation-tests.mjs <app-binary>
@@ -99,13 +96,13 @@ try {
   // Each port must answer independently: a shared port answers once and the
   // other runner's queries go to a process it never launched.
   for (const [i, s] of live.entries()) {
+    const name = `app ${i + 1}'s inspector answers on port ${s.port}`;
     const inspector = new Inspector(s.port);
     try {
       const res = await inspector.send("getTree", { maxDepth: 1 });
-      check(`app ${i + 1}'s inspector answers on port ${s.port}`,
-        !res.error, `getTree returned ${JSON.stringify(res.error)}`);
+      check(name, !res.error, `getTree returned ${JSON.stringify(res.error)}`);
     } catch (err) {
-      check(`app ${i + 1}'s inspector answers on port ${s.port}`, false, err.message);
+      check(name, false, err.message);
     } finally {
       inspector.disconnect();
     }
