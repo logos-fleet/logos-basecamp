@@ -59,6 +59,8 @@ let
   bundledModules = bundledSet.modules;
   bundleDirs = map (m: "${bundledSet}/${m.bundle}") bundledModules;
   bundleImages = map (m: "${bundledSet}/${m.image}") bundledModules;
+  # What each of those is called once embedded: <stem>.framework.
+  bundleNames = map baseNameOf bundleDirs;
   viewModules = lib.filter (m: m.type == "ui_qml") bundledModules;
   # <stem>.framework -> <stem>. The runner dlopens by stem.
   stemOf = m: lib.removeSuffix ".framework" (baseNameOf m.bundle);
@@ -189,31 +191,31 @@ let
     exportedSymbolFiles = [ exportedSymbols ];
   };
 
-  # One app: the Xcode half, and the two runners over it. Everything that
-  # differs between LiblogosSmoke and BasecampShell is an argument here, and
-  # everything that does not -- the embed list, the exported symbols, the
-  # /nix/store scan, the Frameworks-versus-manifest diff -- is in
-  # nix/ios-runner.nix and is therefore the same check on both.
+  # Everything the two apps do NOT differ in -- the embed list, the exported
+  # symbols, the /nix/store scan, the Frameworks-versus-manifest diff -- lives
+  # in nix/ios-runner.nix, and is therefore the same check on both.
   #
-  # That file takes plain strings rather than these derivations, which is what
-  # lets nix/ios-runner-lint.nix render the same runners over fixtures and
-  # shellcheck them for every Bundled-set size -- including the one-module set
-  # that `--bundle <one app>` asks for.
-  #
-  # The build dir is keyed on the stage's store path, so a rebuilt stage never
-  # reuses an Xcode cache from the previous one.
+  # That file takes plain strings rather than the derivations they came from,
+  # which is what lets nix/ios-runner-lint.nix render the same runners over
+  # fixtures and shellcheck them for every Bundled-set size -- including the
+  # one-module set that `--bundle <one app>` asks for.
   mkRunners = import ./ios-runner.nix {
     inherit lib;
     inherit (buildPkgs) writeShellApplication;
   };
 
+  # One app: the Xcode half, and the two runners over it. Everything that
+  # differs between LiblogosSmoke and BasecampShell is an argument here.
+  #
+  # The build dir is keyed on the stage's store path, so a rebuilt stage never
+  # reuses an Xcode cache from the previous one.
   mkApp = { pname, appName, project, bundleId, appSrcDir, stage, prefixes ? [ ],
             configureFlags ? [ ] }:
     mkRunners {
       inherit pname appName project bundleId appleSdk configureFlags;
       appSrc = "${src}/${appSrcDir}";
       stagePath = "${stage}";
-      frameworks = map baseNameOf bundleDirs;
+      frameworks = bundleNames;
       frameworkSrcs = bundleDirs;
       toolchainFile = "${pkgs.logosQtCrossToolchainFile}";
       crossCmakeFlags = pkgs.logosQtCrossCmakeFlags;

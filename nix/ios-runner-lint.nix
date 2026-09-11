@@ -53,16 +53,19 @@ let
     three = [ "a_bare.framework" "b_view.framework" "c_bare.framework" ];
   };
 
-  cases = lib.concatMap
-    (name:
-      let runners = fixture name sizes.${name}; in
+  cases = lib.concatLists (lib.mapAttrsToList
+    (name: frameworks:
+      let runners = fixture name frameworks; in
       [
-        { inherit name; kind = "sim"; drv = runners.runSim; frameworks = sizes.${name}; }
-        { inherit name; kind = "device"; drv = runners.runDevice; frameworks = sizes.${name}; }
+        { inherit frameworks; drv = runners.runSim; }
+        { inherit frameworks; drv = runners.runDevice; }
       ])
-    (lib.attrNames sizes);
+    sizes);
 
-  scriptOf = c: "${c.drv}/bin/run-lint-${c.name}-ios-${c.kind}";
+  # Via mainProgram rather than by spelling `run-lint-<name>-ios-<kind>` out
+  # again here: ios-runner.nix names its own runners, and one copy of that
+  # convention is enough.
+  scriptOf = c: lib.getExe c.drv;
 in
 pkgs.runCommand "ios-runner-lint"
   {
@@ -116,8 +119,8 @@ pkgs.runCommand "ios-runner-lint"
     fi
   done < "$expectedPath"
 
-  echo "ios-runner-lint: ${toString (builtins.length cases)} runner(s) lint clean, sizes ${
-    lib.concatStringsSep ", " (map (n: toString (builtins.length sizes.${n})) (lib.attrNames sizes))
+  echo "ios-runner-lint: ${toString (lib.length cases)} runner(s) lint clean, sizes ${
+    lib.concatStringsSep ", " (lib.mapAttrsToList (_: fws: toString (lib.length fws)) sizes)
   }"
   touch $out
 ''

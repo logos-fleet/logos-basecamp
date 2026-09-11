@@ -26,7 +26,7 @@
 , configureFlags ? [ ] # per-app extras
 , prefixPath           # CMAKE_PREFIX_PATH, already ;-joined
 , findRootPath         # CMAKE_FIND_ROOT_PATH, already ;-joined
-, versionGate          # pkgs.xcodeWrapper.versionGate
+, versionGate          # shell snippet that refuses too old a host Xcode
 , runtimeInputs ? [ ]
 }:
 
