@@ -9,7 +9,9 @@ QML renders in this process's own engine, bound to a backend that also lives in
 this process.
 
 This is a bring-up probe, not a product: nothing is *installed* at runtime and
-no capability_module is loaded. What it proves is that the core and the eight
+no capability_module is loaded. Basecamp's real UI shell runs on the same host,
+over the same set — see [`../basecamp-shell`](../basecamp-shell/README.md), and
+`--app shell`. What it proves is that the core and the eight
 repos it links run on iOS and Android, that a protocol-free module image loads
 in the Native container there, and that the whole path from a signed catalog
 package to a loadable image inside an app bundle works.
