@@ -118,6 +118,33 @@
     # implementations agreeing by luck.
     nix-bundle-lgx.inputs.logos-package.follows = "logos-package";
     nix-bundle-lgx.inputs.nix-bundle-dir.follows = "nix-bundle-dir";
+    # ── the networking modules the mobile catalog publishes ────────────────
+    # libp2p_module, delivery_module and chat_module, as Bare images for the
+    # three mobile targets. They are here for the same reason bare-counter is
+    # built here: the app's Bundled set is resolved out of a CATALOG, and the
+    # dev catalog has to be built from something.
+    #
+    # EVERY shared input follows this flake's copy, and logos-module-builder
+    # above all: a Bare module is compiled against logos-protocol's headers and
+    # stamped with the protocol version it saw, and the host gates that stamp
+    # at load (bareModuleProtocolCompatible). Each of the three pins its own
+    # builder rev upstream, and three builders in one closure means three
+    # protocols -- the app would refuse its own bundled modules, or worse, load
+    # them and disagree about the wire.
+    #
+    # LOCKED TO THE logos-fleet FORKS, like the rest of the mobile chain: the
+    # `bare` outputs for the mobile pseudo-systems do not exist upstream.
+    logos-libp2p-module.url = "github:logos-co/logos-libp2p-module";
+    logos-libp2p-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-delivery-module.url = "github:logos-co/logos-delivery-module";
+    logos-delivery-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-delivery-module.inputs.nix-bundle-lgx.follows = "nix-bundle-lgx";
+    logos-chat-module.url = "github:logos-co/logos-chat-module";
+    logos-chat-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    # chat_module DEPENDS on delivery_module (metadata.json), and the .lidl
+    # contract it generates against has to be the one the delivery image in the
+    # same Bundled set actually implements.
+    logos-chat-module.inputs.logos-delivery-module.follows = "logos-delivery-module";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
     logos-qt-mcp.url = "github:logos-co/logos-qt-mcp";
     nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
@@ -133,7 +160,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -357,6 +384,18 @@
             inherit target;
           };
 
+          # ── the networking set (slice 21) ─────────────────────────────
+          # libp2p_module, delivery_module and chat_module, each as the Bare
+          # image its own flake cross-builds for this target. Same shape as the
+          # counter above and the same `mobile.<target>.bare` key: nothing here
+          # knows that one of them carries a nim libp2p, another a nim delivery
+          # core plus zerokit's rln, and the third a Rust chat core.
+          barePayloadFor = { module, name }: catalogLib.mkVariantPayload {
+            drv = module.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
+            stem = "${name}_bare";
+            inherit target;
+          };
+
           viewPayload = catalogLib.mkVariantPayload {
             drv = viewCounter.packages.${system}.view;
             stem = "view_counter_view";
@@ -377,6 +416,47 @@
               description = "The counter, as a Bundled Bare module for the mobile host";
               dependencies = [ ];
               variants.${target} = barePayload;
+              inherit signingKey;
+            };
+
+            # The three networking modules. `dependencies` is the module's own
+            # metadata.json answer, not a convenience: the Bundled set resolves
+            # a CLOSURE out of it, so `--bundle chat_module` has to bring
+            # delivery_module along without naming it.
+            libp2p_module = {
+              name = "libp2p_module";
+              version = "1.0.0";
+              type = "core";
+              category = "protocol";
+              description = "nim-libp2p's C bindings as a Bundled Bare module";
+              dependencies = [ ];
+              variants.${target} = barePayloadFor {
+                module = logos-libp2p-module; name = "libp2p_module";
+              };
+              inherit signingKey;
+            };
+            delivery_module = {
+              name = "delivery_module";
+              version = "0.2.1";
+              type = "core";
+              category = "protocol";
+              description = "logosdelivery + rln as a Bundled Bare module";
+              dependencies = [ ];
+              variants.${target} = barePayloadFor {
+                module = logos-delivery-module; name = "delivery_module";
+              };
+              inherit signingKey;
+            };
+            chat_module = {
+              name = "chat_module";
+              version = "0.2.2";
+              type = "core";
+              category = "messaging";
+              description = "The Rust chat core as a Bundled Bare module";
+              dependencies = [ "delivery_module" ];
+              variants.${target} = barePayloadFor {
+                module = logos-chat-module; name = "chat_module";
+              };
               inherit signingKey;
             };
           } // nixpkgs.lib.optionalAttrs (!isAndroid) {

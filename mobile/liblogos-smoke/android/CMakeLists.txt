@@ -22,6 +22,7 @@ qt_add_executable(LiblogosSmoke
     ${SRC}/main.cpp
     ${SRC}/SmokeRunner.cpp ${SRC}/SmokeRunner.h
     ${SRC}/BundledSetRunner.cpp ${SRC}/BundledSetRunner.h
+    ${SRC}/NetworkSmokeRunner.cpp ${SRC}/NetworkSmokeRunner.h
     ${SRC}/BundledSetCoreRuntime.cpp ${SRC}/BundledSetCoreRuntime.h)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
