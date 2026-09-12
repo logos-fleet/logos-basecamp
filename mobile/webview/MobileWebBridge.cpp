@@ -169,6 +169,20 @@ BridgeReply refusal(int status, const char* why)
     return reply;
 }
 
+BridgeReply jsonReply(const QByteArray& body)
+{
+    BridgeReply reply;
+    reply.mimeType = QByteArrayLiteral("application/json");
+    reply.body = body;
+    return reply;
+}
+
+// What every control path that has nothing to report answers with.
+BridgeReply ackReply()
+{
+    return jsonReply(QByteArrayLiteral("{\"ok\":true}"));
+}
+
 } // namespace
 
 MobileWebBridge::MobileWebBridge(QString moduleDir, QString runtimeDir, QString entryFile,
@@ -207,10 +221,7 @@ QString MobileWebBridge::channelShim() const
 
 BridgeReply MobileWebBridge::closedReply()
 {
-    BridgeReply reply;
-    reply.mimeType = QByteArrayLiteral("application/json");
-    reply.body = QByteArrayLiteral("{\"frames\":[],\"closed\":true}");
-    return reply;
+    return jsonReply(QByteArrayLiteral("{\"frames\":[],\"closed\":true}"));
 }
 
 BridgeReply MobileWebBridge::framesReply(const std::vector<std::string>& frames)
@@ -219,11 +230,7 @@ BridgeReply MobileWebBridge::framesReply(const std::vector<std::string>& frames)
     for (const std::string& frame : frames) array.append(QString::fromStdString(frame));
     QJsonObject object;
     object.insert(QStringLiteral("frames"), array);
-
-    BridgeReply reply;
-    reply.mimeType = QByteArrayLiteral("application/json");
-    reply.body = QJsonDocument(object).toJson(QJsonDocument::Compact);
-    return reply;
+    return jsonReply(QJsonDocument(object).toJson(QJsonDocument::Compact));
 }
 
 BridgeReply MobileWebBridge::drainLocked()
@@ -250,28 +257,8 @@ void MobileWebBridge::handleRequest(const QByteArray& method, const QUrl& url,
 
     const QString path = url.path();
     const QLatin1String controlPrefix(kControlPathPrefix);
-
     if (!path.startsWith(controlPrefix)) {
-        // A DOCUMENT. The rules are LogosWebPaths', shared with the desktop
-        // container, so a package that loads in one loads in all three.
-        const QString resolved = resolveDocument(m_moduleDir, m_runtimeDir, path);
-        if (resolved.isEmpty()) {
-            respond(refusal(404, "no such file in this package"));
-            return;
-        }
-        BridgeReply reply;
-        reply.mimeType = mimeTypeFor(resolved);
-        if (m_injectShim && reply.mimeType == QByteArrayLiteral("text/html")) {
-            QFile file(resolved);
-            if (!file.open(QIODevice::ReadOnly)) {
-                respond(refusal(500, "the entry document could not be read"));
-                return;
-            }
-            reply.body = withShim(file.readAll());
-        } else {
-            reply.filePath = resolved;
-        }
-        respond(reply);
+        serveDocument(path, respond);
         return;
     }
 
@@ -291,124 +278,150 @@ void MobileWebBridge::handleRequest(const QByteArray& method, const QUrl& url,
     }
 
     if (leaf == QLatin1String("send")) {
-        {
-            std::lock_guard<std::mutex> guard(m_mutex);
-            if (!m_open) {
-                respond(refusal(410, "this channel is closed"));
-                return;
-            }
-        }
+        handleSend(url, body, respond);
+    } else if (leaf == QLatin1String("poll")) {
+        handlePoll(std::move(respond));
+    } else if (leaf == QLatin1String("log")) {
+        handleLog(url, respond);
+    } else if (leaf == QLatin1String("close")) {
+        handleClose(respond);
+    } else {
+        respond(refusal(404, "no such control path"));
+    }
+}
 
-        // Either spelling: a body when the platform hands us one, or the
-        // chunked query when it does not (see the header -- neither phone
-        // does).
-        QString frame;
-        bool complete = false;
-        if (!body.isEmpty()) {
-            frame = QString::fromUtf8(body);
-            complete = true;
-        } else {
-            const QUrlQuery query(url);
-            const QString seq = query.queryItemValue(QStringLiteral("s"));
-            bool okIndex = false, okCount = false;
-            const int index = query.queryItemValue(QStringLiteral("i")).toInt(&okIndex);
-            const int count = query.queryItemValue(QStringLiteral("n")).toInt(&okCount);
-            const QString chunk = query.queryItemValue(QStringLiteral("d"), QUrl::FullyDecoded);
-            if (seq.isEmpty() || !okIndex || !okCount || count <= 0
-                || index < 0 || index >= count) {
-                respond(refusal(400, "send needs s, i, n and d"));
-                return;
-            }
-
-            std::lock_guard<std::mutex> guard(m_mutex);
-            Partial& partial = m_partial[seq];
-            if (partial.count != count) {
-                partial.count = count;
-                partial.chunks.assign(size_t(count), QString());
-                partial.have = 0;
-            }
-            // A REPEATED CHUNK IS NOT A SECOND ONE. A webview that retried a
-            // request would otherwise complete the frame early and deliver it
-            // with a hole in it.
-            if (partial.chunks[size_t(index)].isNull()) ++partial.have;
-            partial.chunks[size_t(index)] = chunk;
-            if (partial.have == count) {
-                for (const QString& piece : partial.chunks) frame += piece;
-                m_partial.erase(seq);
-                complete = true;
-            }
-        }
-
-        if (complete) {
-            // Delivered OUTSIDE m_mutex: a receiver reaching back into send()
-            // under it would deadlock, and the peer above does exactly that
-            // when it answers a Call inline.
-            Receiver receiver;
-            {
-                std::lock_guard<std::recursive_mutex> guard(m_receiverMutex);
-                receiver = m_receiver;
-            }
-            if (receiver) receiver(frame.toStdString());
-        }
-
-        BridgeReply reply;
-        reply.mimeType = QByteArrayLiteral("application/json");
-        reply.body = complete ? QByteArrayLiteral("{\"ok\":true}")
-                              : QByteArrayLiteral("{\"ok\":true,\"partial\":true}");
-        respond(reply);
+// A DOCUMENT. The rules are LogosWebPaths', shared with the desktop container,
+// so a package that loads in one loads in all three.
+void MobileWebBridge::serveDocument(const QString& path, const Respond& respond)
+{
+    const QString resolved = resolveDocument(m_moduleDir, m_runtimeDir, path);
+    if (resolved.isEmpty()) {
+        respond(refusal(404, "no such file in this package"));
         return;
     }
 
-    if (leaf == QLatin1String("poll")) {
+    BridgeReply reply;
+    reply.mimeType = mimeTypeFor(resolved);
+    if (m_injectShim && reply.mimeType == QByteArrayLiteral("text/html")) {
+        QFile file(resolved);
+        if (!file.open(QIODevice::ReadOnly)) {
+            respond(refusal(500, "the entry document could not be read"));
+            return;
+        }
+        reply.body = withShim(file.readAll());
+    } else {
+        reply.filePath = resolved;
+    }
+    respond(reply);
+}
+
+void MobileWebBridge::handleSend(const QUrl& url, const QByteArray& body,
+                                 const Respond& respond)
+{
+    {
         std::lock_guard<std::mutex> guard(m_mutex);
         if (!m_open) {
-            respond(closedReply());
+            respond(refusal(410, "this channel is closed"));
             return;
         }
-        if (!m_outbound.empty()) {
-            respond(drainLocked());
-            return;
-        }
-        // PARKED. Answered by the next send(), by expireWaits(), or by close().
-        m_waiting.push_back(std::move(respond));
-        return;
     }
 
-    if (leaf == QLatin1String("log")) {
+    // Either spelling: a body when the platform hands us one, or the chunked
+    // query when it does not (see the header -- neither phone does).
+    QString frame;
+    bool complete = false;
+    if (!body.isEmpty()) {
+        frame = QString::fromUtf8(body);
+        complete = true;
+    } else {
         const QUrlQuery query(url);
-        std::function<void(const QString&, const QString&)> sink;
-        {
-            std::lock_guard<std::mutex> guard(m_mutex);
-            sink = m_onPageLog;
+        const QString seq = query.queryItemValue(QStringLiteral("s"));
+        bool okIndex = false, okCount = false;
+        const int index = query.queryItemValue(QStringLiteral("i")).toInt(&okIndex);
+        const int count = query.queryItemValue(QStringLiteral("n")).toInt(&okCount);
+        const QString chunk = query.queryItemValue(QStringLiteral("d"), QUrl::FullyDecoded);
+        if (seq.isEmpty() || !okIndex || !okCount || count <= 0
+            || index < 0 || index >= count) {
+            respond(refusal(400, "send needs s, i, n and d"));
+            return;
         }
-        if (sink) {
-            sink(query.queryItemValue(QStringLiteral("l")),
-                 query.queryItemValue(QStringLiteral("m"), QUrl::FullyDecoded));
+
+        std::lock_guard<std::mutex> guard(m_mutex);
+        Partial& partial = m_partial[seq];
+        if (partial.count != count) {
+            partial.count = count;
+            partial.chunks.assign(size_t(count), QString());
+            partial.have = 0;
         }
-        BridgeReply reply;
-        reply.mimeType = QByteArrayLiteral("application/json");
-        reply.body = QByteArrayLiteral("{\"ok\":true}");
-        respond(reply);
-        return;
+        // A REPEATED CHUNK IS NOT A SECOND ONE. A webview that retried a
+        // request would otherwise complete the frame early and deliver it with
+        // a hole in it.
+        if (partial.chunks[size_t(index)].isNull()) ++partial.have;
+        partial.chunks[size_t(index)] = chunk;
+        if (partial.have == count) {
+            for (const QString& piece : partial.chunks) frame += piece;
+            m_partial.erase(seq);
+            complete = true;
+        }
     }
 
-    if (leaf == QLatin1String("close")) {
-        BridgeReply reply;
-        reply.mimeType = QByteArrayLiteral("application/json");
-        reply.body = QByteArrayLiteral("{\"ok\":true}");
-        respond(reply);
-
-        std::function<void()> announce;
+    if (complete) {
+        // Delivered OUTSIDE m_mutex: a receiver reaching back into send() under
+        // it would deadlock, and the peer above does exactly that when it
+        // answers a Call inline.
+        Receiver receiver;
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
-            if (m_open) announce = m_onPageClosed;
+            std::lock_guard<std::recursive_mutex> guard(m_receiverMutex);
+            receiver = m_receiver;
         }
-        close();
-        if (announce) announce();
-        return;
+        if (receiver) receiver(frame.toStdString());
     }
 
-    respond(refusal(404, "no such control path"));
+    respond(complete ? ackReply()
+                     : jsonReply(QByteArrayLiteral("{\"ok\":true,\"partial\":true}")));
+}
+
+void MobileWebBridge::handlePoll(Respond respond)
+{
+    std::lock_guard<std::mutex> guard(m_mutex);
+    if (!m_open) {
+        respond(closedReply());
+        return;
+    }
+    if (!m_outbound.empty()) {
+        respond(drainLocked());
+        return;
+    }
+    // PARKED. Answered by the next send(), by expireWaits(), or by close().
+    m_waiting.push_back(std::move(respond));
+}
+
+void MobileWebBridge::handleLog(const QUrl& url, const Respond& respond)
+{
+    std::function<void(const QString&, const QString&)> sink;
+    {
+        std::lock_guard<std::mutex> guard(m_mutex);
+        sink = m_onPageLog;
+    }
+    if (sink) {
+        const QUrlQuery query(url);
+        sink(query.queryItemValue(QStringLiteral("l")),
+             query.queryItemValue(QStringLiteral("m"), QUrl::FullyDecoded));
+    }
+    respond(ackReply());
+}
+
+void MobileWebBridge::handleClose(const Respond& respond)
+{
+    respond(ackReply());
+
+    std::function<void()> announce;
+    {
+        std::lock_guard<std::mutex> guard(m_mutex);
+        if (m_open) announce = m_onPageClosed;
+    }
+    close();
+    if (announce) announce();
 }
 
 void MobileWebBridge::setInjectsShimIntoHtml(bool injects)
@@ -424,13 +437,13 @@ QByteArray MobileWebBridge::withShim(const QByteArray& html) const
     // everything when there is not -- a shim that landed after the page's own
     // first script would be exactly as late as evaluateJavascript, which is why
     // this exists at all.
-    const int head = html.indexOf("<head>");
-    if (head >= 0) {
-        QByteArray out = html;
-        out.insert(head + int(sizeof("<head>")) - 1, tag);
-        return out;
-    }
-    return tag + html;
+    const QByteArray headOpen = QByteArrayLiteral("<head>");
+    const int head = html.indexOf(headOpen);
+    if (head < 0) return tag + html;
+
+    QByteArray out = html;
+    out.insert(head + headOpen.size(), tag);
+    return out;
 }
 
 void MobileWebBridge::setReceiver(Receiver receiver)

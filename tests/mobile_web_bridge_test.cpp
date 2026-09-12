@@ -64,20 +64,34 @@ private:
         BridgeReply reply;
     };
 
-    // Issue one request and collect whatever the bridge did with it.
-    std::shared_ptr<Call> request(MobileWebBridge& bridge, const char* method,
-                                  const QString& path, const QByteArray& body = {})
+    // A URL under the origin the default bridge serves -- what one of the
+    // shim's fetches looks like by the time it reaches the container.
+    static QUrl pageUrl(const QString& path, const QUrlQuery& query = {})
     {
-        auto call = std::make_shared<Call>();
         QUrl url;
         url.setScheme(QStringLiteral("logos"));
         url.setHost(QStringLiteral("module"));
         url.setPath(path);
+        if (!query.isEmpty()) url.setQuery(query);
+        return url;
+    }
+
+    // Issue one request and collect whatever the bridge did with it.
+    static std::shared_ptr<Call> requestUrl(MobileWebBridge& bridge, const char* method,
+                                            const QUrl& url, const QByteArray& body = {})
+    {
+        auto call = std::make_shared<Call>();
         bridge.handleRequest(method, url, body, [call](const BridgeReply& reply) {
             call->answered = true;
             call->reply = reply;
         });
         return call;
+    }
+
+    static std::shared_ptr<Call> request(MobileWebBridge& bridge, const char* method,
+                                         const QString& path, const QByteArray& body = {})
+    {
+        return requestUrl(bridge, method, pageUrl(path), body);
     }
 
     QString control(const MobileWebBridge& bridge, const char* leaf) const
@@ -96,17 +110,12 @@ private:
         const int size = int(encoded.size());
         const int count = std::max(1, (size + chunkChars - 1) / chunkChars);
         for (int i = 0; i < count; ++i) {
-            QUrl url;
-            url.setScheme(QStringLiteral("logos"));
-            url.setHost(QStringLiteral("module"));
-            url.setPath(control(bridge, "send"));
             QUrlQuery query;
             query.addQueryItem("s", QString::number(seq));
             query.addQueryItem("i", QString::number(i));
             query.addQueryItem("n", QString::number(count));
             query.addQueryItem("d", encoded.mid(i * chunkChars, chunkChars));
-            url.setQuery(query);
-            bridge.handleRequest("GET", url, {}, [](const BridgeReply&) {});
+            requestUrl(bridge, "GET", pageUrl(control(bridge, "send"), query));
         }
     }
 
@@ -281,17 +290,12 @@ private slots:
         bridge->setReceiver([&got](const std::string& text) { got.push_back(text); });
 
         const auto chunk = [&](int index, int count, const char* data) {
-            QUrl url;
-            url.setScheme("logos");
-            url.setHost("module");
-            url.setPath(control(*bridge, "send"));
             QUrlQuery query;
             query.addQueryItem("s", "7");
             query.addQueryItem("i", QString::number(index));
             query.addQueryItem("n", QString::number(count));
             query.addQueryItem("d", QLatin1String(data));
-            url.setQuery(query);
-            bridge->handleRequest("GET", url, {}, [](const BridgeReply&) {});
+            requestUrl(*bridge, "GET", pageUrl(control(*bridge, "send"), query));
         };
 
         chunk(0, 2, "he");
@@ -415,19 +419,10 @@ private slots:
             lines.append(level + ": " + message);
         });
 
-        QUrl url;
-        url.setScheme("logos");
-        url.setHost("module");
-        url.setPath(control(*bridge, "log"));
         QUrlQuery query;
         query.addQueryItem("l", "error");
         query.addQueryItem("m", QUrl::toPercentEncoding("could not load logos-view-loader.js"));
-        url.setQuery(query);
-        auto call = std::make_shared<Call>();
-        bridge->handleRequest("GET", url, {}, [call](const BridgeReply& r) {
-            call->answered = true;
-            call->reply = r;
-        });
+        auto call = requestUrl(*bridge, "GET", pageUrl(control(*bridge, "log"), query));
         QVERIFY(call->answered);
         QCOMPARE(lines, QStringList{"error: could not load logos-view-loader.js"});
     }

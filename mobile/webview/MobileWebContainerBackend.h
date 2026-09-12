@@ -12,6 +12,15 @@ class QTimer;
 
 namespace basecamp::web {
 
+// WHERE THIS APP'S BUNDLED Qt-wasm QML RUNTIME IS, or an empty string when it
+// ships none — `install()`'s first argument.
+//
+// `platformDir` is where this platform unpacks it (iOS: the main bundle's
+// Resources; Android: the app's files directory), which is the only thing the
+// two halves disagree about. `LOGOS_QML_RUNTIME_DIR` overrides it, and a
+// directory with no `logos_qml_runtime.js` in it is not one whatever named it.
+QString bundledQmlRuntimeDir(const QString& platformDir);
+
 // THE PHONE'S WEB CONTAINER BACKEND — the one place that says "a Downloaded
 // module's page runs here", and the one place that says how many may.
 //
@@ -120,14 +129,14 @@ private:
     // Called by the factory, always on the Qt main thread.
     MobileWebModuleView* createView(const LogosCore::WebModuleViewRequest& request,
                                     const QString& runtimeDir);
-    bool m_shimInDocument = false;
-    WebOrigin m_origin;
     void forget(const QString& moduleName);
     void armPollTimer();
 
     QHash<QString, MobileWebModuleView*> m_views;
     LiveRuntimeBudget m_budget;
     PlatformPageFactory m_platform;
+    bool m_shimInDocument = false;
+    WebOrigin m_origin;
     QTimer* m_pollTimer = nullptr;
 };
 

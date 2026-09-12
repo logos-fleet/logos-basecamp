@@ -1,6 +1,7 @@
 #include "webview/AndroidWebPage.h"
 
 #include "webview/MobileWebBridge.h"
+#include "webview/MobileWebContainerBackend.h"
 
 #include <jni.h>
 
@@ -8,7 +9,6 @@
 #include <QFuture>
 #include <QDebug>
 #include <QDir>
-#include <QFileInfo>
 #include <QJniEnvironment>
 #include <QJniObject>
 #include <QStandardPaths>
@@ -144,23 +144,11 @@ jlong nextHandle()
 
 QString androidQmlRuntimeDir()
 {
-    const auto usable = [](const QString& dir) {
-        return !dir.isEmpty()
-               && QFileInfo(dir).isDir()
-               && QFileInfo(QDir(dir).filePath(QStringLiteral("logos_qml_runtime.js"))).isFile();
-    };
-
-    const QString fromEnv = qEnvironmentVariable("LOGOS_QML_RUNTIME_DIR");
-    if (!fromEnv.isEmpty()) {
-        if (usable(fromEnv)) return QDir(fromEnv).absolutePath();
-        qWarning() << "LOGOS_QML_RUNTIME_DIR points at" << fromEnv
-                   << "which holds no logos_qml_runtime.js; ignoring it";
-    }
-
+    // Where the app unpacks it from its assets. The rest of the question --
+    // the override, what counts as a runtime -- is the same on both phones.
     const QString appData =
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    const QString candidate = QDir(appData).filePath(QStringLiteral("logos-runtime"));
-    return usable(candidate) ? QDir(candidate).absolutePath() : QString();
+    return bundledQmlRuntimeDir(QDir(appData).filePath(QStringLiteral("logos-runtime")));
 }
 
 PlatformPageFactory androidPlatformPageFactory()

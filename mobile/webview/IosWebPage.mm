@@ -1,6 +1,7 @@
 #include "webview/IosWebPage.h"
 
 #include "webview/MobileWebBridge.h"
+#include "webview/MobileWebContainerBackend.h"
 #include "web/LogosWebPaths.h"
 
 #import <Foundation/Foundation.h>
@@ -11,7 +12,6 @@
 #include <QGuiApplication>
 #include <QWindow>
 #include <QDir>
-#include <QFileInfo>
 
 #include <memory>
 
@@ -31,6 +31,44 @@ NSString* toNs(const QString& s)
 QString fromNs(NSString* s)
 {
     return s ? QString::fromUtf8([s UTF8String]) : QString();
+}
+
+// THE WINDOW A MODULE'S PAGE LIVES IN, or nil when this app has none yet.
+//
+// QT'S OWN WINDOW FIRST, and that is what works. A Qt for iOS app has no scene
+// manifest in its Info.plist, so `connectedScenes` is empty; and it does not put
+// its UIWindow in `UIApplication.windows` early enough for a page opened before
+// the event loop runs. Both spellings found nothing on the simulator and every
+// page reported "no window to live in" -- which would have thrown it out of the
+// hierarchy and throttled its requestAnimationFrame, so a QML runtime in it
+// would have frozen.
+//
+// QWindow::winId() IS the QUIView, which knows its window whatever UIKit is
+// willing to enumerate. The two scans after it stay as fallbacks for a host
+// whose surface is not a QWindow at all.
+UIWindow* hostWindow()
+{
+    for (QWindow* qtWindow : QGuiApplication::topLevelWindows()) {
+        // winId() rather than handle(): it CREATES the platform window if there
+        // is not one yet, which for a page opened before the event loop has
+        // turned is the difference between finding Qt's UIWindow and not.
+        UIView* qtView = (__bridge UIView*)reinterpret_cast<void*>(qtWindow->winId());
+        if (qtView && qtView.window) return qtView.window;
+    }
+
+    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        NSArray<UIWindow*>* windows = ((UIWindowScene*)scene).windows;
+        for (UIWindow* candidate in windows) {
+            if (candidate.isKeyWindow) return candidate;
+        }
+        if (windows.firstObject) return windows.firstObject;
+    }
+
+    for (UIWindow* candidate in UIApplication.sharedApplication.windows) {
+        if (candidate.isKeyWindow) return candidate;
+    }
+    return UIApplication.sharedApplication.windows.firstObject;
 }
 
 } // namespace
@@ -195,22 +233,11 @@ namespace basecamp::web {
 
 QString iosQmlRuntimeDir()
 {
-    const auto usable = [](const QString& dir) {
-        return !dir.isEmpty()
-               && QFileInfo(dir).isDir()
-               && QFileInfo(QDir(dir).filePath(QStringLiteral("logos_qml_runtime.js"))).isFile();
-    };
-
-    const QString fromEnv = qEnvironmentVariable("LOGOS_QML_RUNTIME_DIR");
-    if (!fromEnv.isEmpty()) {
-        if (usable(fromEnv)) return QDir(fromEnv).absolutePath();
-        qWarning() << "LOGOS_QML_RUNTIME_DIR points at" << fromEnv
-                   << "which holds no logos_qml_runtime.js; ignoring it";
-    }
-
+    // Where the app bundle carries it. The rest of the question -- the
+    // override, what counts as a runtime -- is the same on both phones.
     NSString* resources = [[NSBundle mainBundle] resourcePath];
-    const QString candidate = QDir(fromNs(resources)).filePath(QStringLiteral("logos-runtime"));
-    return usable(candidate) ? QDir(candidate).absolutePath() : QString();
+    return bundledQmlRuntimeDir(
+        QDir(fromNs(resources)).filePath(QStringLiteral("logos-runtime")));
 }
 
 PlatformPageFactory iosPlatformPageFactory()
@@ -251,40 +278,7 @@ PlatformPageFactory iosPlatformPageFactory()
         // then freeze. It goes behind Qt's own view at the window's size; the
         // shell brings it forward through the handle below when the user is
         // looking at this module.
-        // QT'S OWN WINDOW FIRST, and that is what works. A Qt for iOS app has no
-        // scene manifest in its Info.plist, so `connectedScenes` is empty; and
-        // it does not put its UIWindow in `UIApplication.windows` early enough
-        // for a page opened before the event loop runs. Both spellings found
-        // nothing on the simulator and every page reported "no window to live
-        // in" -- which would have thrown it out of the hierarchy and throttled
-        // its requestAnimationFrame, so a QML runtime in it would have frozen.
-        //
-        // QWindow::winId() IS the QUIView, which knows its window whatever UIKit
-        // is willing to enumerate. The two scans below stay as fallbacks for a
-        // host whose surface is not a QWindow at all.
-        UIWindow* window = nil;
-        for (QWindow* qtWindow : QGuiApplication::topLevelWindows()) {
-            // winId() rather than handle(): it CREATES the platform window if
-            // there is not one yet, which for a page opened before the event
-            // loop has turned is the difference between finding Qt's UIWindow
-            // and not.
-            UIView* qtView = (__bridge UIView*)reinterpret_cast<void*>(qtWindow->winId());
-            if (qtView && qtView.window) { window = qtView.window; break; }
-        }
-        for (UIScene* scene in (window ? @[] : UIApplication.sharedApplication.connectedScenes)) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow* candidate in ((UIWindowScene*)scene).windows) {
-                if (candidate.isKeyWindow) { window = candidate; break; }
-            }
-            if (!window) window = ((UIWindowScene*)scene).windows.firstObject;
-            if (window) break;
-        }
-        if (!window) {
-            for (UIWindow* candidate in UIApplication.sharedApplication.windows) {
-                if (candidate.isKeyWindow) { window = candidate; break; }
-            }
-            if (!window) window = UIApplication.sharedApplication.windows.firstObject;
-        }
+        UIWindow* window = hostWindow();
         if (window) {
             webView.frame = window.bounds;
             webView.autoresizingMask =
@@ -294,7 +288,7 @@ PlatformPageFactory iosPlatformPageFactory()
         } else {
             // MEASURED, and it is a TIMING fact rather than a failure: a page
             // opened before the event loop has turned (the bring-up probe does
-            // exactly that) finds no UIWindow by any of the three routes above.
+            // exactly that) finds no UIWindow by any of hostWindow()'s routes.
             // The channel works regardless -- WKWebView runs its JavaScript
             // detached -- but requestAnimationFrame is throttled, so a QML
             // runtime in such a page would freeze. Modules are loaded from the

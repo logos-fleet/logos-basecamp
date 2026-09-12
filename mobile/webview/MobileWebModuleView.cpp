@@ -3,7 +3,6 @@
 #include <QDebug>
 #include <QDir>
 
-#include <mutex>
 #include <utility>
 
 namespace basecamp::web {

@@ -1,6 +1,8 @@
 #include "webview/MobileWebContainerBackend.h"
 
 #include <QDebug>
+#include <QDir>
+#include <QFileInfo>
 #include <QMetaObject>
 #include <QThread>
 #include <QTimer>
@@ -16,7 +18,28 @@ QString megabytes(qint64 bytes)
     return QStringLiteral("%1 MB").arg(double(bytes) / (1024.0 * 1024.0), 0, 'f', 0);
 }
 
+// A directory holding the runtime's glue script IS the runtime; anything else
+// named as one is a misconfiguration, and saying so beats a page that comes up
+// and then cannot find what it was promised.
+bool holdsQmlRuntime(const QString& dir)
+{
+    return !dir.isEmpty()
+           && QFileInfo(dir).isDir()
+           && QFileInfo(QDir(dir).filePath(QStringLiteral("logos_qml_runtime.js"))).isFile();
+}
+
 } // namespace
+
+QString bundledQmlRuntimeDir(const QString& platformDir)
+{
+    const QString fromEnv = qEnvironmentVariable("LOGOS_QML_RUNTIME_DIR");
+    if (!fromEnv.isEmpty()) {
+        if (holdsQmlRuntime(fromEnv)) return QDir(fromEnv).absolutePath();
+        qWarning() << "LOGOS_QML_RUNTIME_DIR points at" << fromEnv
+                   << "which holds no logos_qml_runtime.js; ignoring it";
+    }
+    return holdsQmlRuntime(platformDir) ? QDir(platformDir).absolutePath() : QString();
+}
 
 MobileWebContainerBackend* MobileWebContainerBackend::instance()
 {

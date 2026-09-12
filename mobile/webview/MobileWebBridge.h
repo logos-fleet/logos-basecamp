@@ -182,6 +182,15 @@ private:
     // `html` with the shim inserted as early as the document allows.
     QByteArray withShim(const QByteArray& html) const;
 
+    // One request each, once handleRequest() has decided which it is. Every one
+    // of them calls `respond` exactly once, except handlePoll(), which may park
+    // it instead — see m_waiting.
+    void serveDocument(const QString& path, const Respond& respond);
+    void handleSend(const QUrl& url, const QByteArray& body, const Respond& respond);
+    void handlePoll(Respond respond);
+    void handleLog(const QUrl& url, const Respond& respond);
+    void handleClose(const Respond& respond);
+
     // The reply to a poll, built from `m_outbound` with the lock held.
     BridgeReply drainLocked();
     static BridgeReply closedReply();

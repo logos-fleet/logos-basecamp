@@ -175,12 +175,12 @@ int main(int argc, char* argv[])
         web->install(basecamp::web::iosQmlRuntimeDir(),
                      basecamp::web::iosPlatformPageFactory());
 #elif defined(Q_OS_ANDROID)
-        // ...and on Android the shim travels INSIDE the entry document: there
-        // is no user-script API, and evaluateJavascript runs after the page's
-        // own first script.
-        // ...and on https, because Chromium's Fetch there refuses a
-        // non-standard scheme even when the embedder registered one -- measured
-        // on a Samsung, see LogosWebPaths.h.
+        // ANDROID DIFFERS TWICE. The shim travels INSIDE the entry document,
+        // because there is no user-script API and evaluateJavascript runs after
+        // the page's own first script; and the page is served over https,
+        // because Chromium's Fetch there refuses a non-standard scheme even
+        // when the embedder registered one -- measured on a Samsung, see
+        // LogosWebPaths.h.
         web->install(basecamp::web::androidQmlRuntimeDir(),
                      basecamp::web::androidPlatformPageFactory(),
                      basecamp::web::LiveRuntimeBudget(), /*shimInDocument=*/true,
@@ -202,14 +202,14 @@ int main(int argc, char* argv[])
     // URL scheme at all. A fixture page, a frame each way, on the console --
     // before any module is loaded, so a failure here is not mistaken for one.
     {
-        basecamp::web::WebPageProbe probe(
 #if defined(Q_OS_IOS)
-            basecamp::web::iosPlatformPageFactory(), /*shimInDocument=*/false
+        basecamp::web::WebPageProbe probe(basecamp::web::iosPlatformPageFactory(),
+                                          /*shimInDocument=*/false);
 #else
-            basecamp::web::androidPlatformPageFactory(), /*shimInDocument=*/true,
-            basecamp::web::WebOrigin::android()
+        basecamp::web::WebPageProbe probe(basecamp::web::androidPlatformPageFactory(),
+                                          /*shimInDocument=*/true,
+                                          basecamp::web::WebOrigin::android());
 #endif
-        );
         QObject::connect(&probe, &basecamp::web::WebPageProbe::log, &say);
         say(probe.run() ? QStringLiteral("web container: PASS")
                         : QStringLiteral("web container: FAIL"));
