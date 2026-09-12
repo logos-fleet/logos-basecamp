@@ -23,6 +23,7 @@
 #include "ModuleInstanceModel.h"
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -42,12 +43,18 @@ class ShellModulesBackend : public QObject
     Q_PROPERTY(int currentActiveSectionIndex READ currentActiveSectionIndex
                    WRITE setCurrentActiveSectionIndex NOTIFY currentActiveSectionIndexChanged)
 
+    // ── live: the apps in the Bundled set ──
+    // The sidebar's tiles. A Store shell's apps are the `ui_qml` members of
+    // the set the build embedded -- there is no UI-plugin directory to scan
+    // (ADR 0003) -- so the same QML that lists what UIPluginManager found on
+    // disk lists what the manifest says the app carries.
+    Q_PROPERTY(QVariantList launcherApps READ launcherApps NOTIFY launcherAppsChanged)
+    Q_PROPERTY(QString currentVisibleApp READ currentVisibleApp NOTIFY currentVisibleAppChanged)
+
     // ── inert: nothing on a phone answers these yet ──
     Q_PROPERTY(QAbstractItemModel* uiModulesModel READ uiModulesModel CONSTANT)
     Q_PROPERTY(QAbstractItemModel* appsModel READ appsModel CONSTANT)
     Q_PROPERTY(QVariantList requiredPackages READ requiredPackages NOTIFY requiredPackagesChanged)
-    Q_PROPERTY(QVariantList launcherApps READ launcherApps NOTIFY launcherAppsChanged)
-    Q_PROPERTY(QString currentVisibleApp READ currentVisibleApp NOTIFY currentVisibleAppChanged)
     Q_PROPERTY(QStringList loadingModules READ loadingModules NOTIFY loadingModulesChanged)
     Q_PROPERTY(QString buildVersion READ buildVersion CONSTANT)
     Q_PROPERTY(bool isPortableBuild READ isPortableBuild CONSTANT)
@@ -76,8 +83,11 @@ public:
     int currentActiveSectionIndex() const { return m_sectionIndex; }
     bool modulesLoading() const { return false; }
     QVariantList requiredPackages() const { return { }; }
-    QVariantList launcherApps() const { return { }; }
-    QString currentVisibleApp() const { return { }; }
+    // One row per `ui_qml` member of the Bundled set, in the row shape
+    // UIPluginManager::buildAppRow uses -- the sidebar's delegates read those
+    // keys by name, so a shorter map would render a tile with no label.
+    QVariantList launcherApps() const;
+    QString currentVisibleApp() const { return m_currentVisibleApp; }
     QStringList loadingModules() const { return { }; }
     QString buildVersion() const;
     bool isPortableBuild() const { return false; }
@@ -93,6 +103,21 @@ public:
     // a rendered row, and no row may exist that the manifest does not account
     // for. ShellModulesDriver checks that against the scene.
     QStringList bundledSetNames() const;
+
+    // The set's `ui_qml` members, in manifest order. The Shell's apps.
+    QStringList viewModuleNames() const;
+    // Whether this member is one -- i.e. the host's to instantiate and render
+    // rather than the core's to load (ADR 0006).
+    bool isViewModule(const QString& name) const;
+    // Called by the host once a view module's framework is up and its QML is
+    // in a widget, or once it has been taken back down. The ONLY thing that
+    // makes an app read as loaded: a `ui_qml` row used to claim it
+    // unconditionally, which made "the Modules tab shows what is running" a
+    // sentence the tab could not get wrong.
+    void setUiModuleMounted(const QString& name, bool mounted);
+    // Route a line through the host's console. The host is not a QObject and
+    // has no log of its own; everything the Shell says comes out of this one.
+    void report(const QString& line) { emit log(line); }
 
     // ── the Modules tab ──
     Q_INVOKABLE void refreshCoreModules();
@@ -140,6 +165,12 @@ public slots:
 signals:
     void log(const QString& line);
 
+    // The sidebar asked for an app. BundledSetShellHost answers -- it owns the
+    // observer the mounted widget has to reach, and the backend owns no
+    // widgets. IShellHost::loadUiModule lands on the same two.
+    void uiModuleLaunchRequested(const QString& name);
+    void uiModuleCloseRequested(const QString& name);
+
     void currentActiveSectionIndexChanged();
     void modulesLoadingChanged();
     void appsLoadingChanged();
@@ -158,13 +189,13 @@ private:
     // every two seconds.
     void rebuildRows();
     QVariantList snapshot() const;
-    // Whether `name` is a view module: in the Bundled set, but not the core's
-    // to load (ADR 0006 -- the host instantiates it and renders its QML).
-    bool isHostLoaded(const QString& name) const;
 
     BundledSetCoreRuntime* m_core;    // not owned
     LogosAPI*              m_api;     // owned
     CoreModuleManager*     m_modules; // owned (parent = this)
     ModuleInstanceModel*   m_coreModulesModel;
     int                    m_sectionIndex = 0;
+    // The view modules whose framework is open and whose QML is on screen.
+    QSet<QString>          m_mounted;
+    QString                m_currentVisibleApp;
 };

@@ -10,7 +10,11 @@
 #include "IShellHost.h"
 #include "ShellModulesBackend.h"
 
+#include <QHash>
+
 class BundledSetCoreRuntime;
+class QQuickWidget;
+class ViewModuleRunner;
 
 class BundledSetShellHost : public IShellHost
 {
@@ -37,7 +41,31 @@ public:
     // needs saying once the observer is attached.
     void replaySection();
 
+    // The widget a mounted app renders into, or nullptr. For a driver that has
+    // to assert the app reached the screen rather than only that the mount
+    // returned true.
+    QQuickWidget* mountedView(const QString& name) const;
+
 private:
-    ShellModulesBackend m_backend;
-    IShellObserver*     m_observer = nullptr;
+    // Bring a `ui_qml` member of the Bundled set up and hand its widget to the
+    // Shell: dlopen the framework, instantiate the backend in THIS process,
+    // acquire the typed replica, load the module's QML out of the image's qrc
+    // (all ViewModuleRunner's, shared with the smoke probe), then hand the
+    // widget over through onPluginWindowRequested -- the same callback the
+    // desktop host uses, so the Shell mounts a phone's app exactly as it
+    // mounts a desktop one.
+    //
+    // A second call for a mounted app presents it rather than mounting a
+    // second copy: a sidebar tile is a toggle.
+    void mountApp(const QString& name);
+    void unmountApp(const QString& name);
+
+    struct Mounted {
+        QQuickWidget*     widget = nullptr;   // owned by the Shell once handed over
+        ViewModuleRunner* runner = nullptr;   // owned by this
+    };
+
+    ShellModulesBackend      m_backend;
+    IShellObserver*          m_observer = nullptr;
+    QHash<QString, Mounted>  m_mounted;
 };

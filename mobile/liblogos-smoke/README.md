@@ -38,7 +38,9 @@ else — which is why adding a module to `--bundle` changes no source file here.
 
 The catalog the smoke host builds against is local (`mobileCatalogFor` in
 `flake.nix`), signed with the test key in `mobile/catalog/keys/`. It carries
-this repo's own two mobile modules plus a real cross build of
+this repo's own two mobile modules, the three networking ones, the real Chat
+app (`chat_ui`, out of logos-chat-ui -- a `ui_qml` repo of its own, not a
+fixture) plus a real cross build of
 `capability_module` out of logos-capability-module — the trust root every
 module-to-module call mints its token through. A Store shell build points the
 same function at a pinned release instead; nothing else changes.

@@ -19,7 +19,9 @@
 #include "IShellHost.h"
 #include "IShellView.h"
 #include "NetworkSmokeRunner.h"
+#include "ShellAppDriver.h"
 #include "ShellModulesDriver.h"
+#include "ShellSections.h"
 #include "SmokeRunner.h"
 
 #include <QApplication>
@@ -145,7 +147,36 @@ int main(int argc, char* argv[])
     auto* driver = new ShellModulesDriver(&host, shellWidget, &app);
     QObject::connect(driver, &ShellModulesDriver::log, &console);
 
-    QTimer::singleShot(0, &app, [network, driver]() {
+    // The app in the Bundled set, opened from the sidebar. BEFORE the Modules
+    // tab, and in that order for two reasons that are both about what the
+    // other driver does: it unloads and reloads a core module, which resets
+    // whatever the chat run left in it, and an app mounted on top of a module
+    // that goes away is not a state worth asserting about. It is also the
+    // order a user meets them in -- open the app, then go look at Settings.
+    auto* apps = new ShellAppDriver(&host, shellWidget, &app);
+    QObject::connect(apps, &ShellAppDriver::log, &console);
+    // NOT a third COLD START marker: this clock starts at the tile press, and
+    // the press happens after the chat bring-up has spent a minute and a half
+    // waiting for the group to commit. Timed from main() it would read as a
+    // four-minute app launch, which is a measurement of the peer's commit
+    // latency wearing the app's name.
+    QObject::connect(apps, &ShellAppDriver::appShown, &app,
+                     [](const QString& name, qint64 elapsedMs) {
+                         console(QStringLiteral("APP SHOWN: %1 on screen %2 ms after the "
+                                                "sidebar tile was pressed")
+                                     .arg(name).arg(elapsedMs));
+                     });
+
+    // Where the run LEAVES the user: on the app, not on the Settings page the
+    // last check happened to end on. It is also what makes a screen recording
+    // of the run worth anything -- the Modules tab's pass is three console
+    // lines, and the app being on screen is the thing you would want to see.
+    auto backToTheApp = [&host, apps]() {
+        if (apps->hasWork())
+            host.setCurrentSectionIndex(ShellSection::Workspace);
+    };
+
+    QTimer::singleShot(0, &app, [network, driver, apps, backToTheApp]() {
         if (network->hasWork()) {
             const bool ok = network->run();
             console(ok ? QStringLiteral("networking modules: PASS")
@@ -153,13 +184,23 @@ int main(int argc, char* argv[])
             // The chat bring-up has just spent seconds turning the event
             // loop, so the scene has had far more than the one frame the
             // driver needs.
+            // The CHAT half is what the app has to show, not the run's overall
+            // verdict: the libp2p leg can fail on its own (an unanswered
+            // local-network prompt on a device) with the group exchange
+            // perfectly fine.
+            apps->run(network->madeConversation());
             driver->run();
+            backToTheApp();
         } else {
             console(QStringLiteral("networking modules: none in this Bundled set"));
             // Nothing ran ahead of it, so the tab needs its own settle: a QML
             // item has no geometry until the scene has painted, and a press
             // at the centre of a zero-sized button lands on nothing.
-            QTimer::singleShot(2500, driver, &ShellModulesDriver::run);
+            QTimer::singleShot(2500, driver, [driver, apps, backToTheApp]() {
+                apps->run();
+                driver->run();
+                backToTheApp();
+            });
         }
     });
 

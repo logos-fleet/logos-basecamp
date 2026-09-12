@@ -5,11 +5,14 @@
 
 #include <LogosViewPlugin.h>
 
+#include <QAbstractItemModel>
+#include <QAbstractItemModelReplica>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QLocalSocket>
+#include <QMetaProperty>
 #include <QMouseEvent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -49,9 +52,8 @@ constexpr unsigned kSupportedViewAbi = 1;
 #  error "LOGOS_VIEW_MODULE_STEM must be defined by the build (see stage/CMakeLists.txt)"
 #endif
 
-QString viewImageSuffix()
+QString viewImageSuffix(const QString& stem)
 {
-    const QString stem = QStringLiteral(LOGOS_VIEW_MODULE_STEM);
     return QStringLiteral("/Frameworks/%1.framework/%1").arg(stem);
 }
 
@@ -78,14 +80,51 @@ QObject* InProcViewBridge::module(const QString& name) const
     return name == m_name ? m_replica : nullptr;
 }
 
-void InProcViewBridge::publish(const QString& name, QObject* replica)
+void InProcViewBridge::publish(const QString& name, QObject* replica,
+                               QRemoteObjectNode* node)
 {
     m_name = name;
     m_replica = replica;
+    m_node = node;
+}
+
+QObject* InProcViewBridge::model(const QString& moduleName, const QString& modelName,
+                                 bool prefetch)
+{
+    // The child source's name, and it is not a convention this file gets to
+    // choose: remoteModelProperties() below registers under exactly this, and
+    // so does ui-host on the desktop.
+    const QString key = moduleName + QLatin1Char('/') + modelName;
+    if (QObject* cached = m_models.value(key, nullptr))
+        return cached;
+    if (!m_node || moduleName != m_name)
+        return nullptr;
+
+    // PrefetchData, or a ListView shows the right number of empty rows: with
+    // FetchRootSize the replica knows the row COUNT before it knows any data,
+    // and a delegate that reads a role in the meantime gets an invalid
+    // QVariant with no second chance to bind.
+    QAbstractItemModelReplica* replica = m_node->acquireModel(
+        key, prefetch ? QtRemoteObjects::PrefetchData : QtRemoteObjects::FetchRootSize);
+    if (!replica)
+        return nullptr;
+    auto* asObject = static_cast<QObject*>(replica);
+    // The bridge owns it, not the engine: a model handed to a ListView that is
+    // then destroyed would take the replica with it, and the next mount would
+    // acquire a second one on the same node.
+    QQmlEngine::setObjectOwnership(asObject, QQmlEngine::CppOwnership);
+    m_models.insert(key, asObject);
+    return asObject;
 }
 
 ViewModuleRunner::ViewModuleRunner(QObject* parent)
+    : ViewModuleRunner(QStringLiteral(LOGOS_VIEW_MODULE_STEM), parent)
+{
+}
+
+ViewModuleRunner::ViewModuleRunner(QString stem, QObject* parent)
     : QObject(parent)
+    , m_stem(std::move(stem))
 {
 }
 
@@ -100,12 +139,12 @@ ViewModuleRunner::~ViewModuleRunner()
     delete m_api;
 }
 
-QString ViewModuleRunner::viewImagePath()
+QString ViewModuleRunner::viewImagePathFor(const QString& stem)
 {
     const QString dir = logosImageDir();
-    if (dir.isEmpty())
+    if (dir.isEmpty() || stem.isEmpty())
         return {};
-    return dir + viewImageSuffix();
+    return dir + viewImageSuffix(stem);
 }
 
 bool ViewModuleRunner::run(QQuickWidget* surface)
@@ -115,7 +154,7 @@ bool ViewModuleRunner::run(QQuickWidget* surface)
         return false;
     }
 
-    const QString imagePath = viewImagePath();
+    const QString imagePath = viewImagePathFor(m_stem);
     if (imagePath.isEmpty()) {
         emit log(QStringLiteral("view module: could not locate the Logos image directory"));
         return false;
@@ -237,6 +276,11 @@ bool ViewModuleRunner::run(QQuickWidget* surface)
         emit log(QStringLiteral("view module: enableRemoting refused the backend"));
         return false;
     }
+    // The MODELS hang off the view object, not off the plugin -- the plugin is
+    // the Qt plugin interface and the view object is the backend QML talks to.
+    // Same target ui-host scans, and getting it wrong is silent: the scan finds
+    // no model properties and every list in the app renders empty.
+    remoteModelProperties(name, viewPlugin->viewObject());
     m_host->addHostSideConnection(hostSide);
     m_node = new QRemoteObjectNode;
     m_node->addClientSideConnection(clientSide);
@@ -257,8 +301,26 @@ bool ViewModuleRunner::run(QQuickWidget* surface)
     // registered. AC: this number is what the spike measured at 14 ms on
     // device, 8 ms on the simulator.
     m_bridge = new InProcViewBridge(this);
-    m_bridge->publish(name, m_replica);
+    m_bridge->publish(name, m_replica, m_node);
     surface->engine()->rootContext()->setContextProperty(QStringLiteral("logos"), m_bridge);
+
+    // THE MODULE'S OWN QML DIRECTORY, AS AN IMPORT PATH. A view of any size is
+    // a directory, not a file: chat_ui's ChatView.qml is `import ChatUi` over
+    // twenty-odd components with a qmldir beside them, and all of it is in the
+    // framework's qrc under the view document. The engine resolves a module
+    // name against its import paths and nothing else -- "qrc:/" is on that
+    // list, the view's own directory is not -- so without this the QML loads
+    // exactly as far as its first import and says `module "ChatUi" is not
+    // installed`. view_counter never needed it: one file, no local module.
+    //
+    // Added as a resource PATH (":/logos/<name>"), which is the spelling
+    // QQmlImportDatabase matches a qrc URL against.
+    const QUrl viewUrl(qmlUrl);
+    const QString viewDir = viewUrl.path().left(viewUrl.path().lastIndexOf(QLatin1Char('/')));
+    if (viewUrl.scheme() == QLatin1String("qrc") && !viewDir.isEmpty()) {
+        surface->engine()->addImportPath(QLatin1Char(':') + viewDir);
+        emit log(QStringLiteral("view import path: :%1").arg(viewDir));
+    }
 
     QElapsedTimer qmlTimer;
     qmlTimer.start();
@@ -274,6 +336,35 @@ bool ViewModuleRunner::run(QQuickWidget* surface)
     m_surface = surface;
     emit log(QStringLiteral("BUNDLED VIEW MODULE OK"));
     return true;
+}
+
+void ViewModuleRunner::remoteModelProperties(const QString& name, QObject* target)
+{
+    if (!target)
+        return;
+    // enableRemoting() on the .rep source carries the backend's properties,
+    // signals and slots. It does NOT carry a QAbstractItemModel one of those
+    // properties points at -- a model is remoted as its own child source, with
+    // its role names, and acquired on the client with acquireModel(). ui-host
+    // does this scan on the desktop; without it here a view module's lists are
+    // empty and nothing says why.
+    const QMetaObject* mo = target->metaObject();
+    for (int i = 0; i < mo->propertyCount(); ++i) {
+        const QMetaProperty property = mo->property(i);
+        if (!property.isReadable())
+            continue;
+        auto* model = qvariant_cast<QAbstractItemModel*>(property.read(target));
+        if (!model)
+            continue;
+        const QString childName =
+            QStringLiteral("%1/%2").arg(name, QString::fromUtf8(property.name()));
+        if (!m_host->enableRemoting(model, childName, model->roleNames().keys())) {
+            emit log(QStringLiteral("view module: could not remote model %1").arg(childName));
+            continue;
+        }
+        emit log(QStringLiteral("view model remoted: %1 (%2 roles)")
+                     .arg(childName).arg(model->roleNames().size()));
+    }
 }
 
 void ViewModuleRunner::driveViewOnce()
