@@ -63,7 +63,11 @@ let
   # catches the one that does not lint.
   webHalves = { none = ""; shipped = "/fixture/web-assets"; };
 
-  cases = lib.concatLists (lib.concatLists (lib.mapAttrsToList
+  # Every size against every `web` half, and both runners of each: the two
+  # mapAttrsToList nest three levels of list, flattened here to the flat list of
+  # cases the check below reads. `lib.flatten` does not descend into an
+  # attribute set, so each case's own `frameworks` list survives it.
+  cases = lib.flatten (lib.mapAttrsToList
     (name: frameworks:
       lib.mapAttrsToList
         (half: webAssetsPath:
@@ -73,7 +77,7 @@ let
             { inherit frameworks; drv = runners.runDevice; }
           ])
         webHalves)
-    sizes));
+    sizes);
 
   # Via mainProgram rather than by spelling `run-lint-<name>-ios-<kind>` out
   # again here: ios-runner.nix names its own runners, and one copy of that

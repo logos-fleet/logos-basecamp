@@ -15,11 +15,6 @@ namespace basecamp::web {
 
 namespace {
 
-QString megabytes(qint64 bytes)
-{
-    return QStringLiteral("%1 MB").arg(double(bytes) / (1024.0 * 1024.0), 0, 'f', 0);
-}
-
 // A directory holding the runtime's glue script IS the runtime; anything else
 // named as one is a misconfiguration, and saying so beats a page that comes up
 // and then cannot find what it was promised.

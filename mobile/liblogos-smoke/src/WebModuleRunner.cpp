@@ -8,16 +8,8 @@
 #include <QRegularExpression>
 #include <QTimer>
 
+using basecamp::web::megabytes;
 using basecamp::web::MobileWebContainerBackend;
-
-namespace {
-
-QString megabytes(qint64 bytes)
-{
-    return QStringLiteral("%1 MB").arg(double(bytes) / (1024.0 * 1024.0), 0, 'f', 0);
-}
-
-} // namespace
 
 WebModuleRunner::WebModuleRunner(ICoreRuntime* core, QString webModulesDir, QObject* parent)
     : QObject(parent)
@@ -74,7 +66,6 @@ QStringList WebModuleRunner::available() const
 qint64 WebModuleRunner::bringUp(const QString& name)
 {
     auto* backend = MobileWebContainerBackend::instance();
-    const int before = m_pageLines.size();
 
     QElapsedTimer timer;
     timer.start();
@@ -100,7 +91,6 @@ qint64 WebModuleRunner::bringUp(const QString& name)
     // THE VIEW'S OWN REPORT. `logos-view: ready <name> count=0` is the module's
     // QML saying it took its backend replica over the MessagePort -- the fact a
     // screenshot of a canvas cannot establish.
-    (void)before;
     if (!waitForPageLine(QStringLiteral("logos-view: ready %1 count=").arg(name), 90000)) {
         emit log(QStringLiteral("web module %1: the view never reported a backend").arg(name));
         return -1;

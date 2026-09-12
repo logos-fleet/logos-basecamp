@@ -36,4 +36,9 @@ qint64 appResidentBytes()
 #endif
 }
 
+QString megabytes(qint64 bytes)
+{
+    return QStringLiteral("%1 MB").arg(double(bytes) / (1024.0 * 1024.0), 0, 'f', 0);
+}
+
 } // namespace basecamp::web

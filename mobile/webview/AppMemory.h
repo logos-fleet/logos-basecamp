@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QString>
 #include <QtGlobal>
 
 namespace basecamp::web {
@@ -24,5 +25,11 @@ namespace basecamp::web {
 // honest thing to log: what a shell can measure about itself. The page's own
 // cost is the platform's to report and neither phone offers it to an embedder.
 qint64 appResidentBytes();
+
+// A byte count as whole megabytes, which is the unit every line about memory in
+// the Web container is stated in -- the budget's, the container's and the smoke
+// host's. One spelling of it, so two logs of the same number never disagree
+// about their rounding.
+QString megabytes(qint64 bytes);
 
 } // namespace basecamp::web

@@ -123,10 +123,10 @@ void BundledSetCoreRuntime::start()
 void BundledSetCoreRuntime::refuseSubprocessArtifacts()
 {
     // WHAT THE CONTAINER POLICY USED TO SAY, said where it can be said
-    // truthfully -- see the note at logos_core_set_container_policy above. A
-    // phone has a Native container and a Web container and no subprocess module
-    // host, so the artifact that must not appear is a Qt PLUGIN: every module
-    // the core discovered has to be `bare` or `web`.
+    // truthfully -- see the note at logos_core_set_container_policy in
+    // registerBundledSet(). A phone has a Native container and a Web container
+    // and no subprocess module host, so the artifact that must not appear is a
+    // Qt PLUGIN: every module the core discovered has to be `bare` or `web`.
     //
     // AFTER discovery rather than as a policy, because the core is the one that
     // stamps the format: a package's format is read off what is on disk, and
@@ -178,8 +178,8 @@ void BundledSetCoreRuntime::registerBundledSet()
     // subprocess module host and neither platform allows one (ADR 0003, 0006).
     // Bare and web are both in-process as far as Logos is concerned. So the core
     // is left on `auto` -- the artifact decides its container -- and
-    // refuseSubprocessArtifacts() below reads the formats the core discovered
-    // and says so if one of them is neither.
+    // refuseSubprocessArtifacts() reads the formats the core discovered and
+    // says so if one of them is neither.
     logos_core_set_container_policy("auto");
 
     for (const QJsonValue& value : modules) {
