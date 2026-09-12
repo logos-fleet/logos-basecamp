@@ -57,10 +57,11 @@ protected:
     // -> row -- and a press aimed at where a control was two passes ago lands
     // on nothing at all, which reads exactly like a button that does not work.
     QPointF settledCentre(QQuickItem* item);
-    // Scroll the nearest enclosing flickable so `item` is on screen. Used for
-    // the phone's section strip, which is a horizontal scroller BY DESIGN and
-    // which a finger would swipe; NOT for a row's action, whose whole
-    // requirement is to be reachable without scrolling sideways.
+    // Scroll the nearest enclosing flickable, on either axis, so `item` is on
+    // screen. Used for the surfaces that scroll BY DESIGN and that a finger
+    // would swipe -- the phone's section strip sideways, the sidebar's app
+    // column down; NOT for a row's action, whose whole requirement is to be
+    // reachable without scrolling at all.
     void scrollIntoView(QQuickItem* item);
     // Spin the event loop until `item` exists or the deadline passes. Delegate
     // creation is asynchronous -- the rows of a view that just became visible

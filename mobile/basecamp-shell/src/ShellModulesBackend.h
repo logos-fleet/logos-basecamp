@@ -106,9 +106,9 @@ public:
 
     // The set's `ui_qml` members, in manifest order. The Shell's apps.
     QStringList viewModuleNames() const;
-    // Whether this member is one -- i.e. the host's to instantiate rather than
-    // the core's to load (ADR 0006).
-    bool isViewModule(const QString& name) const { return isHostLoaded(name); }
+    // Whether this member is one -- i.e. the host's to instantiate and render
+    // rather than the core's to load (ADR 0006).
+    bool isViewModule(const QString& name) const;
     // Called by the host once a view module's framework is up and its QML is
     // in a widget, or once it has been taken back down. The ONLY thing that
     // makes an app read as loaded: a `ui_qml` row used to claim it
@@ -189,9 +189,6 @@ private:
     // every two seconds.
     void rebuildRows();
     QVariantList snapshot() const;
-    // Whether `name` is a view module: in the Bundled set, but not the core's
-    // to load (ADR 0006 -- the host instantiates it and renders its QML).
-    bool isHostLoaded(const QString& name) const;
 
     BundledSetCoreRuntime* m_core;    // not owned
     LogosAPI*              m_api;     // owned

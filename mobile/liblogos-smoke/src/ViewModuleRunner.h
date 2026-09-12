@@ -84,11 +84,9 @@ public:
     // Must run after logos_core_start().
     bool run(QQuickWidget* surface);
 
-    // Where the framework is, resolved from the running process rather than
-    // guessed — see BundledModuleRunner::bundledImagePath() for why dladdr
-    // and not applicationDirPath().
-    static QString viewImagePath();
-    // The same, for any stem.
+    // Where the framework with this stem is, resolved from the running process
+    // rather than guessed — see BundledModuleRunner::bundledImagePath() for
+    // why dladdr and not applicationDirPath().
     static QString viewImagePathFor(const QString& stem);
 
     // The replica the QML is bound to, for a driver that wants to read the

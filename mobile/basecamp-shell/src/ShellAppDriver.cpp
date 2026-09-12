@@ -29,24 +29,21 @@ bool ShellAppDriver::hasWork() const
     return !m_host->backend()->viewModuleNames().isEmpty();
 }
 
-QStringList ShellAppDriver::handlesFor(const QString& appName)
+ShellAppDriver::KnownApp ShellAppDriver::knownApp(const QString& appName)
 {
     // chat_ui's conversations pane and its "+" menu: the two things on screen
     // before any conversation is selected, and both are in the app's own QML
     // (logos-chat-ui src/qml/ChatUi/ConversationsPane.qml) rather than in
-    // anything this repo draws.
-    if (appName == QLatin1String("chat_ui"))
-        return { QStringLiteral("conversationList"), QStringLiteral("newMenuButton") };
-    // view_counter's button and label -- the fixture's whole view.
+    // anything this repo draws. The pane is also its content list -- the rows
+    // in it are the core's conversations.
+    if (appName == QLatin1String("chat_ui")) {
+        const QString pane = QStringLiteral("conversationList");
+        return { { pane, QStringLiteral("newMenuButton") }, pane };
+    }
+    // view_counter's button and label -- the fixture's whole view. It lists
+    // nothing, so there is no content to check it against.
     if (appName == QLatin1String("view_counter"))
-        return { QStringLiteral("incrementButton"), QStringLiteral("countLabel") };
-    return { };
-}
-
-QString ShellAppDriver::contentListFor(const QString& appName)
-{
-    if (appName == QLatin1String("chat_ui"))
-        return QStringLiteral("conversationList");
+        return { { QStringLiteral("incrementButton"), QStringLiteral("countLabel") }, { } };
     return { };
 }
 
@@ -59,7 +56,8 @@ void ShellAppDriver::run(bool expectLiveContent)
         return;
     }
     const QString app = apps.first();
-    const QStringList handles = handlesFor(app);
+    const KnownApp known = knownApp(app);
+    const QStringList& handles = known.handles;
     if (handles.isEmpty()) {
         emit log(QStringLiteral("WRONG: no rendered handles are known for app '%1', so "
                                 "there is nothing that could say its view came up")
@@ -81,7 +79,7 @@ void ShellAppDriver::run(bool expectLiveContent)
     }
     emit log(QStringLiteral("shell: the sidebar carries a tile for %1").arg(app));
 
-    // The sidebar's app column is a vertical Flickable; a set with several
+    // The sidebar's app column is a vertical Flickable, and a set with several
     // apps can push one of them below the fold.
     scrollIntoView(tile);
     QElapsedTimer sincePress;
@@ -157,7 +155,7 @@ void ShellAppDriver::run(bool expectLiveContent)
     // first is the .rep, each of the others is a child source acquired by
     // name. So a view can be fully bound, online, and listing nothing -- which
     // is exactly what an unremoted model looks like from the outside.
-    const QString listHandle = contentListFor(app);
+    const QString& listHandle = known.contentList;
     if (!listHandle.isEmpty()) {
         QQuickItem* list = find(listHandle);
         // A model replica's row count arrives over the node, so it is NOT

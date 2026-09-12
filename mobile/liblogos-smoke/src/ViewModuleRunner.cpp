@@ -139,11 +139,6 @@ ViewModuleRunner::~ViewModuleRunner()
     delete m_api;
 }
 
-QString ViewModuleRunner::viewImagePath()
-{
-    return viewImagePathFor(QStringLiteral(LOGOS_VIEW_MODULE_STEM));
-}
-
 QString ViewModuleRunner::viewImagePathFor(const QString& stem)
 {
     const QString dir = logosImageDir();

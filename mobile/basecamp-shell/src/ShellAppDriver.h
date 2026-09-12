@@ -48,15 +48,19 @@ signals:
     void appShown(const QString& name, qint64 elapsedMs);
 
 private:
-    // The handles a mounted app must show for it to count as rendered. One
-    // entry per known app, because an app's own view is the only thing that
-    // can say it rendered -- there is no generic "did the QML load" an
-    // objectName-based driver can ask, and a check that accepted any scene at
-    // all would pass on an empty one.
-    static QStringList handlesFor(const QString& appName);
-    // The handle of the list whose `count` says the app has real data, or
-    // empty if this app has no such list.
-    static QString contentListFor(const QString& appName);
+    // What this driver knows about one app's rendered view. One entry per
+    // known app, because an app's own view is the only thing that can say it
+    // rendered -- there is no generic "did the QML load" an objectName-based
+    // driver can ask, and a check that accepted any scene at all would pass
+    // on an empty one.
+    struct KnownApp {
+        // The handles the mounted app must show for it to count as rendered.
+        QStringList handles;
+        // The handle of the list whose `count` says the app has real data, or
+        // empty if this app has no such list.
+        QString contentList;
+    };
+    static KnownApp knownApp(const QString& appName);
 
     BundledSetShellHost* m_host;  // not owned
 };

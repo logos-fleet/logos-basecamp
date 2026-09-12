@@ -58,10 +58,11 @@ QQuickWidget* BundledSetShellHost::mountedView(const QString& name) const
 
 void BundledSetShellHost::mountApp(const QString& name)
 {
-    if (m_mounted.contains(name)) {
+    const auto already = m_mounted.constFind(name);
+    if (already != m_mounted.cend()) {
         m_backend.setCurrentVisibleApp(name);
         if (m_observer)
-            m_observer->onPresentAppRequested(m_mounted.value(name).widget);
+            m_observer->onPresentAppRequested(already->widget);
         return;
     }
     if (!m_backend.isViewModule(name)) {

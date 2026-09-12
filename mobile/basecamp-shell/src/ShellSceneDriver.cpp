@@ -26,6 +26,23 @@ constexpr int kPressHoldMs      = 80;   // press to release, as a finger would
 constexpr int kAfterReleaseMs   = 120;  // let the click's handlers run
 constexpr int kAfterScrollMs    = 50;   // let the flickable repaint
 
+// Move one of a flickable's content offsets by the least that brings
+// [offset, offset + extent] inside [0, viewport]. Returns whether it moved.
+bool scrollAxis(QQuickItem* flickable, const char* property,
+                qreal offset, qreal extent, qreal viewport)
+{
+    const qreal overflow = offset + extent - viewport;
+    qreal delta = 0;
+    if (overflow > 0)
+        delta = overflow;
+    else if (offset < 0)
+        delta = offset;
+    else
+        return false;
+    flickable->setProperty(property, flickable->property(property).toReal() + delta);
+    return true;
+}
+
 void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
 {
     if (!item) return;
@@ -151,17 +168,18 @@ void ShellSceneDriver::scrollIntoView(QQuickItem* item)
     // built on it does. Asking by property rather than by type keeps this off
     // Qt's private headers.
     for (QQuickItem* p = item->parentItem(); p; p = p->parentItem()) {
-        const QVariant contentX = p->property("contentX");
-        if (!contentX.isValid()) continue;
-        const qreal left = item->mapToItem(p, QPointF(0, 0)).x();
-        const qreal overflow = left + item->width() - p->width();
-        if (overflow > 0)
-            p->setProperty("contentX", contentX.toReal() + overflow);
-        else if (left < 0)
-            p->setProperty("contentX", contentX.toReal() + left);
-        else
-            return;
-        QCoreApplication::processEvents(QEventLoop::AllEvents, kAfterScrollMs);
+        if (!p->property("contentX").isValid()) continue;
+        // BOTH axes, because the two callers scroll in different directions:
+        // the phone's section strip sideways, the sidebar's app column down.
+        // A flickable answers to contentX and contentY whichever way it
+        // flicks, and the axis with nothing to correct costs a comparison.
+        const QPointF topLeft = item->mapToItem(p, QPointF(0, 0));
+        const bool movedX =
+            scrollAxis(p, "contentX", topLeft.x(), item->width(), p->width());
+        const bool movedY =
+            scrollAxis(p, "contentY", topLeft.y(), item->height(), p->height());
+        if (movedX || movedY)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, kAfterScrollMs);
         return;
     }
 }

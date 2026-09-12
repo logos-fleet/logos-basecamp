@@ -55,7 +55,7 @@ QString ShellModulesBackend::buildVersion() const
     return QStringLiteral("mobile");
 }
 
-bool ShellModulesBackend::isHostLoaded(const QString& name) const
+bool ShellModulesBackend::isViewModule(const QString& name) const
 {
     for (const QVariant& row : m_core->bundledSet()) {
         const QVariantMap entry = row.toMap();
@@ -80,7 +80,7 @@ QVariantList ShellModulesBackend::snapshot() const
         const QVariantMap entry = value.toMap();
         const QString name = entry.value(QStringLiteral("name")).toString();
         const QString type = entry.value(QStringLiteral("type")).toString();
-        const bool hostLoaded = type == kViewModuleType;
+        const bool isView = type == kViewModuleType;
 
         QVariantMap row;
         row[QStringLiteral("name")] = name;
@@ -96,12 +96,12 @@ QVariantList ShellModulesBackend::snapshot() const
         // because it is one: the whole claim of the Modules tab is that it
         // shows what is running.
         row[QStringLiteral("isLoaded")] =
-            hostLoaded ? m_mounted.contains(name) : loaded.contains(name);
+            isView ? m_mounted.contains(name) : loaded.contains(name);
         // A Bundled member the core never registered has something wrong with
         // its image -- the closure was resolved and verified at build time, so
         // there is no missing dependency to install. Saying so in the one
         // status column the row has beats a silent "Not loaded".
-        row[QStringLiteral("hasMissingDeps")] = !hostLoaded && !known.contains(name);
+        row[QStringLiteral("hasMissingDeps")] = !isView && !known.contains(name);
 
         const QVariantMap stats = m_modules->moduleStats(name);
         row[QStringLiteral("cpu")] = stats.value(QStringLiteral("cpu"), 0.0);
@@ -180,7 +180,7 @@ void ShellModulesBackend::refreshCoreModules()
 
 void ShellModulesBackend::loadCoreModule(const QString& moduleName)
 {
-    if (isHostLoaded(moduleName)) {
+    if (isViewModule(moduleName)) {
         // Not a refusal to be fixed: a view module's image is a Qt-backed
         // framework this process instantiates itself, so the core has no
         // handle on it to load (ADR 0006). It is in the set and in this list,
@@ -196,7 +196,7 @@ void ShellModulesBackend::loadCoreModule(const QString& moduleName)
 
 void ShellModulesBackend::unloadCoreModule(const QString& moduleName)
 {
-    if (isHostLoaded(moduleName)) {
+    if (isViewModule(moduleName)) {
         emit log(QStringLiteral("%1 is a view module: host-loaded, not the core's to unload")
                      .arg(moduleName));
         return;
