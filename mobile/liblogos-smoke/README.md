@@ -77,12 +77,15 @@ Qt and `LogosAPI` bound upward into the app (ADR 0006). The pair is the two
 extremes of the same idea — a module with no Qt in it at all, and a module
 that is nothing but Qt and still carries none of it.
 
-**iOS only, for now.** On Android Qt is a set of SHARED objects, so the same
-module there is a `.so` naming `libQt6Core_arm64-v8a.so` and friends in
-`DT_NEEDED` — a different artifact with a different gate, which
-logos-module-builder does not publish yet. The Android catalog holds the Bare counter and
-nothing else, so `--bundle view_counter --target android-arm64` is refused by
-name at evaluation rather than half-built.
+**iOS only, for now** — and this is the one thing on the mobile track that
+still is. On Android Qt is a set of SHARED objects, so the same module there
+is a `.so` naming `libQt6Core_arm64-v8a.so` and friends in `DT_NEEDED` — a
+different artifact with a different gate, which logos-module-builder does not
+publish yet. The Android catalog holds the Bare modules and nothing else, so
+`--bundle view_counter --target android-arm64` (and `--bundle chat_ui`) is
+refused by name at evaluation rather than half-built. The Android Shell is
+built and runs (`../basecamp-shell/README.md`); what it has no member for is
+an APP to mount.
 
 On the desktop a view module's backend runs in a `ui-host` **subprocess** and
 the host talks to it over a local socket. A phone has no subprocess a store

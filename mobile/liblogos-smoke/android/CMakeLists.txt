@@ -18,37 +18,17 @@ set(LOGOS_LIB_ROOTS "" CACHE STRING "Prefixes holding lib/ of liblogos and its c
 set(LOGOS_INCLUDE_ROOTS "" CACHE STRING "Prefixes holding include/ to compile against")
 
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
-set(WEBVIEW ${CMAKE_CURRENT_SOURCE_DIR}/../../webview)
-set(BASECAMP_APP ${CMAKE_CURRENT_SOURCE_DIR}/../../../app)
-qt_add_executable(LiblogosSmoke
-    ${SRC}/main.cpp
-    ${SRC}/SmokeRunner.cpp ${SRC}/SmokeRunner.h
-    ${SRC}/BundledSetRunner.cpp ${SRC}/BundledSetRunner.h
-    ${SRC}/NetworkSmokeRunner.cpp ${SRC}/NetworkSmokeRunner.h
-    ${SRC}/BundledSetCoreRuntime.cpp ${SRC}/BundledSetCoreRuntime.h
-    # The Web container. Everything except AndroidWebPage.cpp is the same
-    # platform-free code the iOS stage compiles and the desktop unit tests
-    # drive; that one file is android.webkit.WebView over JNI.
-    ${BASECAMP_APP}/web/LogosWebPaths.cpp ${BASECAMP_APP}/web/LogosWebPaths.h
-    ${WEBVIEW}/MobileWebBridge.cpp ${WEBVIEW}/MobileWebBridge.h
-    ${WEBVIEW}/MobileWebModuleView.cpp ${WEBVIEW}/MobileWebModuleView.h
-    ${WEBVIEW}/LiveRuntimeBudget.cpp ${WEBVIEW}/LiveRuntimeBudget.h
-    ${WEBVIEW}/MobileWebContainerBackend.cpp ${WEBVIEW}/MobileWebContainerBackend.h
-    ${WEBVIEW}/WebPageProbe.cpp ${WEBVIEW}/WebPageProbe.h
-    ${WEBVIEW}/AndroidWebPage.cpp ${WEBVIEW}/AndroidWebPage.h)
+# The host's own sources, shared with the iOS stage and with the Android Shell
+# next door -- see cmake/LogosMobileHostSources.cmake for what is in the list
+# and what each host adds for itself. This one adds main.cpp and nothing else.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosMobileHostSources.cmake)
+logos_mobile_host_sources(LOGOS_HOST_SOURCES)
+qt_add_executable(LiblogosSmoke ${SRC}/main.cpp ${LOGOS_HOST_SOURCES})
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(LiblogosSmoke PRIVATE "${LOGOS_INCLUDE_ROOTS}")
 
-# ICoreRuntime.h -- Basecamp's own runtime seam, header-only. This host
-# implements it (BundledSetCoreRuntime).
-target_include_directories(LiblogosSmoke PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../app/interfaces
-    # mobile/, so the Web container's headers are reached as `webview/...`, and
-    # app/, so its one shared header is `web/LogosWebPaths.h` -- the same
-    # spellings the desktop container, the iOS stage and the unit tests use.
-    ${CMAKE_CURRENT_SOURCE_DIR}/../..
-    ${BASECAMP_APP})
+logos_mobile_host_includes(LiblogosSmoke PRIVATE)
 
 # The Bundled SET's manifest, compiled in. Passed by nix, never read from the
 # source tree: `--bundle` changes the set and must change no file here.
@@ -106,6 +86,10 @@ target_link_libraries(LiblogosSmoke PRIVATE
 # is the Android half of the container for every host in this repo and belongs
 # next to the C++ it is paired with.
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/platform/
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package)
+# The launcher icon is one file for every Android host in this repo, and lives
+# under mobile/android/ rather than in whichever host needed one first.
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../android/res
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package)
 file(COPY ${WEBVIEW}/android/src
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package)

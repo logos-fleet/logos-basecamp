@@ -13,8 +13,10 @@
 // The Bundled VIEW module is iOS-only, so everything that reaches it is behind
 // this one name. On Android Qt is a set of SHARED objects, so a ui_qml module
 // there is a different artifact with a different gate and logos-module-builder
-// publishes no `view` output for it -- and android/CMakeLists.txt accordingly
-// neither compiles ViewModuleRunner nor finds Qt Quick.
+// publishes no `view` output for it -- so no Android Bundled set can carry a
+// view module, and android/CMakeLists.txt accordingly neither compiles
+// ViewModuleRunner nor finds Qt Quick. (The Android SHELL does compile it: it
+// is the same BundledSetShellHost on both phones and that is what mounts one.)
 #if defined(Q_OS_IOS)
 #  define LOGOS_SMOKE_WITH_VIEW_MODULE 1
 #endif
@@ -29,6 +31,7 @@
 #endif
 #include "BundledSetRunner.h"
 #include "NetworkSmokeRunner.h"
+#include "PlatformConsole.h"
 #include "SmokeRunner.h"
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
 #include "ViewModuleRunner.h"
@@ -55,9 +58,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
-#if defined(Q_OS_ANDROID)
-#include <android/log.h>
-#endif
 
 namespace {
 
@@ -65,12 +65,7 @@ QPlainTextEdit* g_log = nullptr;
 
 void console(const char* tag, const QString& line)
 {
-#if defined(Q_OS_ANDROID)
-    __android_log_print(ANDROID_LOG_INFO, "logos-smoke", "[%s] %s", tag, qUtf8Printable(line));
-#else
-    std::fprintf(stderr, "[%s] %s\n", tag, qUtf8Printable(line));
-    std::fflush(stderr);
-#endif
+    basecamp::mobile::consoleLine(tag, line);
 }
 
 void say(const QString& line)
@@ -144,11 +139,12 @@ int main(int argc, char* argv[])
     g_log = logView;
     window.setCentralWidget(central);
     window.showFullScreen();
-    // The probe's own surface, which is what stands in for the Shell on a
-    // platform that has no Shell build yet (Android: Qt there is a set of
-    // shared objects, so main_ui is a different artifact). Named differently
-    // from the Shell's own marker for exactly that reason -- the two are not
-    // the same screen and a report should not be able to pretend they are.
+    // The probe's OWN surface -- a log view and a Quit button -- and it is
+    // named differently from the Shell's marker on purpose: the two are not
+    // the same screen, and a report should not be able to pretend they are.
+    // Both phones have a Shell of their own now
+    // (../basecamp-shell/README.md), so this number is the probe's, never a
+    // stand-in for one.
     say(QStringLiteral("COLD START: host UI shown at %1 ms").arg(sinceMain.elapsed()));
 
     SmokeRunner runner;
