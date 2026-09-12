@@ -151,14 +151,6 @@ the log below appears in the terminal as well as on the screen.
 [smoke] VIEW ROUND TRIP OK
 ```
 
-> **Known failure, not this host's:** on the workspace pins as of 2026-09-11
-> `add(1, 2)` comes back empty and the line reads `bundled module: FAIL`. The
-> module registers, loads and is invoked — `ModuleProxy: callRemoteMethod "add"`
-> is in the log — and `__logos_call_complete__` arrives *after*
-> `invokeRemoteMethod` has already returned. Reproduced identically on the
-> unmodified host at the previous pin, so it is a liblogos/SDK regression and
-> not a Bundled-set one.
-
 ...followed by the Modules list's own round trip, driven the same way:
 
 ```
@@ -182,6 +174,91 @@ logcat only because the host hangs a logcat sink on liblogos's spdlog channels
 before loading — liblogos logs to stderr, which the platform discards.
 Measured: 4.7 ms on the iPhone 16 Pro simulator, 20.5 ms on an iPad Air,
 1.7 ms on an SM-G990B.
+
+## The networking set, and the two peers it needs
+
+`--bundle capability_module,bare_counter,libp2p_module,delivery_module,chat_module`
+puts slice 21's three real modules in the set, and `NetworkSmokeRunner` is what
+they DO once loaded, as opposed to that they load at all. Every step is
+conditional on the module being in the set, so a set that carries only the
+counter reports "not in this set" and passes.
+
+A phone cannot discover a laptop, so both peers are handed in on the app's own
+command line — `simctl launch` and `devicectl process launch` take trailing
+arguments, and the Android runner forwards them as Qt's `extraappparams` intent
+extra:
+
+| | |
+|---|---|
+| `--peer <multiaddr>/p2p/<peerId>` | the desktop **libp2p** peer to dial. Without it the node is still created, started and reported; the dial and the gossipsub exchange are skipped by name. |
+| `--topic <name>` | the gossipsub topic, `logos-smoke` by default. |
+| `--chat-peer <address>` | the desktop **chat** installation's `get_address()`. Without it the desktop-backed conversation is skipped. |
+
+Each also has an environment fallback (`LOGOS_SMOKE_PEER`, `LOGOS_SMOKE_TOPIC`,
+`LOGOS_SMOKE_CHAT_PEER`) for a human at a terminal.
+
+### Standing the two desktop peers up
+
+Both are `logoscore` daemons over this workspace's own module builds. Give each
+its own `LOGOSCORE_CONFIG_DIR`, or the second one drives the first.
+
+```bash
+# the libp2p peer: listening on 9500, subscribed to the topic, publishing
+export LOGOSCORE_CONFIG_DIR=/tmp/libp2p-peer
+logoscore -D -m ./modules &
+logoscore load-module libp2p_module
+logoscore call libp2p_module createNode \
+  'str:{"addrs":["/ip4/0.0.0.0/tcp/9500"],"transport":"tcp","mountGossipsub":true}'
+logoscore call libp2p_module start
+logoscore call libp2p_module getNodeInfo PeerId      # goes into --peer
+logoscore call libp2p_module gossipsubSubscribe logos-smoke
+while :; do logoscore call libp2p_module gossipsubPublish logos-smoke hello; sleep 1; done &
+
+# the chat peer: same delivery preset as the phone's
+export LOGOSCORE_CONFIG_DIR=/tmp/chat-peer
+logoscore -D -m ./modules &
+logoscore load-module chat_module                    # brings delivery_module
+logoscore call chat_module init 'json:{"delivery_preset":"logos.test"}'
+logoscore call chat_module get_address               # goes into --chat-peer
+```
+
+`json:` on `init` and `str:` on `createNode` are not interchangeable:
+`init(config: ChatConfig)` takes a RECORD and `createNode` takes a `tstr` the
+module parses itself.
+
+### What it proves, and from which end
+
+```
+[smoke]   subscribed to 'logos-smoke'
+[smoke]   dialled 12D3KooWDpa... at /ip4/192.168.1.158/tcp/9500 in 142 ms
+[smoke]   published 'phone-6631fefa' on 'logos-smoke'
+[smoke]   gossipsub message from the desktop peer: 'desktop-hello-119'
+[smoke] LIBP2P NODE + PEER EXCHANGE OK
+[smoke] chat_module: health() ok (the Rust core answers)
+[smoke] chat_module: init ok
+[smoke]   delivery node online in 1043 ms
+[smoke]   chat address: 7f7c41380f5d...
+[smoke]   group conversation: b3088251e1
+[smoke]   conversation with the desktop peer: 303fcf985ed0340a5d20043fb1541c6b
+[smoke] CHAT CONVERSATION OK
+```
+
+Subscribe comes BEFORE the dial: gossipsub only forwards a topic to a peer that
+is in its mesh for it, and the mesh is built from the subscriptions both ends
+announce when the connection comes up. `gossipsubTriggerSelf` is off and the
+reader refuses its own nonce, so a self-echo cannot be mistaken for an exchange.
+
+**Two of these lines are only half the evidence, and the other half is on the
+desktop.** `phone-<nonce>` has to appear in the libp2p peer's own
+`gossipsubNextMessage`, and the conversation id has to appear in the chat peer's
+`list_conversations` — the phone reports a convo_id either way, because
+`create_conversation` writes it locally and publishes the invite
+asynchronously.
+
+`delivery node online in N ms` is why that second one can be believed. `init`
+returns as soon as the state is installed and the delivery node joins the
+network on callbacks afterwards, so without the wait the conversation is opened
+against a node that is still `initialising` and the invite goes nowhere.
 
 ## Layout
 

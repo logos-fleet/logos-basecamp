@@ -32,6 +32,13 @@
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
+    <!-- A libp2p node on a phone dials peers on the same LAN, and since iOS 14
+         an app that does so without this key is denied outright rather than
+         asked: the connection fails with no prompt and no diagnostic. Declared
+         for the bring-up probe so the dial is the USER's decision rather than
+         a silent refusal. The simulator does not enforce it. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Liblogos Smoke dials a Logos peer on this network to prove the networking modules run on this device.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Logos. All rights reserved.</string>
 </dict>

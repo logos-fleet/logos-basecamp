@@ -49,14 +49,17 @@
     logos-liblogos.inputs.logos-module.follows = "logos-module";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
-    # The trust root, and a MEMBER of the mobile dev catalog (mobileCatalogFor):
-    # the catalog carries its `bare` output, reached as
-    # `legacyPackages.<buildSystem>.mobile.<target>.bare`.
+    # The capability broker, and a MEMBER of the mobile dev catalog
+    # (mobileCatalogFor below): the catalog carries its `bare` output, reached
+    # as `legacyPackages.<buildSystem>.mobile.<target>.bare`. A module-to-module
+    # call on a phone mints its token through this module, so the networking set
+    # cannot run without it.
     #
     # LOCKED TO THE logos-fleet FORK, for the same reason and with the same
     # consequence as logos-module-builder below: upstream publishes no mobile
-    # keys, so a bare `nix flake update` walks the lock back to logos-co and
-    # the mobile outputs stop EVALUATING ("attribute 'legacyPackages' missing").
+    # keys and no Bare build of its own (it included boost/uuid until the fork),
+    # so a bare `nix flake update` walks the lock back to logos-co and the
+    # mobile outputs stop EVALUATING ("attribute 'legacyPackages' missing").
     # Re-pin with
     #   nix flake lock --override-input logos-capability-module \
     #     github:logos-fleet/logos-capability-module/<rev>
@@ -138,6 +141,33 @@
     # implementations agreeing by luck.
     nix-bundle-lgx.inputs.logos-package.follows = "logos-package";
     nix-bundle-lgx.inputs.nix-bundle-dir.follows = "nix-bundle-dir";
+    # ── the networking modules the mobile catalog publishes ────────────────
+    # libp2p_module, delivery_module and chat_module, as Bare images for the
+    # three mobile targets. They are here for the same reason bare-counter is
+    # built here: the app's Bundled set is resolved out of a CATALOG, and the
+    # dev catalog has to be built from something.
+    #
+    # EVERY shared input follows this flake's copy, and logos-module-builder
+    # above all: a Bare module is compiled against logos-protocol's headers and
+    # stamped with the protocol version it saw, and the host gates that stamp
+    # at load (bareModuleProtocolCompatible). Each of the three pins its own
+    # builder rev upstream, and three builders in one closure means three
+    # protocols -- the app would refuse its own bundled modules, or worse, load
+    # them and disagree about the wire.
+    #
+    # LOCKED TO THE logos-fleet FORKS, like the rest of the mobile chain: the
+    # `bare` outputs for the mobile pseudo-systems do not exist upstream.
+    logos-libp2p-module.url = "github:logos-co/logos-libp2p-module";
+    logos-libp2p-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-delivery-module.url = "github:logos-co/logos-delivery-module";
+    logos-delivery-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-delivery-module.inputs.nix-bundle-lgx.follows = "nix-bundle-lgx";
+    logos-chat-module.url = "github:logos-co/logos-chat-module";
+    logos-chat-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    # chat_module DEPENDS on delivery_module (metadata.json), and the .lidl
+    # contract it generates against has to be the one the delivery image in the
+    # same Bundled set actually implements.
+    logos-chat-module.inputs.logos-delivery-module.follows = "logos-delivery-module";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
     # LOCKED TO THE logos-fleet FORK, not to this URL: the test framework's
     # per-app inspector port (launchAppWithInspector) is not upstream yet, and
@@ -160,7 +190,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -411,21 +441,28 @@
           isAndroid = system == "aarch64-android";
           signingKey = { inherit (catalogTestKey) name jwk; };
 
-          # The trust root, cross-built for this target out of its own repo.
-          # `legacyPackages.<buildSystem>.mobile`, not `packages.<system>`, for
-          # the same reason bareCounter uses it: a cross derivation's `system`
-          # is its BUILD platform, and the Android leg has to be the one this
-          # machine can realise.
-          capabilityPayload = catalogLib.mkVariantPayload {
-            drv = logos-capability-module.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
-            stem = "capability_module_bare";
-            inherit target;
-          };
-
-          barePayload = catalogLib.mkVariantPayload {
-            drv = bareCounter.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
-            stem = "bare_counter_bare";
-            inherit target;
+          # One catalog entry per Bare module, and they are all the same shape:
+          # the `mobile.<target>.bare` image the module's OWN flake cross-builds,
+          # published under `<name>_bare` and signed with the dev key. Nothing
+          # here knows that one of them carries a nim libp2p, another a nim
+          # delivery core plus zerokit's rln, and the third a Rust chat core.
+          #
+          # `legacyPackages.<buildSystem>.mobile`, not `packages.<system>`: a
+          # cross derivation's `system` is its BUILD platform, and the Android
+          # leg has to be the one this machine can realise.
+          #
+          # `dependencies` is the module's own metadata.json answer, not a
+          # convenience: the Bundled set resolves a CLOSURE out of it, so
+          # `--bundle chat_module` has to bring delivery_module along without
+          # naming it.
+          mkBareSpec = { name, version, category, description, module, dependencies ? [ ] }: {
+            inherit name version category description dependencies signingKey;
+            type = "core";
+            variants.${target} = catalogLib.mkVariantPayload {
+              drv = module.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
+              stem = "${name}_bare";
+              inherit target;
+            };
           };
 
           viewPayload = catalogLib.mkVariantPayload {
@@ -440,25 +477,56 @@
           };
 
           specs = {
-            capability_module = {
-              name = "capability_module";
-              version = logos-capability-module.config.version;
-              type = "core";
-              category = "security";
-              description = "Coordinates permissions between modules";
-              dependencies = [ ];
-              variants.${target} = capabilityPayload;
-              inherit signingKey;
-            };
-            bare_counter = {
+            bare_counter = mkBareSpec {
               name = "bare_counter";
               version = "1.0.0";
-              type = "core";
               category = "testing";
               description = "The counter, as a Bundled Bare module for the mobile host";
-              dependencies = [ ];
-              variants.${target} = barePayload;
-              inherit signingKey;
+              module = bareCounter;
+            };
+
+            # The capability broker. Not a networking module, and here for what
+            # the three below NEED: a module-to-module call mints its token
+            # through `capability_module` (LogosAPIClient::mintAndCacheToken),
+            # and without it in the set the call goes out with no token, the
+            # target's ModuleProxy refuses it and the caller is told "token not
+            # recognized". Measured on the iOS simulator: chat_module's
+            # `delivery_module.createNode` failed exactly that way and the chat
+            # core came up with delivery_state "error".
+            #
+            # liblogos already knows this module by name -- the in-process
+            # container grants it `token_registry` / `token_delivery`
+            # (hostServicesJsonFor) -- so bundling it is the whole of the wiring.
+            capability_module = mkBareSpec {
+              name = "capability_module";
+              version = logos-capability-module.config.version;
+              category = "security";
+              description = "Coordinates permissions between modules";
+              module = logos-capability-module;
+            };
+
+            # ── the networking set (slice 21) ─────────────────────────────
+            libp2p_module = mkBareSpec {
+              name = "libp2p_module";
+              version = "1.0.0";
+              category = "protocol";
+              description = "nim-libp2p's C bindings as a Bundled Bare module";
+              module = logos-libp2p-module;
+            };
+            delivery_module = mkBareSpec {
+              name = "delivery_module";
+              version = "0.2.1";
+              category = "protocol";
+              description = "logosdelivery + rln as a Bundled Bare module";
+              module = logos-delivery-module;
+            };
+            chat_module = mkBareSpec {
+              name = "chat_module";
+              version = "0.2.2";
+              category = "messaging";
+              description = "The Rust chat core as a Bundled Bare module";
+              module = logos-chat-module;
+              dependencies = [ "delivery_module" ];
             };
           } // nixpkgs.lib.optionalAttrs (!isAndroid) {
             view_counter = {
