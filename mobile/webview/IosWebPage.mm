@@ -8,6 +8,8 @@
 #import <WebKit/WebKit.h>
 
 #include <QDebug>
+#include <QGuiApplication>
+#include <QWindow>
 #include <QDir>
 #include <QFileInfo>
 
@@ -249,15 +251,39 @@ PlatformPageFactory iosPlatformPageFactory()
         // then freeze. It goes behind Qt's own view at the window's size; the
         // shell brings it forward through the handle below when the user is
         // looking at this module.
+        // QT'S OWN WINDOW FIRST, and that is what works. A Qt for iOS app has no
+        // scene manifest in its Info.plist, so `connectedScenes` is empty; and
+        // it does not put its UIWindow in `UIApplication.windows` early enough
+        // for a page opened before the event loop runs. Both spellings found
+        // nothing on the simulator and every page reported "no window to live
+        // in" -- which would have thrown it out of the hierarchy and throttled
+        // its requestAnimationFrame, so a QML runtime in it would have frozen.
+        //
+        // QWindow::winId() IS the QUIView, which knows its window whatever UIKit
+        // is willing to enumerate. The two scans below stay as fallbacks for a
+        // host whose surface is not a QWindow at all.
         UIWindow* window = nil;
-        for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
-            if ([scene isKindOfClass:[UIWindowScene class]]) {
-                for (UIWindow* candidate in ((UIWindowScene*)scene).windows) {
-                    if (candidate.isKeyWindow) { window = candidate; break; }
-                }
-                if (!window) window = ((UIWindowScene*)scene).windows.firstObject;
+        for (QWindow* qtWindow : QGuiApplication::topLevelWindows()) {
+            // winId() rather than handle(): it CREATES the platform window if
+            // there is not one yet, which for a page opened before the event
+            // loop has turned is the difference between finding Qt's UIWindow
+            // and not.
+            UIView* qtView = (__bridge UIView*)reinterpret_cast<void*>(qtWindow->winId());
+            if (qtView && qtView.window) { window = qtView.window; break; }
+        }
+        for (UIScene* scene in (window ? @[] : UIApplication.sharedApplication.connectedScenes)) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* candidate in ((UIWindowScene*)scene).windows) {
+                if (candidate.isKeyWindow) { window = candidate; break; }
             }
+            if (!window) window = ((UIWindowScene*)scene).windows.firstObject;
             if (window) break;
+        }
+        if (!window) {
+            for (UIWindow* candidate in UIApplication.sharedApplication.windows) {
+                if (candidate.isKeyWindow) { window = candidate; break; }
+            }
+            if (!window) window = UIApplication.sharedApplication.windows.firstObject;
         }
         if (window) {
             webView.frame = window.bounds;
@@ -266,8 +292,17 @@ PlatformPageFactory iosPlatformPageFactory()
             [window addSubview:webView];
             [window sendSubviewToBack:webView];
         } else {
+            // MEASURED, and it is a TIMING fact rather than a failure: a page
+            // opened before the event loop has turned (the bring-up probe does
+            // exactly that) finds no UIWindow by any of the three routes above.
+            // The channel works regardless -- WKWebView runs its JavaScript
+            // detached -- but requestAnimationFrame is throttled, so a QML
+            // runtime in such a page would freeze. Modules are loaded from the
+            // event loop and are unaffected.
             qWarning() << "Web module" << request.moduleName
-                       << "has no window to live in; its page will be throttled";
+                       << "found no window to live in; its page will run detached "
+                          "and anything drawing through requestAnimationFrame "
+                          "will be throttled";
         }
 
         NSURL* url = [NSURL URLWithString:toNs(request.entryUrl.toString())];
