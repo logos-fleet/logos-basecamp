@@ -113,6 +113,26 @@
     logos-module-builder.inputs.logos-module.follows = "logos-module";
     logos-module-builder.inputs.nix-bundle-logos-module-install.follows =
       "nix-bundle-logos-module-install";
+    # ONE VIEW RUNTIME IN THE CLOSURE, for the reason every other `follows` here
+    # exists and for one more that is specific to it.
+    #
+    # The builder exports a `ui_qml` module's `web` variant (`web-view-counter`,
+    # and every real ui_qml module's `web` output) only when ITS
+    # logos-view-module-runtime publishes `qml-runtime-wasm`. Without this line
+    # that is the builder's own lock -- which at the time of writing predates the
+    # output -- so no `web` variant existed in this flake at all: `web-container-
+    # test` was silently ABSENT from `nix flake show .#checks`, and the mobile
+    # apps shipped no module for their Web container to load. The workspace flake
+    # already declares this follows and saw a different world from the repo's own
+    # (logos-fleet/logos-workspace#91).
+    #
+    # And the second reason: the app SERVES the runtime it bundles
+    # (nix/app.nix stages `qmlRuntimeWasm` under share/logos-runtime, the mobile
+    # apps carry it in nix/mobile-web-assets.nix). If the builder linked a
+    # variant against a different one, the page would load a backend image built
+    # against a runtime this build does not ship.
+    logos-module-builder.inputs.logos-view-module-runtime.follows =
+      "logos-view-module-runtime";
     logos-design-system.url = "github:logos-co/logos-design-system";
     logos-view-module-runtime.url = "github:logos-co/logos-view-module-runtime";
     # ui-host links the same qt-host and protocol the app does.
@@ -642,6 +662,33 @@
           pname = "liblogos-smoke-bundled-set";
         };
 
+      # THE `web` HALF OF A PHONE APP: the Qt-wasm QML runtime and the
+      # Downloaded `web` modules this build ships (nix/mobile-web-assets.nix).
+      # Architecture-free wasm and JavaScript, so it is keyed off the BUILD
+      # platform and both phones carry the same bytes.
+      #
+      # `web-view-counter` and `web-view-counter-b` are the only `ui_qml` `web`
+      # variants that exist -- the same instrumented fixture built twice under
+      # two names, which logos-module-builder exports precisely so a container
+      # with a live-runtime budget can be shown enforcing it. Both are absent
+      # while a pin predates the Qt-for-WebAssembly outputs they need, which is
+      # a pin rollout rather than a defect: `or null` each, and the app then
+      # ships whichever exist.
+      mobileWebAssetsFor = { chain, androidBuildSystem }:
+        let
+          builderPkgs = logos-module-builder.packages.${androidBuildSystem} or { };
+          named = name: attr:
+            nixpkgs.lib.optionalAttrs (builderPkgs ? ${attr}) { ${name} = builderPkgs.${attr}; };
+        in
+        import ./nix/mobile-web-assets.nix {
+          pkgs = chain.pkgs.pkgsBuildBuild;
+          qmlRuntimeWasm =
+            (logos-view-module-runtime.packages.${androidBuildSystem} or { }).qml-runtime-wasm
+              or null;
+          webVariants = named "web_counter" "web-view-counter"
+                     // named "web_counter_b" "web-view-counter-b";
+        };
+
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
         nixpkgs.lib.mapAttrs
           (system: chain:
@@ -656,6 +703,12 @@
               # them from. The host reads bundled-set.json out of it and knows
               # nothing else about what it carries.
               bundledSet = mobileBundledSetFor { inherit system androidBuildSystem; };
+
+              # The app's `web` half: the bundled QML runtime and the
+              # Downloaded `web` modules it ships. See mobileWebAssetsFor
+              # above. Both phones, keyed off the build platform alone --
+              # wasm and JavaScript are architecture-free.
+              webAssets = mobileWebAssetsFor { inherit chain androidBuildSystem; };
 
               # LogosViewPlugin.h — the HOST side of the view-plugin
               # interface, header-only. The runtime's library and its ui-host

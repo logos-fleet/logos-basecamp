@@ -1,4 +1,4 @@
-// srcdeps: webview/MobileWebContainerBackend.cpp webview/MobileWebModuleView.cpp webview/MobileWebBridge.cpp webview/LiveRuntimeBudget.cpp web/LogosWebPaths.cpp
+// srcdeps: webview/MobileWebContainerBackend.cpp webview/MobileWebModuleView.cpp webview/MobileWebBridge.cpp webview/LiveRuntimeBudget.cpp webview/AppMemory.cpp web/LogosWebPaths.cpp
 //
 // THE PHONE'S WEB CONTAINER BACKEND, driven with a FAKE WEBVIEW.
 //
@@ -20,6 +20,7 @@
 //
 // Run: nix build .#unit-tests -L
 
+#include "webview/AppMemory.h"
 #include "webview/MobileWebContainerBackend.h"
 
 #include <QtTest/QtTest>
@@ -54,6 +55,12 @@ struct FakeWebView {
     QString shim;
     bool destroyed = false;
     bool alive = true;
+    // What the shell asked of the surface. A page is mounted BEHIND the host's
+    // own view and brought forward when the user is looking at that module, so
+    // "which module is visible" is a fact about the platform view and not only
+    // about the budget's bookkeeping.
+    bool frontmost = false;
+    int frontmostCalls = 0;
     std::function<void(const QByteArray&, const QUrl&, const QByteArray&,
                        basecamp::web::MobileWebBridge::Respond)> serve;
     std::function<void()> die;
@@ -86,6 +93,10 @@ private:
             platform.destroy = [page] { page->destroyed = true; page->alive = false; };
             platform.nativeHandle = [page] { return static_cast<void*>(&page->address); };
             platform.isAlive = [page] { return page->alive; };
+            platform.setFrontmost = [page](bool front) {
+                page->frontmost = front;
+                ++page->frontmostCalls;
+            };
             return platform;
         };
     }
@@ -229,6 +240,41 @@ private slots:
         backend->show("counter_ui");
         QCOMPARE(evict.count(), 1);
         QCOMPARE(evict.at(0).at(0).toString(), QString("notes_ui"));
+    }
+
+    // The shell says what the user is looking at; the surface has to follow,
+    // because a page is mounted at the BACK of the hierarchy on both phones and
+    // would otherwise never be seen however healthy its channel is.
+    void showingAModuleBringsItsPageToTheFrontAndSendsTheOthersBack()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        // A budget of two, so both pages stay and the only thing under test is
+        // which one is in front.
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(2));
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+
+        backend->show("counter_ui");
+        QVERIFY(m_pages[0]->frontmost);
+        QVERIFY(!m_pages[1]->frontmost);
+
+        backend->show("notes_ui");
+        QVERIFY(!m_pages[0]->frontmost);
+        QVERIFY(m_pages[1]->frontmost);
+    }
+
+    // The host's own cost, which is what slice 28's "memory returns to within a
+    // stated budget" is measured in. A platform that will not say answers -1;
+    // every platform this runs on says something.
+    void theAppCanWeighItself()
+    {
+        const qint64 bytes = basecamp::web::appResidentBytes();
+        QVERIFY2(bytes > 0, qPrintable(QStringLiteral("appResidentBytes() = %1").arg(bytes)));
+        // Sanity rather than a threshold: a Qt test process is more than a
+        // megabyte and less than a hundred gigabytes, and a parse that read the
+        // wrong column would fail one of the two.
+        QVERIFY(bytes > 1024 * 1024);
+        QVERIFY(bytes < Q_INT64_C(100) * 1024 * 1024 * 1024);
     }
 
     void theBudgetIsStated()

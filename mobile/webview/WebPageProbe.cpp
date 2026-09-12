@@ -3,6 +3,7 @@
 #include "webview/MobileWebBridge.h"
 
 #include <QCoreApplication>
+#include <QMetaObject>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -84,14 +85,35 @@ bool WebPageProbe::run(int timeoutMs)
     MobileWebBridge bridge(dir, QString(), QStringLiteral("index.html"), m_origin);
     bridge.setInjectsShimIntoHtml(m_shimInDocument);
 
-    QStringList console;
-    bridge.setOnPageLog([&console, this](const QString& level, const QString& message) {
-        console.append(message);
-        emit log(QStringLiteral("web probe: page %1: %2").arg(level, message));
+    // A MEMBER rather than a local, because the queued delivery below may be
+    // posted while this function is still running and run on the main thread
+    // after it has returned; a captured reference to a local would dangle.
+    m_console.clear();
+    // ON THE QT MAIN THREAD, AND NOT WHERE THIS IS CALLED FROM. Android hands
+    // `shouldInterceptRequest` to a Chromium background thread (see
+    // LogosWebPage.java: that is what makes the long poll free), so a page's
+    // console line arrives on it -- and `log` is connected DIRECTLY to a host
+    // that appends to a QPlainTextEdit. Widgets from a second thread is an
+    // immediate SIGSEGV inside QTextDocumentPrivate::insert; measured on a
+    // Samsung SM-G990B, 2026-09-12, where it took the whole app down mid-probe.
+    //
+    // Queued, so the line is delivered by the processEvents() this probe is
+    // already pumping -- and `console` is appended on that thread too, rather
+    // than being a QStringList two threads touch.
+    bridge.setOnPageLog([this](const QString& level, const QString& message) {
+        QMetaObject::invokeMethod(this, [this, level, message] {
+            m_console.append(message);
+            emit log(QStringLiteral("web probe: page %1: %2").arg(level, message));
+        }, Qt::QueuedConnection);
     });
-    QStringList fromPage;
-    bridge.setReceiver([&fromPage](const std::string& text) {
-        fromPage.append(QString::fromStdString(text));
+    // The same hop, for the same reason: a frame from the page arrives on
+    // whichever thread this platform serves its requests on, and the wait below
+    // reads this list on the main one.
+    m_fromPage.clear();
+    bridge.setReceiver([this](const std::string& text) {
+        const QString line = QString::fromStdString(text);
+        QMetaObject::invokeMethod(this, [this, line] { m_fromPage.append(line); },
+                                  Qt::QueuedConnection);
     });
 
     PlatformPageRequest request;
@@ -113,7 +135,7 @@ bool WebPageProbe::run(int timeoutMs)
     }
 
     const bool listening = pumpUntil(
-        [&console] { return console.join(QLatin1Char(' ')).contains("probe page is listening"); },
+        [this] { return m_console.join(QLatin1Char(' ')).contains("probe page is listening"); },
         timeoutMs);
     emit log(listening
                  ? QStringLiteral("web probe: the page loaded off %1 and published a channel "
@@ -123,10 +145,10 @@ bool WebPageProbe::run(int timeoutMs)
     if (!listening) { page.destroy(); return false; }
 
     bridge.send("probe-ping");
-    const bool answered = pumpUntil([&fromPage] { return !fromPage.isEmpty(); }, timeoutMs);
+    const bool answered = pumpUntil([this] { return !m_fromPage.isEmpty(); }, timeoutMs);
     if (answered) {
         emit log(QStringLiteral("web probe: round trip OK -- %1 (%2 ms)")
-                     .arg(fromPage.first()).arg(since.elapsed()));
+                     .arg(m_fromPage.first()).arg(since.elapsed()));
     } else {
         emit log(QStringLiteral("web probe: the page never answered"));
     }

@@ -44,6 +44,15 @@ private:
     // directory, or an empty string.
     QString writeFixture();
 
+    // Every line the page's console produced, appended ON THE MAIN THREAD.
+    // A member rather than a local in run(): Android delivers a page's log from
+    // a Chromium background thread, so the append is posted, and a post that
+    // outlives run() must not name a local. Cleared at the start of each run.
+    QStringList m_console;
+    // ...and every frame the page sent back, on the same thread and for the
+    // same reason.
+    QStringList m_fromPage;
+
     PlatformPageFactory m_platform;
     bool m_shimInDocument;
     WebOrigin m_origin;

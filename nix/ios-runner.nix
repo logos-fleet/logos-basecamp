@@ -23,6 +23,7 @@
 , toolchainFile
 , crossCmakeFlags      # the cross toolchain's own flags
 , symbolExportFlags    # logos_ios_export_symbols()'s two flags, from the stage
+, webAssetsPath ? ""  # nix/mobile-web-assets.nix's output, copied into <App>.app
 , configureFlags ? [ ] # per-app extras
 , prefixPath           # CMAKE_PREFIX_PATH, already ;-joined
 , findRootPath         # CMAKE_FIND_ROOT_PATH, already ;-joined
@@ -71,6 +72,8 @@ let
         ${lib.escapeShellArgs crossCmakeFlags} \
         ${lib.escapeShellArgs symbolExportFlags} \
         "-DLOGOS_IOS_BUNDLED_FRAMEWORKS=$embed_fws" \
+        "-DLOGOS_IOS_WEB_ASSETS=${webAssetsPath}" \
+        "-DLOGOS_IOS_APP_BUNDLE_DIR=$app" \
         "-DCMAKE_PREFIX_PATH=${prefixPath}" \
         "-DCMAKE_FIND_ROOT_PATH=${findRootPath}" \
         ${lib.escapeShellArgs configureFlags} \
@@ -121,6 +124,25 @@ let
         [ -f "$bin" ] || { echo "error: $fw has no binary at $bin" >&2; exit 1; }
       done
       echo "==> embedded, and matching bundled-set.json: $(tr '\n' ' ' < "$build_dir/got-frameworks.txt")"
+
+      # THE `web` HALF, asserted for the same reason as the Frameworks list: a
+      # copy phase that silently did nothing leaves an app that starts, opens a
+      # page and only then says the runtime is missing -- three steps from the
+      # cause. Both names are what iosQmlRuntimeDir() and iosWebModulesDir()
+      # look for, so a rename on either side fails here rather than on a device.
+      #
+      # RENDERED AWAY rather than tested at run time when this app ships none:
+      # the path is known at eval, so `[ -n "<a literal>" ]` is SC2157 and
+      # writeShellApplication refuses the script (nix/ios-runner-lint.nix
+      # renders both shapes for exactly this reason).${lib.optionalString (webAssetsPath != "") ''
+
+      for want in logos-runtime/logos_qml_runtime.js web-modules; do
+        [ -e "$app/$want" ] || {
+          echo "error: <App>.app/$want is missing; the app ships no $want" >&2
+          exit 1
+        }
+      done
+      echo "==> web assets: $(du -sk "$app/logos-runtime" | cut -f1) KB runtime, modules: $(find "$app/web-modules" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort | tr '\n' ' ')"''}
       # Only on a real signing identity. A simulator build is put together
       # with CODE_SIGNING_ALLOWED=NO and still ends up carrying an ad-hoc
       # signature with no _CodeSignature/CodeResources beside it, so

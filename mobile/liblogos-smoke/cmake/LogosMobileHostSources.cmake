@@ -19,6 +19,12 @@
 #                        renders no view (the mobile catalog publishes no
 #                        ui_qml variant for Android, so no Bundled set there
 #                        can carry one).
+#   WebModuleRunner      compiled by a host that DRIVES the app's Downloaded
+#                        `web` modules as an acceptance pass -- the probe on
+#                        both phones. The Shell installs no Web container of
+#                        its own yet, so it carries the container's code (the
+#                        backend is a singleton the UI reaches) and not the
+#                        runner over it.
 #   IosWebPage.mm        Objective-C++, and added by the iOS stage with its
 #                        own ARC flags.
 include_guard(GLOBAL)
@@ -40,7 +46,12 @@ function(logos_mobile_host_sources out_var)
         ${_webview}/MobileWebModuleView.cpp ${_webview}/MobileWebModuleView.h
         ${_webview}/LiveRuntimeBudget.cpp ${_webview}/LiveRuntimeBudget.h
         ${_webview}/MobileWebContainerBackend.cpp ${_webview}/MobileWebContainerBackend.h
-        ${_webview}/WebPageProbe.cpp ${_webview}/WebPageProbe.h)
+        ${_webview}/WebPageProbe.cpp ${_webview}/WebPageProbe.h
+        # What the process is costing, which is what the live-runtime budget is
+        # spent against. In the shared list rather than beside a runner because
+        # MobileWebContainerBackend itself calls it (appMemoryLine), so a host
+        # that compiles the container and not this fails to link.
+        ${_webview}/AppMemory.cpp ${_webview}/AppMemory.h)
 
     if(ANDROID)
         # android.webkit.WebView over JNI -- the Android half of the container.

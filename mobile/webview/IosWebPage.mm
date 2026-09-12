@@ -12,6 +12,7 @@
 #include <QGuiApplication>
 #include <QWindow>
 #include <QDir>
+#include <QFileInfo>
 
 #include <memory>
 
@@ -240,6 +241,17 @@ QString iosQmlRuntimeDir()
         QDir(fromNs(resources)).filePath(QStringLiteral("logos-runtime")));
 }
 
+QString iosWebModulesDir()
+{
+    // NO UNPACKING STEP, unlike Android: an iOS app's resources ARE files on
+    // disk, read-only, which is all the core's discovery wants. So the app's
+    // shipped `web` modules are added to the core as a second modules
+    // directory exactly where the build put them.
+    NSString* resources = [[NSBundle mainBundle] resourcePath];
+    const QString dir = QDir(fromNs(resources)).filePath(QStringLiteral("web-modules"));
+    return QFileInfo(dir).isDir() ? QDir(dir).absolutePath() : QString();
+}
+
 PlatformPageFactory iosPlatformPageFactory()
 {
     return [](const PlatformPageRequest& request) -> PlatformPage {
@@ -329,6 +341,19 @@ PlatformPageFactory iosPlatformPageFactory()
             holder->delegate = nil;
         };
         page.nativeHandle = [holder]() -> void* { return (__bridge void*)holder->view; };
+        // THE Z-ORDER, and nothing else. The page is already mounted at the
+        // window's size (above); what "the user is looking at this module"
+        // means on iOS is which subview is in front of Qt's own QUIView.
+        // Sending it back rather than hiding it is deliberate: a hidden
+        // WKWebView is throttled, and a background module that is still
+        // answering calls must keep its timers.
+        page.setFrontmost = [holder](bool front) {
+            UIView* view = holder->view;
+            UIView* superview = view.superview;
+            if (!view || !superview) return;
+            if (front) [superview bringSubviewToFront:view];
+            else [superview sendSubviewToBack:view];
+        };
         page.isAlive = [holder]() -> bool { return holder->view != nil; };
         return page;
     };

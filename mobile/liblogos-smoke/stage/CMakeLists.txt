@@ -46,6 +46,8 @@ add_library(liblogos_smoke_host STATIC
     ${LOGOS_HOST_SOURCES}
     ${SRC}/ViewModuleRunner.cpp
     ${SRC}/ViewModuleRunner.h
+    ${SRC}/WebModuleRunner.cpp
+    ${SRC}/WebModuleRunner.h
 )
 
 # LogosViewPlugin.h — the HOST side of the view-plugin interface, from
@@ -153,6 +155,7 @@ set_target_properties(liblogos_smoke_host PROPERTIES EXPORT_NAME LiblogosSmokeHo
 install(TARGETS liblogos_smoke_host EXPORT LiblogosSmokeHostTargets ARCHIVE DESTINATION lib)
 install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledSetRunner.h ${SRC}/NetworkSmokeRunner.h
         ${SRC}/BundledSetCoreRuntime.h ${SRC}/ViewModuleRunner.h
+        ${SRC}/WebModuleRunner.h
         # Header-only, and it is the APP's main.cpp that includes it -- so it
         # has to travel in the installed interface like the runners do.
         ${SRC}/PlatformConsole.h
@@ -168,6 +171,7 @@ install(FILES
         ${WEBVIEW}/MobileWebContainerBackend.h
         ${WEBVIEW}/LiveRuntimeBudget.h
         ${WEBVIEW}/WebPageProbe.h
+        ${WEBVIEW}/AppMemory.h
         DESTINATION include/liblogos-smoke-host/webview)
 install(FILES ${BASECAMP_APP}/web/LogosWebPaths.h
         DESTINATION include/liblogos-smoke-host/web)

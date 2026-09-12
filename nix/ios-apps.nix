@@ -33,6 +33,12 @@
   # the embed list, the symbol scan and the view module's stem all be derived
   # from one answer instead of three.
   bundledSet,
+  # nix/mobile-web-assets.nix: the bundled Qt-wasm QML runtime and the
+  # Downloaded `web` modules this app ships, both architecture-free. Copied into
+  # <App>.app, which is what `[[NSBundle mainBundle] resourcePath]` answers on
+  # iOS -- so iosQmlRuntimeDir() and iosWebModulesDir() find them with no path
+  # of their own.
+  webAssets,
   # logos-view-module-runtime's source tree. Headers only: the host needs
   # LogosViewPlugin.h to cast the plugin it constructs, and nothing else from
   # that repo -- ui-host and its library are a desktop concern.
@@ -210,7 +216,7 @@ let
   # The build dir is keyed on the stage's store path, so a rebuilt stage never
   # reuses an Xcode cache from the previous one.
   mkApp = { pname, appName, project, bundleId, appSrcDir, stage, prefixes ? [ ],
-            configureFlags ? [ ] }:
+            configureFlags ? [ ], webAssetsPath ? "" }:
     mkRunners {
       inherit pname appName project bundleId appleSdk configureFlags;
       appSrc = "${src}/${appSrcDir}";
@@ -220,6 +226,7 @@ let
       toolchainFile = "${pkgs.logosQtCrossToolchainFile}";
       crossCmakeFlags = pkgs.logosQtCrossCmakeFlags;
       symbolExportFlags = stage.logosIosSymbolExports.cmakeFlags;
+      inherit webAssetsPath;
       prefixPath = joined ([ stage ] ++ prefixes);
       findRootPath = joined ([ stage ] ++ prefixes ++ roots);
       versionGate = pkgs.xcodeWrapper.versionGate;
@@ -233,6 +240,10 @@ let
     bundleId = "co.logos.liblogos.smoke";
     appSrcDir = "mobile/liblogos-smoke/app";
     stage = smokeStage;
+    # The Web container's half of the app image. The Shell has no
+    # LOGOS_IOS_WEB_ASSETS yet -- it does not install a web backend -- so it
+    # ships none and the runner asserts nothing about it.
+    webAssetsPath = "${webAssets}";
   };
 
   shellApp = mkApp {
@@ -260,6 +271,8 @@ shellUi.packages
   # cannot be a nix derivation (ADR 0002), so this is the part of the app image
   # that IS one, and the runners below embed exactly it.
   bundled-set = bundledSet;
+  # The `web` half on its own, so `nix build` can weigh it without an Xcode run.
+  web-assets = webAssets;
 }
 // lib.optionalAttrs (appleSdk == "iphonesimulator") {
   run-liblogos-smoke-ios-sim = smokeApp.runSim;

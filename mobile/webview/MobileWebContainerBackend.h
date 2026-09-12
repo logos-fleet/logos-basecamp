@@ -108,6 +108,13 @@ public:
 
     const LiveRuntimeBudget& budget() const { return m_budget; }
 
+    // WHAT THE APP WEIGHS RIGHT NOW, as one log line. show() prints it, and the
+    // host prints it again once it has answered an eviction -- which is the
+    // pair slice 28 asks for: the memory a shell holds with a module's UI live,
+    // and what it returns to when that UI is given up. A platform that will not
+    // say says so rather than printing a zero.
+    static QString appMemoryLine(const QString& occasion);
+
 signals:
     // A module's page exists and can be mounted. Emitted BEFORE the container
     // asks the page whether it is serving, so the page is on screen while it
@@ -117,6 +124,11 @@ signals:
 
     // The module's page is going away. The handle is already unusable.
     void viewClosed(const QString& moduleName);
+
+    // One line the module's page wrote to its own console. A `web` variant
+    // draws into a canvas, so what it says is the only thing outside it can
+    // read -- a host that asserts "the view came up" asserts on these.
+    void pageLog(const QString& moduleName, const QString& level, const QString& message);
 
     // This module is over the live-runtime budget and must give its page up.
     // The host answers by unloading it through the core; see the class note on

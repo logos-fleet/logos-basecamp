@@ -45,6 +45,19 @@ struct PlatformPage {
     // `webViewWebContentProcessDidTerminate`, Android `onRenderProcessGone`)
     // reports through onDied instead; this is for the ordinary question.
     std::function<bool()> isAlive;
+    // PUT THIS PAGE IN FRONT OF THE HOST'S OWN SURFACE, or behind it again.
+    //
+    // Both phones mount a module's page at the BACK of the view hierarchy at
+    // creation, for the same reason: a webview that is not in a window is
+    // throttled -- requestAnimationFrame stops and a Qt-wasm QML runtime
+    // drawing through it freezes -- so a page has to be mounted before anyone
+    // decides to look at it. Which means "the user is looking at this module"
+    // is a separate instruction, and this is it.
+    //
+    // Optional: a platform that has no z-order to speak of (and the fake webview
+    // a desktop test drives) leaves it unset, and the backend then only keeps
+    // the books.
+    std::function<void(bool front)> setFrontmost;
 };
 
 // What a platform backend is asked to build. Everything it needs and nothing
@@ -97,6 +110,19 @@ public:
     // the page never came up.
     void* nativeHandle() const;
 
+    // Bring this page in front of the host's own surface, or send it back.
+    // A no-op on a platform whose page does not implement it.
+    void setFrontmost(bool front);
+
+    // Every line the page's own console produced. Already printed through Qt's
+    // message handler; this is for a host that wants to WAIT for one -- which
+    // for a view that draws into a canvas is the only way to know it came up.
+    // Set before the page is loaded, so nothing is missed.
+    void setOnPageLog(std::function<void(const QString& level, const QString& message)> sink)
+    {
+        m_onPageLog = std::move(sink);
+    }
+
     // Called from the destructor, whatever destroyed this view. The container
     // owns the view's lifetime and the backend owns the registry of them, and
     // this is the only place the two meet: a view the container has destroyed
@@ -117,6 +143,7 @@ private:
     logos::web::MessageChannelPtr m_channel;
     PlatformPage m_page;
     std::function<void()> m_onDied;
+    std::function<void(const QString&, const QString&)> m_onPageLog;
     std::function<void()> m_onDestroyed;
     bool m_announced = false;
     bool m_alive = true;

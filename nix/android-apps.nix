@@ -29,6 +29,11 @@
   # app's native library directory, which since API 29 is the only place
   # Android will dlopen from at all.
   bundledSet,
+  # nix/mobile-web-assets.nix: the bundled Qt-wasm QML runtime and the
+  # Downloaded `web` modules this build ships. Packaged as APK ASSETS (the only
+  # way an APK carries a directory tree) and unpacked into the app's data
+  # directory on first launch -- see unpackAndroidWebAssets.
+  webAssets,
   # logos-view-module-runtime's source tree. Headers only: the host needs
   # LogosViewPlugin.h to cast the plugin it constructs. Nothing on Android
   # constructs one yet -- the mobile catalog publishes no `ui_qml` variant for
@@ -261,6 +266,11 @@ let
     ];
     cmakeFlags = [
       "-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=${pkgs.qt6.qtremoteobjects}"
+      # The Web container's half of the app image. Only the probe ships it --
+      # the Shell installs no web backend of its own, so it carries none and
+      # its CMakeLists asserts nothing about one. Same split as iOS, where
+      # `webAssetsPath` is the smoke app's argument alone.
+      "-DLOGOS_ANDROID_WEB_ASSETS=${webAssets}"
     ];
   };
 
@@ -331,6 +341,8 @@ shellUi.packages
   # <repo> --target android-arm64 --bundle <apps>` builds. Both APKs above
   # package exactly it.
   bundled-set = bundledSet;
+  # The `web` half on its own, so `nix build` can weigh it without an APK.
+  web-assets = webAssets;
   run-liblogos-smoke-android = smokeApp.runner;
   run-basecamp-shell-android = shellApp.runner;
 }
