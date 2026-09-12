@@ -66,6 +66,7 @@ private:
     // to put a key or a finger on what a user would touch is to dispatch the
     // event in the page. What happens next the MODULE reports, on its own
     // console, which is what these then wait for.
+    bool tapButton(const QString& name);
     bool typeIntoView(const QString& name);
     bool scrollViewList(const QString& name);
 

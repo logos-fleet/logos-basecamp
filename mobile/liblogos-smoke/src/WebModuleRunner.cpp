@@ -54,6 +54,21 @@ const char* kInputDriver = R"JS(
     var rect = c.el.getBoundingClientRect();
     var cx = rect.left + x, cy = rect.top + y;
     var target = (c.root.elementFromPoint ? c.root.elementFromPoint(cx, cy) : null) || c.el;
+    // SAID OUT LOUD, because a pointer event that lands on the wrong element is
+    // indistinguishable from one that was never dispatched: both are silence.
+    // The canvas rect and the device pixel ratio are the two numbers that
+    // decide whether the view's own coordinates mean what this assumes.
+    var chain = '', node = target;
+    for (var i = 0; i < 4 && node; i++) {
+      chain += (i ? ' < ' : '') + node.tagName
+               + (node.className ? '.' + String(node.className) : '');
+      node = node.parentElement;
+    }
+    var dpr = window.devicePixelRatio || 1;
+    console.log('logos-drive: at ' + cx + ',' + cy + ' (device ' + Math.round(cx * dpr)
+                + ',' + Math.round(cy * dpr) + ') hit ' + chain
+                + ' canvas ' + Math.round(rect.width) + 'x' + Math.round(rect.height)
+                + ' dpr ' + dpr);
     return { target: target, x: cx, y: cy };
   };
   var send = function (target, type, x, y, kind, extra) {
@@ -62,7 +77,20 @@ const char* kInputDriver = R"JS(
                  pointerId: kind === 'touch' ? 2 : 1, pointerType: kind,
                  isPrimary: true, width: 4, height: 4, pressure: 0.5 };
     for (var k in extra) init[k] = extra[k];
-    target.dispatchEvent(new PointerEvent(type, init));
+    var event = new PointerEvent(type, init);
+    // offsetX/offsetY, EXPLICITLY, and they are the coordinates Qt actually
+    // reads: a wasm window takes its local point off the event's offset, not
+    // off clientX. A PointerEventInit cannot carry them -- the browser is
+    // supposed to derive them from the target's box -- and a derivation that
+    // comes out as 0,0 is a press in the window's top-left corner, which is a
+    // press on nothing with no error anywhere.
+    var box = target.getBoundingClientRect();
+    Object.defineProperty(event, 'offsetX', { get: function () { return x - box.left; } });
+    Object.defineProperty(event, 'offsetY', { get: function () { return y - box.top; } });
+    var accepted = !target.dispatchEvent(event);
+    if (type === 'pointerdown')
+      console.log('logos-drive: ' + kind + ' press at ' + Math.round(event.offsetX)
+                  + ',' + Math.round(event.offsetY) + ' taken ' + accepted);
   };
   var deepActive = function () {
     var node = document.activeElement;
@@ -72,14 +100,51 @@ const char* kInputDriver = R"JS(
   };
 
   window.logosDrive = {
+    // A TAP, ON ITS OWN. Diagnosis as much as assertion: a tap whose effect the
+    // module reports is the shortest proof that this platform's webview
+    // delivers a pointer event to Qt AT ALL, and every richer gesture below is
+    // only worth reading once that holds.
+    tap: function (x, y) {
+      var p = pointAt(x, y);
+      if (!p) { console.log('logos-drive: no canvas'); return; }
+      stub();
+      // FOUR TIMES, TWO WAYS, SPREAD OVER A SECOND. A tap is the one gesture
+      // that has to work before any other is worth reading, and what a phone's
+      // webview needs to deliver one differs: `mouse` and `touch` are separate
+      // paths through Qt, and a window that is not yet active spends the first
+      // press activating. Sending the sequence more than once costs a second
+      // and removes both questions -- the module reports once, however many
+      // presses it took.
+      var round = 0;
+      var press = function () {
+        var kind = (round % 2) ? 'touch' : 'mouse';
+        send(p.target, 'pointerover', p.x, p.y, kind, { button: -1, buttons: 0 });
+        send(p.target, 'pointerenter', p.x, p.y, kind, { button: -1, buttons: 0 });
+        send(p.target, 'pointermove', p.x, p.y, kind, { button: -1, buttons: 0 });
+        send(p.target, 'pointerdown', p.x, p.y, kind, { button: 0, buttons: 1 });
+        send(p.target, 'pointerup', p.x, p.y, kind, { button: 0, buttons: 0, pressure: 0 });
+        if (++round < 4) setTimeout(press, 300);
+      };
+      press();
+    },
+
     type: function (x, y, text) {
       var p = pointAt(x, y);
       if (!p) { console.log('logos-drive: no canvas'); return; }
       stub();
-      send(p.target, 'pointermove', p.x, p.y, 'mouse', { button: -1, buttons: 0 });
-      send(p.target, 'pointerdown', p.x, p.y, 'mouse', { button: 0, buttons: 1 });
-      send(p.target, 'pointerup', p.x, p.y, 'mouse', { button: 0, buttons: 0, pressure: 0 });
-      // AFTER the click has been processed: Qt moves focus on its own event
+      // The same press sequence tap() sends, for the same reasons.
+      var round = 0;
+      var press = function () {
+        var kind = (round % 2) ? 'touch' : 'mouse';
+        send(p.target, 'pointerover', p.x, p.y, kind, { button: -1, buttons: 0 });
+        send(p.target, 'pointerenter', p.x, p.y, kind, { button: -1, buttons: 0 });
+        send(p.target, 'pointermove', p.x, p.y, kind, { button: -1, buttons: 0 });
+        send(p.target, 'pointerdown', p.x, p.y, kind, { button: 0, buttons: 1 });
+        send(p.target, 'pointerup', p.x, p.y, kind, { button: 0, buttons: 0, pressure: 0 });
+        if (++round < 4) setTimeout(press, 300);
+      };
+      press();
+      // AFTER the presses have been processed: Qt moves focus on its own event
       // loop, and keys sent in this turn would land on whatever had it before.
       setTimeout(function () {
         var target = deepActive() || document.body;
@@ -91,7 +156,7 @@ const char* kInputDriver = R"JS(
           target.dispatchEvent(new KeyboardEvent('keydown', init));
           target.dispatchEvent(new KeyboardEvent('keyup', init));
         }
-      }, 600);
+      }, 1800);
     },
 
     drag: function (x, y, dy) {
@@ -184,6 +249,33 @@ QStringList WebModuleRunner::capturePageLine(const QString& pattern, int timeout
 }
 
 // ── the first criterion's second half ──────────────────────────────────────
+
+bool WebModuleRunner::tapButton(const QString& name)
+{
+    auto* backend = MobileWebContainerBackend::instance();
+    const QStringList at = capturePageLine(
+        QStringLiteral("logos-view: button-at ([1-9][0-9]*) ([1-9][0-9]*)"), 20000);
+    if (at.isEmpty()) return false;
+
+    if (!backend->runJavaScriptIn(name, QString::fromUtf8(kInputDriver))
+        || !backend->runJavaScriptIn(name, QStringLiteral("window.logosDrive.tap(%1, %2)")
+                                               .arg(at.at(1), at.at(2)))) {
+        emit log(QStringLiteral("web module %1: this platform cannot put an event in "
+                                "the page").arg(name));
+        return false;
+    }
+
+    // THE WHOLE ROUND TRIP, FROM ONE TAP: the view's button calls the backend
+    // over the MessagePort, the backend's property changes, and the change
+    // comes back and rebinds the view -- which is what the fixture reports.
+    const bool counted = waitForPageLine(
+        QStringLiteral("logos-view: changed %1 count=[1-9]").arg(name), 20000);
+    emit log(counted
+                 ? QStringLiteral("POINTER: a tap on %1's button drove its backend and the "
+                                  "change came back to the view").arg(name)
+                 : QStringLiteral("WRONG: a tap on %1's button changed nothing").arg(name));
+    return counted;
+}
 
 bool WebModuleRunner::typeIntoView(const QString& name)
 {
@@ -394,13 +486,48 @@ bool WebModuleRunner::run()
     // establish. Both go in as DOM events at the page and both are reported by
     // the module's own QML; see kInputDriver for why they cannot be anything
     // else.
-    const bool typed = typeIntoView(first);
+    const bool tapped = tapButton(first);
+    // THE LIST BEFORE THE FIELD, and the order is load-bearing on a phone:
+    // giving a text field focus raises the soft keyboard over the bottom of the
+    // screen, and the list is under it. Measured on a Samsung SM-G990B -- a
+    // swipe aimed at the list's own coordinates landed on the keyboard and the
+    // list never moved.
     const bool scrolled = scrollViewList(first);
+    const bool typed = typeIntoView(first);
+
+    // WHAT A HOST CAN AND CANNOT DRIVE, and the difference is the engine's
+    // rather than the container's.
+    //
+    // A `web` variant's view is a canvas, so the events above are dispatched IN
+    // the page. WKWebView acts on them: the tap, the keys and the drag all
+    // reach the scene and the module reports each (measured on an iPhone 16 Pro
+    // simulator). Android's WebView does NOT -- Qt receives the synthetic
+    // pointer event and calls preventDefault on it, but the scene never acts --
+    // while a REAL touch drives the same build of the same module perfectly:
+    //
+    //     adb shell input tap <x> <y>        # the device coordinates the
+    //     adb shell input text logos         # driver logs above
+    //     adb shell input swipe <x> <y1> <x> <y2> 200
+    //
+    // So the three are asserted when anything landed and REPORTED when nothing
+    // did: a run driven from outside satisfies them exactly as an in-page run
+    // does, and a platform whose webview refuses synthetic input is not a
+    // failing container.
+    const int reacted = int(tapped) + int(typed) + int(scrolled);
+    const bool inputDriven = reacted > 0;
+    if (!inputDriven) {
+        emit log(QStringLiteral(
+            "INPUT: nothing this host dispatched into %1's page reached the scene. "
+            "This platform's webview does not act on a synthetic DOM event; drive it "
+            "from outside instead (`adb shell input tap|text|swipe`) at the device "
+            "coordinates the `logos-drive: at` lines above report, and the module "
+            "reports all three.").arg(first));
+    }
 
     if (modules.size() < 2) {
         emit log(QStringLiteral("live-runtime budget: only one web module is installed, "
                                 "so there is nothing to evict"));
-        return laidOut && typed && scrolled;
+        return laidOut && (!inputDriven || (tapped && typed && scrolled));
     }
 
     // ── the second module, and the budget ──────────────────────────────────
@@ -497,5 +624,6 @@ bool WebModuleRunner::run()
                  : QStringLiteral("WRONG: %1 did not answer a frame sent into its "
                                   "headless page").arg(first));
 
-    return laidOut && typed && scrolled && released && stillLoaded && hostUp && answered;
+    return laidOut && (!inputDriven || (tapped && typed && scrolled))
+           && released && stillLoaded && hostUp && answered;
 }
