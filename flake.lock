@@ -37126,11 +37126,11 @@
         "rust-overlay": "rust-overlay_20"
       },
       "locked": {
-        "lastModified": 1789230597,
-        "narHash": "sha256-IKGt8svN4HwjL00m4OHG/FilMdIK6dgpPXipNamy2d0=",
+        "lastModified": 1789240337,
+        "narHash": "sha256-cUuhPOkdgbnbcEgpO0XNlddZNLSObuYHMKIlFXsU5AM=",
         "owner": "logos-fleet",
         "repo": "logos-module-builder",
-        "rev": "f501128e6cb96a27b7f4565b85f830865fc7755c",
+        "rev": "82dfc8709c22736fd50e4f022028ebebed735d6f",
         "type": "github"
       },
       "original": {

@@ -216,11 +216,19 @@ int main(int argc, char* argv[])
                      basecamp::web::LiveRuntimeBudget(), /*shimInDocument=*/true,
                      basecamp::web::WebOrigin::android());
 #endif
+        QObject::connect(web, &MobileWebContainerBackend::uiEvicted,
+                         &app, [](const QString& name) {
+                             say(QStringLiteral("web container: %1 is over the "
+                                                "live-runtime budget; its UI page is "
+                                                "gone and its Wasm host is not")
+                                     .arg(name));
+                         });
         QObject::connect(web, &MobileWebContainerBackend::uiEvictionRequired,
                          &app, [](const QString& name) {
                              say(QStringLiteral("web container: %1 is over the "
-                                                "live-runtime budget and must give "
-                                                "up its UI page").arg(name));
+                                                "live-runtime budget and ships no "
+                                                "headless document, so it must be "
+                                                "unloaded").arg(name));
                          });
     }
 

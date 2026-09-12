@@ -5,8 +5,217 @@
 
 #include <QDir>
 #include <QEventLoop>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QTimer>
+
+#include <mutex>
+
+namespace {
+
+// ── driving real input at a canvas ─────────────────────────────────────────
+//
+// A `web` variant's view is pixels in a canvas: there is no DOM node to touch,
+// no text node to read and no accessibility tree to drive. So a host that has
+// to show that a real key and a real finger reach the view dispatches the
+// events IN THE PAGE, and then waits for the module's own QML to say what
+// arrived. Everything asserted afterwards is the module reporting on itself.
+//
+// The same gestures the browser end-to-end drives (logos-module-builder's
+// wasm/browser-e2e), with the same findings baked in:
+//
+//   * THE KEY EVENT ALONE. Qt takes the character off `keydown`; adding the
+//     `input` event a real IME would also fire types every character twice.
+//   * POINTER CAPTURE HAS TO BE DEFUSED. Qt captures the pointer on
+//     pointerdown and a browser refuses to capture an id no real input device
+//     owns -- which throws out of the dispatch and leaves a drag half
+//     delivered.
+//   * A DRAG NEEDS A FRAME BETWEEN ITS MOVES. Flickable has no velocity from
+//     one sample, and eight moves in one turn of the loop are a teleport.
+//
+// ...and two that are a phone's own:
+//
+//   * THE PRESS AND THE KEYS CANNOT BE IN THE SAME TURN of the page's event
+//     loop. Qt moves focus on ITS event loop, so the keys go in from a timer,
+//     after the press has landed.
+//   * THE COORDINATE THE BROWSER HANDS QT IS NOT THE ONE YOU SENT, and it is
+//     not the same on both phones. A Qt wasm window reads offsetX/offsetY, the
+//     browser derives those from clientX, and a Samsung SM-G990B's WebView
+//     derives them divided by the device pixel ratio while WKWebView does not.
+//     So the driver MEASURES the relation with two probe events and solves it,
+//     rather than believing either engine. Getting this wrong is silent: the
+//     press lands in the window's top-left region, Qt accepts it, and nothing
+//     happens.
+const char* kInputDriver = R"JS(
+(function () {
+  if (window.logosDrive) return;
+  var canvas = function () {
+    var host = document.querySelector('#qt-shadow-container');
+    var root = (host && host.shadowRoot) || document;
+    return { root: root, el: root.querySelector('canvas') };
+  };
+  var stub = function () {
+    if (Element.prototype.__logosCaptureStubbed) return;
+    Element.prototype.setPointerCapture = function () {};
+    Element.prototype.releasePointerCapture = function () {};
+    Element.prototype.__logosCaptureStubbed = true;
+  };
+  // WHAT clientX HAS TO BE FOR QT TO SEE THE POINT WE MEAN.
+  //
+  // A Qt wasm window takes its local point off the event's offsetX/offsetY, and
+  // those cannot be set: the browser derives them from the target's box. What
+  // the browser derives is NOT the same on both phones -- MEASURED, a Samsung
+  // SM-G990B's WebView reports an offset of exactly clientX/devicePixelRatio
+  // (60 for a point meant as 180), while WKWebView reports clientX itself. Two
+  // probe events measure the relation instead of assuming either: dispatch a
+  // pointermove at two known client positions, read what the browser made of
+  // them, and solve the line. A pointermove is free -- Qt treats it as a hover.
+  var calibrate = function (target, rect) {
+    var probe = function (clientX, clientY) {
+      var event = new PointerEvent('pointermove', {
+        bubbles: true, cancelable: true, composed: true,
+        clientX: clientX, clientY: clientY, pointerId: 1, pointerType: 'mouse',
+        isPrimary: true, button: -1, buttons: 0 });
+      target.dispatchEvent(event);
+      return { x: event.offsetX, y: event.offsetY };
+    };
+    var a = probe(rect.left, rect.top);
+    var b = probe(rect.left + 100, rect.top + 100);
+    var sx = (b.x - a.x) / 100, sy = (b.y - a.y) / 100;
+    if (!sx || !sy) return null;
+    // client = (wanted - intercept) / slope
+    return { sx: sx, sy: sy,
+             bx: a.x - sx * rect.left, by: a.y - sy * rect.top };
+  };
+
+  var pointAt = function (x, y) {
+    var c = canvas();
+    if (!c.el) return null;
+    var rect = c.el.getBoundingClientRect();
+    var cx = rect.left + x, cy = rect.top + y;
+    var target = (c.root.elementFromPoint ? c.root.elementFromPoint(cx, cy) : null) || c.el;
+    var line = calibrate(target, rect);
+    if (line) {
+      cx = (x - line.bx) / line.sx;
+      cy = (y - line.by) / line.sy;
+    }
+    // SAID OUT LOUD, because a pointer event that lands on the wrong element is
+    // indistinguishable from one that was never dispatched: both are silence.
+    // The canvas rect and the device pixel ratio are the two numbers that
+    // decide whether the view's own coordinates mean what this assumes.
+    var chain = '', node = target;
+    for (var i = 0; i < 4 && node; i++) {
+      chain += (i ? ' < ' : '') + node.tagName
+               + (node.className ? '.' + String(node.className) : '');
+      node = node.parentElement;
+    }
+    var dpr = window.devicePixelRatio || 1;
+    console.log('logos-drive: at ' + Math.round(cx) + ',' + Math.round(cy)
+                + ' for ' + x + ',' + y
+                + ' (device ' + Math.round((rect.left + x) * dpr) + ','
+                + Math.round((rect.top + y) * dpr) + ') hit ' + chain
+                + ' canvas ' + Math.round(rect.width) + 'x' + Math.round(rect.height)
+                + ' dpr ' + dpr);
+    return { target: target, x: cx, y: cy };
+  };
+  var send = function (target, type, x, y, kind, extra) {
+    var init = { bubbles: true, cancelable: true, composed: true,
+                 clientX: x, clientY: y, screenX: x, screenY: y,
+                 pointerId: kind === 'touch' ? 2 : 1, pointerType: kind,
+                 isPrimary: true, width: 4, height: 4, pressure: 0.5 };
+    for (var k in extra) init[k] = extra[k];
+    var event = new PointerEvent(type, init);
+    var accepted = !target.dispatchEvent(event);
+    // offsetX/offsetY ARE WHAT QT READS -- a wasm window takes its local point
+    // off the event's offset, not off clientX -- and they cannot be set: a
+    // PointerEventInit has no field for them and the browser derives them from
+    // the target's box. Logged for that reason, because a derivation that comes
+    // out wrong is a press in the wrong place with no error anywhere. MEASURED:
+    // defining them by hand (Object.defineProperty on the event) makes WebKit
+    // stop acting on the press entirely, so the derived value is the only one
+    // worth sending.
+    if (type === 'pointerdown')
+      console.log('logos-drive: ' + kind + ' press at ' + Math.round(event.offsetX)
+                  + ',' + Math.round(event.offsetY) + ' taken ' + accepted);
+  };
+  // ONE PRESS: move, down, up, at one point. Qt listens for pointerdown,
+  // pointermove, pointerup and pointercancel on its window div and for nothing
+  // else, so this is the whole of what a tap is from outside.
+  var press = function (p, kind) {
+    send(p.target, 'pointermove', p.x, p.y, kind, { button: -1, buttons: 0 });
+    send(p.target, 'pointerdown', p.x, p.y, kind, { button: 0, buttons: 1 });
+    send(p.target, 'pointerup', p.x, p.y, kind, { button: 0, buttons: 0, pressure: 0 });
+  };
+  var deepActive = function () {
+    var node = document.activeElement;
+    while (node && node.shadowRoot && node.shadowRoot.activeElement)
+      node = node.shadowRoot.activeElement;
+    return node;
+  };
+
+  window.logosDrive = {
+    // A TAP, ON ITS OWN. Diagnosis as much as assertion: a tap whose effect the
+    // module reports is the shortest proof that this platform's webview
+    // delivers a pointer event to Qt AT ALL, and every richer gesture below is
+    // only worth reading once that holds.
+    tap: function (x, y) {
+      var p = pointAt(x, y);
+      if (!p) { console.log('logos-drive: no canvas'); return; }
+      stub();
+      press(p, 'mouse');
+      // ...AND THE SAME TAP AS A FINGER, a moment later. The two are separate
+      // paths through Qt and a webview may act on one and not the other; the
+      // module reports once, whichever landed.
+      setTimeout(function () { press(p, 'touch'); }, 250);
+    },
+
+    type: function (x, y, text) {
+      var p = pointAt(x, y);
+      if (!p) { console.log('logos-drive: no canvas'); return; }
+      stub();
+      press(p, 'mouse');
+      setTimeout(function () { press(p, 'touch'); }, 250);
+      // AFTER the presses have been processed: Qt moves focus on its own event
+      // loop, and keys sent in this turn would land on whatever had it before.
+      setTimeout(function () {
+        var target = deepActive() || document.body;
+        console.log('logos-drive: keys to ' + target.tagName);
+        for (var i = 0; i < text.length; i++) {
+          var key = text[i];
+          var init = { key: key, code: 'Key' + key.toUpperCase(),
+                       bubbles: true, cancelable: true, composed: true };
+          target.dispatchEvent(new KeyboardEvent('keydown', init));
+          target.dispatchEvent(new KeyboardEvent('keyup', init));
+        }
+      }, 800);
+    },
+
+    drag: function (x, y, dy) {
+      var p = pointAt(x, y);
+      if (!p) { console.log('logos-drive: no canvas'); return; }
+      stub();
+      send(p.target, 'pointerdown', p.x, p.y, 'touch', { button: 0, buttons: 1 });
+      var step = 0;
+      var move = function () {
+        step++;
+        send(p.target, 'pointermove', p.x, p.y + (dy * step) / 8, 'touch',
+             { button: -1, buttons: 1 });
+        // ONE FRAME APART. Flickable has no velocity from a single sample, and
+        // eight moves delivered in one turn of the loop are one teleport.
+        if (step < 8) { setTimeout(move, 16); return; }
+        setTimeout(function () {
+          send(p.target, 'pointerup', p.x, p.y + dy, 'touch',
+               { button: 0, buttons: 0, pressure: 0 });
+        }, 16);
+      };
+      setTimeout(move, 16);
+    }
+  };
+})();
+)JS";
+
+} // namespace
 
 using basecamp::web::megabytes;
 using basecamp::web::MobileWebContainerBackend;
@@ -25,7 +234,9 @@ WebModuleRunner::WebModuleRunner(ICoreRuntime* core, QString webModulesDir, QObj
                 // `contains`, not `startsWith`: Qt's own console route prefixes
                 // a page's qml log with "qml: ".
                 if (message.contains(QStringLiteral("logos-view:"))
+                    || message.contains(QStringLiteral("logos-drive:"))
                     || message.contains(QStringLiteral("[logos-web-view"))
+                    || message.contains(QStringLiteral("[logos-web-host"))
                     || level == QLatin1String("error"))
                     emit log(QStringLiteral("web %1: %2").arg(module, message));
             });
@@ -49,6 +260,188 @@ bool WebModuleRunner::waitForPageLine(const QString& pattern, int timeoutMs)
         if (timer.elapsed() >= timeoutMs) return false;
         pump(100);
     }
+}
+
+QStringList WebModuleRunner::capturePageLine(const QString& pattern, int timeoutMs)
+{
+    const QRegularExpression re(pattern);
+    QElapsedTimer timer;
+    timer.start();
+    for (;;) {
+        // BACKWARDS. Every one of these lines is reported on a repeating timer
+        // by the fixture, so the list holds many; the last is the one that
+        // describes the view as it is NOW.
+        for (int i = m_pageLines.size() - 1; i >= 0; --i) {
+            const QRegularExpressionMatch match = re.match(m_pageLines.at(i));
+            if (match.hasMatch()) return match.capturedTexts();
+        }
+        if (timer.elapsed() >= timeoutMs) return {};
+        pump(100);
+    }
+}
+
+// ── the first criterion's second half ──────────────────────────────────────
+
+QStringList WebModuleRunner::viewPointFor(const QString& label)
+{
+    // WHERE THE VIEW SAYS THE THING IS, in window coordinates -- the fixture
+    // reports `logos-view: <label>-at X Y` on a repeating timer. Only POSITIVE
+    // coordinates match: a view that never got geometry reports 0 0, and a
+    // gesture aimed there would land in the window's corner and look like a
+    // platform that swallows events.
+    return capturePageLine(
+        QStringLiteral("logos-view: %1-at ([1-9][0-9]*) ([1-9][0-9]*)").arg(label), 20000);
+}
+
+bool WebModuleRunner::drive(const QString& name, const QString& call)
+{
+    // THE DRIVER, THEN THE CALL. kInputDriver installs itself once and returns
+    // immediately when it is already in the page, so every gesture can ask for
+    // it without keeping track of which page has it.
+    auto* backend = MobileWebContainerBackend::instance();
+    if (backend->runJavaScriptIn(name, QString::fromUtf8(kInputDriver))
+        && backend->runJavaScriptIn(name, call))
+        return true;
+    emit log(QStringLiteral("web module %1: this platform cannot put an event in "
+                            "the page").arg(name));
+    return false;
+}
+
+bool WebModuleRunner::tapButton(const QString& name)
+{
+    const QStringList at = viewPointFor(QStringLiteral("button"));
+    if (at.isEmpty()) return false;
+    if (!drive(name, QStringLiteral("window.logosDrive.tap(%1, %2)")
+                         .arg(at.at(1), at.at(2))))
+        return false;
+
+    // THE WHOLE ROUND TRIP, FROM ONE TAP: the view's button calls the backend
+    // over the MessagePort, the backend's property changes, and the change
+    // comes back and rebinds the view -- which is what the fixture reports.
+    const bool counted = waitForPageLine(
+        QStringLiteral("logos-view: changed %1 count=[1-9]").arg(name), 20000);
+    emit log(counted
+                 ? QStringLiteral("POINTER: a tap on %1's button drove its backend and the "
+                                  "change came back to the view").arg(name)
+                 : QStringLiteral("WRONG: a tap on %1's button changed nothing").arg(name));
+    return counted;
+}
+
+bool WebModuleRunner::typeIntoView(const QString& name)
+{
+    const QStringList at = viewPointFor(QStringLiteral("field"));
+    if (at.isEmpty()) {
+        emit log(QStringLiteral("web module %1: its view never reported a text field")
+                     .arg(name));
+        return false;
+    }
+    if (!drive(name, QStringLiteral("window.logosDrive.type(%1, %2, 'logos')")
+                         .arg(at.at(1), at.at(2))))
+        return false;
+
+    // WHAT THE MODULE SAYS IT GOT. `logos-view: typed logos` is the fixture's
+    // own TextField reporting its contents after five keydowns -- the fact a
+    // screenshot of a canvas cannot establish, and the fact a driver that
+    // merely dispatched events cannot claim.
+    const bool typed = waitForPageLine(QStringLiteral("logos-view: typed logos"), 20000);
+    const QStringList focus = capturePageLine(
+        QStringLiteral("logos-view: field-focus (true|false)"), 1000);
+    emit log(typed
+                 ? QStringLiteral("KEYBOARD: %1's text field has `logos` in it, typed by "
+                                  "five key events at its editor (focus=%2)")
+                       .arg(name, focus.size() > 1 ? focus.at(1) : QStringLiteral("?"))
+                 : QStringLiteral("WRONG: %1's text field never took the keys").arg(name));
+    return typed;
+}
+
+bool WebModuleRunner::scrollViewList(const QString& name)
+{
+    const QStringList at = viewPointFor(QStringLiteral("list"));
+    if (at.isEmpty()) {
+        emit log(QStringLiteral("web module %1: its view never reported a list").arg(name));
+        return false;
+    }
+    if (!drive(name, QStringLiteral("window.logosDrive.drag(%1, %2, -90)")
+                         .arg(at.at(1), at.at(2))))
+        return false;
+
+    // THE ROW, not only the offset. A list that moved its content without
+    // rebinding a delegate has not scrolled in any sense a user would name, so
+    // the fixture reports the index it put at the top and this waits for one
+    // that is not the first.
+    const bool scrolled = waitForPageLine(
+        QStringLiteral("logos-view: scrolled contentY=[1-9][0-9]* first=[1-9]"), 20000);
+    const QStringList where = capturePageLine(
+        QStringLiteral("logos-view: scrolled contentY=(\\d+) first=(-?\\d+)"), 1000);
+    emit log(scrolled
+                 ? QStringLiteral("SCROLLING: %1's list followed a drag to contentY=%2 "
+                                  "with row %3 at the top")
+                       .arg(name, where.value(1), where.value(2))
+                 : QStringLiteral("WRONG: %1's list did not follow the drag (%2)")
+                       .arg(name, where.isEmpty() ? QStringLiteral("no scroll line")
+                                                  : where.at(0)));
+    return scrolled;
+}
+
+// ── the third criterion ────────────────────────────────────────────────────
+
+bool WebModuleRunner::callIntoPage(const QString& name, QString* answer)
+{
+    auto* backend = MobileWebContainerBackend::instance();
+
+    // A `Methods` FRAME, AND IT IS THE CONTAINER'S OWN QUESTION. liblogos'
+    // WebContainer decides a `web` module is serving by asking its page for its
+    // interface and getting an answer (WebContainer::awaitLoad), and the wasm
+    // host answers it off the live backend QObject's metaobject. So a
+    // MethodsResult coming back here is not a proxy for "the module is
+    // answering" -- it is the same evidence the container itself uses, taken
+    // while the module's UI page is gone.
+    //
+    // A Call would be the more obvious frame and would prove less: a `ui_qml`
+    // module's backend is reached by a QtRO replica, so its wasm host refuses
+    // Calls on this transport BY DESIGN and a refusal would be ambiguous.
+    const int id = 990001;
+    const QString frame =
+        QStringLiteral("{\"type\":7,\"payload\":{\"id\":%1,\"authToken\":\"\","
+                       "\"object\":\"%2\"}}")
+            .arg(QString::number(id), name);
+
+    // UNDER A LOCK, because the observer is NOT this thread. The bridge calls it
+    // from whatever thread the page's request arrived on -- the Android UI
+    // thread is not Qt's -- while this one is pumping and reading the same
+    // QString, and a QString read while another thread assigns it is not a stale
+    // value but a corrupt one.
+    std::mutex replyMutex;
+    QString reply;
+    const auto answerSoFar = [&replyMutex, &reply] {
+        std::lock_guard<std::mutex> guard(replyMutex);
+        return reply;
+    };
+    backend->observeFramesFrom(name, [&replyMutex, &reply, id](const QString& text) {
+        const QJsonObject envelope = QJsonDocument::fromJson(text.toUtf8()).object();
+        // ONLY OUR ANSWER. The page is talking to the core on this wire at the
+        // same time; everything that is not a MethodsResult carrying the id we
+        // minted belongs to someone else.
+        if (envelope.value(QStringLiteral("type")).toInt() != 8) return;
+        const QJsonObject payload = envelope.value(QStringLiteral("payload")).toObject();
+        if (payload.value(QStringLiteral("id")).toInt() != id) return;
+        std::lock_guard<std::mutex> guard(replyMutex);
+        if (reply.isEmpty()) reply = text;
+    });
+    if (!backend->sendFrameTo(name, frame)) {
+        backend->observeFramesFrom(name, nullptr);
+        return false;
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    while (answerSoFar().isEmpty() && timer.elapsed() < 20000) pump(100);
+    // THE SINK GOES BEFORE THE LOCALS IT CAPTURES, on every path out of here --
+    // which is why the early return above clears it too.
+    backend->observeFramesFrom(name, nullptr);
+    const QString answered = answerSoFar();
+    if (answer) *answer = answered;
+    return !answered.isEmpty();
 }
 
 QStringList WebModuleRunner::available() const
@@ -127,54 +520,108 @@ bool WebModuleRunner::run()
 
     // Laid out, not merely alive: the fixture reports where its button is in
     // window coordinates, and a view that never got geometry reports 0 0.
-    const bool laidOut = waitForPageLine(
-        QStringLiteral("logos-view: button-at ([1-9][0-9]*) ([1-9][0-9]*)"), 20000);
+    const bool laidOut = !viewPointFor(QStringLiteral("button")).isEmpty();
     emit log(laidOut
                  ? QStringLiteral("web module %1: its view is laid out inside the page").arg(first)
                  : QStringLiteral("web module %1: its view never reported a button position")
                        .arg(first));
 
+    // ── a real key and a real finger, at a canvas ──────────────────────────
+    //
+    // Slice 28's first criterion, and the half a rendered view does not
+    // establish. Both go in as DOM events at the page and both are reported by
+    // the module's own QML; see kInputDriver for why they cannot be anything
+    // else.
+    const bool tapped = tapButton(first);
+    // THE LIST BEFORE THE FIELD, and the order is load-bearing on a phone:
+    // giving a text field focus raises the soft keyboard over the bottom of the
+    // screen, and the list is under it. Measured on a Samsung SM-G990B -- a
+    // swipe aimed at the list's own coordinates landed on the keyboard and the
+    // list never moved.
+    const bool scrolled = scrollViewList(first);
+    const bool typed = typeIntoView(first);
+
+    // ALL THREE, ON BOTH PHONES, from events this host puts in the page --
+    // measured on an iPhone 16 Pro simulator and a Samsung SM-G990B.
+    //
+    // ASSERTED WHEN ANYTHING LANDED, REPORTED WHEN NOTHING DID, because the two
+    // failures are different in kind. A gesture that reaches the scene and has
+    // the wrong effect is a container bug and fails the run. A page where
+    // NOTHING lands is a platform this driver has not been taught yet -- and
+    // the same three facts can still be driven from outside, which is how they
+    // were first established here:
+    //
+    //     adb shell input tap <x> <y>        # the device coordinates the
+    //     adb shell input text logos         # `logos-drive: at` lines report
+    //     adb shell input swipe <x> <y1> <x> <y2> 200
+    //
+    // A run driven that way satisfies these exactly as an in-page run does: the
+    // assertions are the MODULE's reports, not the dispatch.
+    const bool anyInputLanded = tapped || typed || scrolled;
+    // This half's verdict, then: all three, or nothing at all.
+    const bool inputOk = !anyInputLanded || (tapped && typed && scrolled);
+    if (!anyInputLanded) {
+        emit log(QStringLiteral(
+            "INPUT: nothing this host dispatched into %1's page reached the scene. "
+            "Drive it from outside instead (`adb shell input tap|text|swipe`) at the "
+            "device coordinates the `logos-drive: at` lines above report, and the "
+            "module reports all three.").arg(first));
+    }
+
     if (modules.size() < 2) {
         emit log(QStringLiteral("live-runtime budget: only one web module is installed, "
                                 "so there is nothing to evict"));
-        return laidOut;
+        return laidOut && inputOk;
     }
 
     // ── the second module, and the budget ──────────────────────────────────
     const QString second = modules.at(1);
     QStringList evicted;
     const auto evictConnection =
-        connect(backend, &MobileWebContainerBackend::uiEvictionRequired, this,
+        connect(backend, &MobileWebContainerBackend::uiEvicted, this,
                 [&evicted](const QString& name) { evicted.append(name); });
+    // The other answer, for a package that ships no headless document. Counted
+    // separately so a run against an older variant says which happened.
+    QStringList unloadable;
+    const auto unloadConnection =
+        connect(backend, &MobileWebContainerBackend::uiEvictionRequired, this,
+                [&unloadable](const QString& name) { unloadable.append(name); });
 
+    const qint64 held = basecamp::web::appResidentBytes();
     const qint64 secondMs = bringUp(second);
     disconnect(evictConnection);
+    disconnect(unloadConnection);
     if (secondMs < 0) return false;
     emit log(QStringLiteral("COLD START: %1's UI ready at %2 ms").arg(second).arg(secondMs));
 
     if (!evicted.contains(first)) {
-        emit log(QStringLiteral("WRONG: showing %1 did not put %2 over the live-runtime budget")
-                     .arg(second, first));
+        emit log(unloadable.contains(first)
+                     ? QStringLiteral("WRONG: %1's package ships no headless entry "
+                                      "document, so it could only be unloaded")
+                           .arg(first)
+                     : QStringLiteral("WRONG: showing %1 did not put %2 over the "
+                                      "live-runtime budget").arg(second, first));
         return false;
     }
 
-    // ANSWERING THE EVICTION IS THE HOST'S JOB, and it is done through the
-    // core: the page belongs to liblogos' container, which destroys it when the
-    // module unloads. A shell that tore the view down itself would leave a
-    // published module with a dead channel.
-    const qint64 held = basecamp::web::appResidentBytes();
-    for (const QString& name : evicted) m_core->unloadModule(name, /*withDependents=*/false);
+    // THE CONTAINER ANSWERED IT ITSELF, which is what is new here. A module
+    // whose package ships a headless entry document is not unloaded: its page
+    // is swapped onto that document, so the view, the bridge and the channel
+    // the core holds are all still the same objects and the core was never
+    // told. The host's only job is to stop mounting a surface that is gone.
+    //
     // The webview's own teardown is asynchronous on both platforms, and what is
     // reclaimed is reclaimed by the OS afterwards. Two seconds is what the
     // number is worth reading after.
     pump(2000);
     const qint64 after = basecamp::web::appResidentBytes();
 
-    const bool released = !backend->hasView(first);
+    const bool released = backend->hasView(first) && !backend->hasUiPage(first);
     emit log(released
-                 ? QStringLiteral("live-runtime budget: %1 gave up its UI page for %2")
-                       .arg(first, second)
-                 : QStringLiteral("WRONG: %1 still holds a page after being unloaded").arg(first));
+                 ? QStringLiteral("live-runtime budget: %1 gave up its UI page for %2 "
+                                  "and stayed loaded").arg(first, second)
+                 : QStringLiteral("WRONG: %1 still holds a UI page after being evicted")
+                       .arg(first));
     emit log(QStringLiteral("live-runtime budget: %1 of %2 held by %3 live runtime(s)")
                  .arg(megabytes(backend->budget().projectedBytes()),
                       megabytes(backend->budget().budgetBytes()),
@@ -194,21 +641,32 @@ bool WebModuleRunner::run()
                             "embedder cannot weigh)")
                  .arg(megabytes(held), megabytes(after)));
 
-    // ── and the evicted module is still there, as a module ─────────────────
-    // KNOWN LIMIT, REPORTED AS ONE. A `ui_qml` module's `web` variant today is
-    // ONE page carrying both the QML runtime and its own Qt-wasm backend image
-    // (logos-module-builder's buildWebViewModule.nix), so giving up the UI gives
-    // up the Wasm host with it. Slice 28 asks for a background module that keeps
-    // answering, and that needs the variant to ship a second, headless entry
-    // document. Nothing in the container changes when it does -- the budget
-    // already governs UI pages only -- so what is checked here is the half that
-    // IS true: the module is still installed and can be brought back.
-    const bool stillKnown = m_core->knownModules().contains(first);
-    emit log(stillKnown
-                 ? QStringLiteral("web module %1: still installed with its UI evicted; its Wasm "
-                                  "host went with the page (one entry document per variant)")
-                       .arg(first)
-                 : QStringLiteral("WRONG: %1 disappeared from the installed set").arg(first));
+    // ── and the evicted module is still ANSWERING ──────────────────────────
+    //
+    // Slice 28's third criterion. Three facts, in the order they build on each
+    // other: the core still has the module loaded; its headless page said its
+    // Wasm host came up; and a frame sent into that page came back answered.
+    const bool stillLoaded = m_core->loadedModules().contains(first);
+    emit log(stillLoaded
+                 ? QStringLiteral("web module %1: still loaded with its UI evicted").arg(first)
+                 : QStringLiteral("WRONG: %1 left the core's loaded set").arg(first));
 
-    return laidOut && released && stillKnown;
+    const bool hostUp = waitForPageLine(
+        QStringLiteral("\\[logos-web-host %1\\] serving with no UI").arg(first), 60000);
+    emit log(hostUp
+                 ? QStringLiteral("web module %1: its Wasm host reports itself serving with "
+                                  "no UI, from the headless entry document").arg(first)
+                 : QStringLiteral("WRONG: %1's headless page never reported a serving host")
+                       .arg(first));
+
+    QString answer;
+    const bool answered = callIntoPage(first, &answer);
+    emit log(answered
+                 ? QStringLiteral("BACKGROUND CALL: %1 answered the container's own "
+                                  "interface query with its UI evicted -- %2")
+                       .arg(first, answer.left(160))
+                 : QStringLiteral("WRONG: %1 did not answer a frame sent into its "
+                                  "headless page").arg(first));
+
+    return laidOut && inputOk && released && stillLoaded && hostUp && answered;
 }

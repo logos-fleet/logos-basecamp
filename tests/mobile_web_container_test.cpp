@@ -61,6 +61,10 @@ struct FakeWebView {
     // about the budget's bookkeeping.
     bool frontmost = false;
     int frontmostCalls = 0;
+    // What the host asked the page to run. A `web` variant draws into a canvas,
+    // so driving a real key or a real finger at it is the one conversation that
+    // does not go down the channel.
+    QStringList scripts;
     std::function<void(const QByteArray&, const QUrl&, const QByteArray&,
                        basecamp::web::MobileWebBridge::Respond)> serve;
     std::function<void()> die;
@@ -75,6 +79,7 @@ class MobileWebContainerTest : public QObject {
 private:
     QTemporaryDir m_root;
     QString m_moduleDir;
+    QString m_bareModuleDir;
     QString m_runtimeDir;
     std::vector<std::shared_ptr<FakeWebView>> m_pages;
 
@@ -97,17 +102,47 @@ private:
                 page->frontmost = front;
                 ++page->frontmostCalls;
             };
+            platform.evaluateJavaScript = [page](const QString& script) {
+                page->scripts.append(script);
+            };
             return platform;
         };
     }
 
+    // `counter_ui` is a module whose package ships a headless entry document and
+    // `notes_ui` is one whose package does not -- which is the fork every
+    // eviction takes, and the only difference between the two directories.
+    QString dirFor(const QString& module) const
+    {
+        return module == QLatin1String("notes_ui") ? m_bareModuleDir : m_moduleDir;
+    }
+
     LogosCore::WebModuleViewRequest requestFor(const QString& module) const
     {
+        const QString dir = dirFor(module);
         LogosCore::WebModuleViewRequest request;
         request.moduleName = module.toStdString();
-        request.moduleDir = m_moduleDir.toStdString();
-        request.entryPath = QDir(m_moduleDir).filePath("index.html").toStdString();
+        request.moduleDir = dir.toStdString();
+        request.entryPath = QDir(dir).filePath("index.html").toStdString();
         return request;
+    }
+
+    // The launch token the bridge minted, read back out of the script it asked
+    // the platform to inject. A test driving a control path has to speak as the
+    // page does, and the page only knows the token because the shim carries it.
+    static QString tokenOf(const QString& shim)
+    {
+        const int at = shim.indexOf("/__logos/");
+        if (at < 0) return {};
+        const QString rest = shim.mid(at + 9);
+        return rest.left(rest.indexOf(QLatin1Char('\'')));
+    }
+
+    static void writeFile(const QString& path, const QByteArray& content)
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(content);
     }
 
     std::unique_ptr<LogosCore::WebModuleView> load(const QString& module)
@@ -120,13 +155,25 @@ private slots:
     {
         QVERIFY(m_root.isValid());
         m_moduleDir = QDir(m_root.path()).filePath("counter_ui");
+        m_bareModuleDir = QDir(m_root.path()).filePath("notes_ui");
         m_runtimeDir = QDir(m_root.path()).filePath("logos-runtime");
         QDir().mkpath(m_moduleDir);
+        QDir().mkpath(m_bareModuleDir);
         QDir().mkpath(m_runtimeDir);
-        QFile entry(QDir(m_moduleDir).filePath("index.html"));
-        QVERIFY(entry.open(QIODevice::WriteOnly));
-        entry.write("<!doctype html><body></body>");
-        entry.close();
+
+        // A package as logos-module-builder emits one: two entry documents, and
+        // a manifest that names the headless one.
+        writeFile(QDir(m_moduleDir).filePath("index.html"), "<!doctype html><body></body>");
+        writeFile(QDir(m_moduleDir).filePath("host.html"), "<!doctype html><body>host</body>");
+        writeFile(QDir(m_moduleDir).filePath("manifest.json"),
+                  R"({"name":"counter_ui","main":"index.html",
+                      "logos_web_runtime":"qml",
+                      "logos_web_view":{"qml":"view/Counter.qml","headless":"host.html"}})");
+
+        // ...and a package from before they existed.
+        writeFile(QDir(m_bareModuleDir).filePath("index.html"), "<!doctype html><body></body>");
+        writeFile(QDir(m_bareModuleDir).filePath("manifest.json"),
+                  R"({"name":"notes_ui","main":"index.html","logos_web_runtime":"qml"})");
     }
 
     void init()
@@ -203,25 +250,126 @@ private slots:
 
     // ── the budget ─────────────────────────────────────────────────────────
 
-    void showingASecondModuleAsksTheFirstForItsPage()
+    // THE EVICTION SLICE 28 ASKS FOR: the module gives its UI page up and keeps
+    // answering. Its package ships a headless entry document, so the backend
+    // swaps the page onto it rather than asking the host to unload the module.
+    void showingASecondModuleBackgroundsTheFirstWithoutUnloadingIt()
     {
         auto* backend = MobileWebContainerBackend::instance();
-        QSignalSpy evict(backend, &MobileWebContainerBackend::uiEvictionRequired);
+        QSignalSpy backgrounded(backend, &MobileWebContainerBackend::uiEvicted);
+        QSignalSpy unloadNeeded(backend, &MobileWebContainerBackend::uiEvictionRequired);
 
         auto first = load("counter_ui");
         auto second = load("notes_ui");
 
         QCOMPARE(backend->show("counter_ui"), QStringList{});
-        QCOMPARE(evict.count(), 0);
+        QCOMPARE(backgrounded.count(), 0);
 
         QCOMPARE(backend->show("notes_ui"), QStringList{"counter_ui"});
-        QCOMPARE(evict.count(), 1);
-        QCOMPARE(evict.at(0).at(0).toString(), QString("counter_ui"));
+        QCOMPARE(backgrounded.count(), 1);
+        QCOMPARE(backgrounded.at(0).at(0).toString(), QString("counter_ui"));
+        // NOT the other signal: there is nowhere for the host to send this and
+        // nothing for it to unload.
+        QCOMPARE(unloadNeeded.count(), 0);
 
-        // ANNOUNCED, NOT PERFORMED: the page belongs to liblogos' container and
-        // is still there until the host unloads the module through the core.
+        // The UI page is gone and a headless one is in its place.
+        QVERIFY(m_pages[0]->destroyed);
+        QCOMPARE(m_pages.size(), size_t(3));
+        QCOMPARE(m_pages[2]->moduleName, QString("counter_ui"));
+        QCOMPARE(m_pages[2]->loaded.path(), QString("/host.html"));
+        QVERIFY(m_pages[2]->alive);
+
+        // ...AND THE MODULE IS STILL THERE, which is the whole point: same view
+        // object, same channel, still published, still answering. A container
+        // that had unloaded it would have taken all three away.
         QVERIFY(backend->hasView("counter_ui"));
+        QVERIFY(!backend->hasUiPage("counter_ui"));
+        QVERIFY(first->isAlive());
+        QVERIFY(first->channel()->isOpen());
+    }
+
+    // A frame the core sends while the swap is in flight is not lost: the
+    // bridge buffers it exactly as it buffers the first Subscribe while a page
+    // is booting, and the incoming page's first poll takes it. This is what
+    // "keeps answering calls" means when the call arrives at the worst moment.
+    void aFrameSentAcrossTheSwapIsDeliveredToTheHeadlessPage()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+        backend->show("counter_ui");
+        backend->show("notes_ui");
+
+        QVERIFY(first->channel()->send("{\"type\":1}"));
+
+        BridgeReply reply;
+        QUrl poll = m_pages[2]->loaded;
+        poll.setPath("/__logos/" + tokenOf(m_pages[2]->shim) + "/poll");
+        m_pages[2]->serve("GET", poll, {}, [&reply](const BridgeReply& r) { reply = r; });
+        QCOMPARE(reply.status, 200);
+        QVERIFY2(reply.body.contains("type"), reply.body.constData());
+    }
+
+    // ...and back again. A budget that only ever took pages away would leave a
+    // user staring at the module they just chose.
+    void showingABackgroundedModuleBringsItsUiBack()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+        backend->show("counter_ui");
+        backend->show("notes_ui");
+        QVERIFY(!backend->hasUiPage("counter_ui"));
+
+        QSignalSpy unloadNeeded(backend, &MobileWebContainerBackend::uiEvictionRequired);
+        backend->show("counter_ui");
+        QVERIFY(backend->hasUiPage("counter_ui"));
+        QCOMPARE(m_pages.back()->moduleName, QString("counter_ui"));
+        QCOMPARE(m_pages.back()->loaded.path(), QString("/index.html"));
+        // On screen, not merely alive: a page comes up at the BACK of the
+        // hierarchy on both phones, and a restored one has to be brought
+        // forward like any other.
+        QVERIFY(m_pages.back()->frontmost);
+        // And `notes_ui` has gone the other way. It ships no headless document,
+        // so it is handed to the host -- which is why its UI page is STILL
+        // there at this point: nothing here destroys it.
+        QCOMPARE(unloadNeeded.count(), 1);
+        QCOMPARE(unloadNeeded.at(0).at(0).toString(), QString("notes_ui"));
+        QVERIFY(backend->hasUiPage("notes_ui"));
+    }
+
+    // THE OLDER ANSWER, for a package built before headless documents existed.
+    // Announced and not performed: the page belongs to liblogos' container and
+    // is still there until the host unloads the module through the core.
+    void aModuleWithNoHeadlessDocumentIsHandedToTheHostToUnload()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        QSignalSpy backgrounded(backend, &MobileWebContainerBackend::uiEvicted);
+        QSignalSpy unloadNeeded(backend, &MobileWebContainerBackend::uiEvictionRequired);
+
+        auto first = load("notes_ui");
+        auto second = load("counter_ui");
+        backend->show("notes_ui");
+        QCOMPARE(backend->show("counter_ui"), QStringList{"notes_ui"});
+
+        QCOMPARE(unloadNeeded.count(), 1);
+        QCOMPARE(unloadNeeded.at(0).at(0).toString(), QString("notes_ui"));
+        QCOMPARE(backgrounded.count(), 0);
+        QVERIFY(backend->hasView("notes_ui"));
         QVERIFY(!m_pages[0]->destroyed);
+    }
+
+    // The one conversation with a module that does not go down the channel. A
+    // `web` variant draws into a canvas, so a host showing that a real key or a
+    // real finger reaches the view has to put the event in the page.
+    void aHostCanDriveInputAtAPage()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        auto view = load("counter_ui");
+        QVERIFY(backend->runJavaScriptIn("counter_ui", "logosPress('a')"));
+        QCOMPARE(m_pages[0]->scripts.size(), 1);
+        QCOMPARE(m_pages[0]->scripts.at(0), QString("logosPress('a')"));
+        QVERIFY(!backend->runJavaScriptIn("no_such_module", "logosPress('a')"));
     }
 
     void anEvictedModuleIsNotAskedTwice()
@@ -232,8 +380,8 @@ private slots:
 
         backend->show("counter_ui");
         backend->show("notes_ui");
-        // The host answered the eviction: the module was unloaded, which
-        // destroys its view through the ordinary container path.
+        // The module went away for a reason of its own -- unloaded, uninstalled
+        // -- which destroys its view through the ordinary container path.
         first.reset();
 
         QSignalSpy evict(backend, &MobileWebContainerBackend::uiEvictionRequired);
@@ -281,7 +429,7 @@ private slots:
     {
         auto* backend = MobileWebContainerBackend::instance();
         QCOMPARE(backend->budget().maxLiveRuntimes(), 1);
-        QCOMPARE(backend->budget().budgetBytes(), LiveRuntimeBudget::kSpikeRuntimeBytes);
+        QCOMPARE(backend->budget().budgetBytes(), LiveRuntimeBudget::kDeviceRuntimeBytes);
     }
 };
 

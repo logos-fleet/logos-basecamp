@@ -104,6 +104,13 @@ public:
     // The URL the webview is asked to load. Never a file: URL.
     QUrl entryUrl() const;
 
+    // The URL of ANY document in this module's package, on the origin this
+    // bridge serves it on. A `web` variant has two entry documents -- the UI
+    // page and the headless one a background module is swapped onto -- and the
+    // container names the second, so the bridge answers for both rather than
+    // holding one of them as state.
+    QUrl documentUrl(const QString& file) const;
+
     // This launch's token. Fresh per bridge, so one module's page cannot use
     // another's control paths even inside one app run.
     QString launchToken() const { return m_token; }
@@ -149,6 +156,16 @@ public:
     // log.
     void setOnPageLog(std::function<void(const QString& level,
                                          const QString& message)> callback);
+
+    // EVERY FRAME THE PAGE SENDS, in ADDITION to the receiver.
+    //
+    // The receiver belongs to the core's protocol client and there is exactly
+    // one of it. This is for a host that has to SHOW what the module answered
+    // — on a phone, that a module whose UI has been evicted is still answering
+    // calls — which it cannot do by taking the receiver away without breaking
+    // the routing it is trying to observe. Off by default and nothing in the
+    // container sets it.
+    void setFrameObserver(std::function<void(const QString& frame)> observer);
 
     // The page said it has stopped serving (its wasm image trapped, its loader
     // gave up). The container's verdict for this is the same as for a page that
@@ -218,6 +235,7 @@ private:
     // setReceiver(nullptr) must not return while one is still running.
     mutable std::recursive_mutex m_receiverMutex;
     Receiver m_receiver;
+    std::function<void(const QString&)> m_observer;
 
     std::function<void()> m_onPageClosed;
     std::function<void(const QString&, const QString&)> m_onPageLog;

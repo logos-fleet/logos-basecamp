@@ -304,6 +304,20 @@ PlatformPageFactory androidPlatformPageFactory()
         // blocking: the shell's next act is to say the module is visible, and a
         // z-order change still queued when that is read is a page the user does
         // not see.
+        // ONE SCRIPT IN THE PAGE. On the Android UI thread like every other
+        // touch of the view, but NOT blocking: a host driving input is not
+        // waiting on a value -- what the script has to say arrives later, on the
+        // page's own console, down the bridge.
+        platform.evaluateJavaScript = [page](const QString& script) {
+            if (!page->isValid()) return;
+            QJniObject held = *page;
+            QJniObject source = QJniObject::fromString(script);
+            QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
+                [held, source]() {
+                    held.callMethod<void>("evaluateJavaScript", "(Ljava/lang/String;)V",
+                                          source.object<jstring>());
+                });
+        };
         platform.setFrontmost = [page](bool front) {
             if (!page->isValid()) return;
             QJniObject held = *page;

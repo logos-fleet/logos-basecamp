@@ -2,12 +2,39 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <utility>
 
 namespace basecamp::web {
 
 namespace {
+
+// THE HEADLESS ENTRY DOCUMENT THIS PACKAGE SHIPS, or empty when it ships none.
+//
+// Read out of the package's own manifest rather than assumed, because the file
+// name is the BUILDER's and this is the container: logos-module-builder writes
+// `logos_web_view.headless` next to the qml document and the backend glue it
+// already names there, and a package built before that key existed simply has
+// no headless document -- which a container must be able to discover, since the
+// only other answer to an eviction is to unload the module.
+QString headlessEntryOf(const QString& moduleDir)
+{
+    QFile manifest(QDir(moduleDir).filePath(QStringLiteral("manifest.json")));
+    if (!manifest.open(QIODevice::ReadOnly)) return {};
+    const QJsonObject root = QJsonDocument::fromJson(manifest.readAll()).object();
+    const QString entry = root.value(QStringLiteral("logos_web_view"))
+                              .toObject()
+                              .value(QStringLiteral("headless"))
+                              .toString();
+    if (entry.isEmpty()) return {};
+    // IT HAS TO BE IN THE PACKAGE. A manifest naming a document that is not
+    // there would turn every eviction into a page that loads nothing, and the
+    // module would go quiet with no error anywhere.
+    return QFile::exists(QDir(moduleDir).filePath(entry)) ? entry : QString();
+}
 
 // The web transport's endpoint on a phone's page, over the bridge.
 //
@@ -66,6 +93,16 @@ MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& 
         return;
     }
 
+    m_platform = platform;
+    m_shimInDocument = shimInDocument;
+    m_uiEntry = entryFile;
+    m_headlessEntry = headlessEntryOf(moduleDir);
+    if (m_headlessEntry.isEmpty()) {
+        qInfo() << "Web module" << m_moduleName
+                << "ships no headless entry document; an eviction will have to "
+                   "unload it rather than background it";
+    }
+
     m_bridge = std::make_shared<MobileWebBridge>(moduleDir, runtimeDir, entryFile,
                                                 std::move(origin));
     m_bridge->setInjectsShimIntoHtml(shimInDocument);
@@ -92,29 +129,97 @@ MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& 
         announceDeath();
     });
 
+    if (!openPage(m_uiEntry)) {
+        m_startupError = QStringLiteral("the platform could not open a webview");
+        qWarning() << "Web module" << m_moduleName << ":" << m_startupError;
+        m_bridge->close();
+    }
+}
+
+bool MobileWebModuleView::openPage(const QString& entryFile)
+{
     PlatformPageRequest pageRequest;
     pageRequest.moduleName = m_moduleName;
-    pageRequest.entryUrl = m_bridge->entryUrl();
+    pageRequest.entryUrl = m_bridge->documentUrl(entryFile);
     // EMPTY when the document carries it: a platform that injects AND a
     // container that serves it inside the HTML would run the shim twice, and
     // the second one would take over the channel the first had already opened.
-    pageRequest.channelShim = shimInDocument ? QString() : m_bridge->channelShim();
+    pageRequest.channelShim = m_shimInDocument ? QString() : m_bridge->channelShim();
     auto bridge = m_bridge;
     pageRequest.serve = [bridge](const QByteArray& method, const QUrl& url,
                                  const QByteArray& body, MobileWebBridge::Respond respond) {
         bridge->handleRequest(method, url, body, std::move(respond));
     };
     pageRequest.onDied = [this] {
+        // DURING A SWAP THIS IS US. Both platforms detach their callbacks
+        // before tearing a webview down, but a report already in flight on
+        // another thread would otherwise turn an eviction into a lost module.
+        if (m_swapping) return;
         qWarning() << "Web module" << m_moduleName << "lost its webview";
         announceDeath();
     };
 
-    m_page = platform(pageRequest);
-    if (!m_page.destroy) {
-        m_startupError = QStringLiteral("the platform could not open a webview");
-        qWarning() << "Web module" << m_moduleName << ":" << m_startupError;
-        m_bridge->close();
+    m_page = m_platform(pageRequest);
+    return bool(m_page.destroy);
+}
+
+bool MobileWebModuleView::swapPageTo(const QString& entryFile)
+{
+    if (!m_bridge || !m_platform || !m_alive) return false;
+
+    m_swapping = true;
+    if (m_page.destroy) m_page.destroy();
+    m_page = PlatformPage();
+    // THE POLLS THE OUTGOING PAGE HAD PARKED. Android answers a poll by
+    // blocking the thread that asked, and a thread still parked on a webview
+    // that no longer exists is one the next page cannot use. Answering them
+    // with an empty batch costs nothing -- the page they belong to is gone --
+    // and the incoming one arms its own.
+    m_bridge->expireWaits();
+    const bool opened = openPage(entryFile);
+    m_swapping = false;
+    if (!opened) {
+        qWarning() << "Web module" << m_moduleName << "could not open" << entryFile;
+        announceDeath();
     }
+    return opened;
+}
+
+bool MobileWebModuleView::evictUi()
+{
+    if (!m_hasUi) return true;
+    if (m_headlessEntry.isEmpty()) return false;
+    if (!swapPageTo(m_headlessEntry)) return false;
+    m_hasUi = false;
+    qInfo() << "Web module" << m_moduleName
+            << "gave its UI page up; its Wasm host is on" << m_headlessEntry;
+    return true;
+}
+
+bool MobileWebModuleView::restoreUi()
+{
+    if (m_hasUi) return true;
+    if (!swapPageTo(m_uiEntry)) return false;
+    m_hasUi = true;
+    qInfo() << "Web module" << m_moduleName << "has its UI page back";
+    return true;
+}
+
+void MobileWebModuleView::observeFrames(std::function<void(const QString&)> sink)
+{
+    if (m_bridge) m_bridge->setFrameObserver(std::move(sink));
+}
+
+bool MobileWebModuleView::sendFrame(const QString& frame)
+{
+    return m_bridge && m_bridge->send(frame.toStdString());
+}
+
+bool MobileWebModuleView::runJavaScript(const QString& script)
+{
+    if (!m_page.evaluateJavaScript) return false;
+    m_page.evaluateJavaScript(script);
+    return true;
 }
 
 MobileWebModuleView::~MobileWebModuleView()

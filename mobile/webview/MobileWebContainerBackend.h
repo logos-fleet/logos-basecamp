@@ -45,22 +45,24 @@ QString bundledQmlRuntimeDir(const QString& platformDir);
 // user is looking at, and LiveRuntimeBudget names the ones that must give their
 // page up.
 //
-// EVICTION IS ANNOUNCED, NOT PERFORMED, and that is the same ownership rule
-// again: the page belongs to liblogos' container, which destroys it when the
-// module is unloaded. A backend that destroyed a view behind the container's
-// back would leave a published module with a dead channel. So show() emits
-// uiEvictionRequired and the host unloads the module through the core, which
-// tears the view down through the ordinary path.
+// WHAT AN EVICTION DOES depends on what the module's package ships, and the two
+// answers are different in kind.
 //
-// KNOWN LIMIT, and it is the artifact's rather than this class's: a `ui_qml`
-// module's `web` variant today is ONE page carrying both the QML runtime and
-// the module's own Qt-wasm backend image (logos-module-builder's
-// buildWebViewModule.nix), so giving up the UI gives up the Wasm host with it
-// and the module stops answering calls until it is shown again. Slice 28 asks
-// for a background module to keep answering, and that needs the variant to ship
-// a SECOND, headless entry document — the Bare `web` variant's loader page —
-// with the container relaying between the two. Nothing here has to change when
-// it does: the budget already governs UI pages only.
+//   * A variant with a HEADLESS entry document is BACKGROUNDED: this backend
+//     swaps its page from the UI document to the headless one, the module keeps
+//     its channel and keeps answering calls, and uiEvicted says so. Nothing is
+//     done behind liblogos' back — the view object, its bridge and the channel
+//     the core holds are all untouched, and the core is never told because from
+//     its side nothing happened.
+//   * A variant WITHOUT one has nowhere to go, and then eviction is announced
+//     and not performed: uiEvictionRequired fires and the host unloads the
+//     module through the core, which tears the view down through the ordinary
+//     path. A backend that destroyed a view behind the container's back would
+//     leave a published module with a dead channel.
+//
+// The second is the older answer and is kept for the packages that need it —
+// every `web` variant built before logos-module-builder emitted a second
+// document.
 class MobileWebContainerBackend : public QObject {
     Q_OBJECT
 public:
@@ -97,13 +99,37 @@ public:
     // The platform handle a loaded web module's page draws into, or nullptr.
     void* nativeHandleFor(const QString& moduleName) const;
     bool hasView(const QString& moduleName) const;
+    // Whether that view is showing the module's UI document rather than its
+    // headless one. A backgrounded module HAS a view and HAS no UI, and the two
+    // questions have different answers for the first time in this class.
+    bool hasUiPage(const QString& moduleName) const;
     QStringList loadedModules() const;
 
+    // Send one logos-protocol frame into a module's page and observe what comes
+    // back — the only way a host can ask a module a question, since a call-a-
+    // module entry point exists nowhere below this and the only callers in the
+    // system are other modules. See MobileWebModuleView::callIntoPage.
+    void observeFramesFrom(const QString& moduleName,
+                           std::function<void(const QString& frame)> sink);
+    bool sendFrameTo(const QString& moduleName, const QString& frame);
+
+    // Run one script in a module's page. False when there is no such page or
+    // the platform cannot. The only caller is a host driving real input at a
+    // view that draws into a canvas — see PlatformPage::evaluateJavaScript.
+    bool runJavaScriptIn(const QString& moduleName, const QString& script);
+
     // THE SHELL SAYS WHAT THE USER IS LOOKING AT. Returns the Downloaded modules
-    // whose UI page must be given up to stay inside the budget, least recently
-    // visible first, and emits uiEvictionRequired for each. Logs the budget and
-    // what is held against it either way — slice 28 asks for the number, and a
-    // number the host never prints cannot be read off a device run.
+    // that gave their UI page up to stay inside the budget, least recently
+    // visible first. Each is either backgrounded here (uiEvicted) or handed to
+    // the host to unload (uiEvictionRequired); see the class note.
+    //
+    // It also brings the shown module's UI BACK if it had been backgrounded,
+    // which is the other half of the same rule: a budget that only ever took
+    // pages away would leave a user staring at the module they just chose.
+    //
+    // Logs the budget and what is held against it either way — slice 28 asks
+    // for the number, and a number the host never prints cannot be read off a
+    // device run.
     QStringList show(const QString& moduleName);
 
     const LiveRuntimeBudget& budget() const { return m_budget; }
@@ -130,9 +156,16 @@ signals:
     // read -- a host that asserts "the view came up" asserts on these.
     void pageLog(const QString& moduleName, const QString& level, const QString& message);
 
-    // This module is over the live-runtime budget and must give its page up.
-    // The host answers by unloading it through the core; see the class note on
-    // why this backend does not do it itself.
+    // This module is over the live-runtime budget and has been BACKGROUNDED:
+    // its UI page is gone and its Wasm host is running on the package's
+    // headless document. The module is still loaded and still answers calls;
+    // the host has nothing to do but unmount the surface it was given.
+    void uiEvicted(const QString& moduleName);
+
+    // This module is over the live-runtime budget and has nowhere to go — its
+    // package ships no headless document — so it must give its page up by being
+    // unloaded. The host answers by unloading it through the core; see the
+    // class note on why this backend does not do it itself.
     void uiEvictionRequired(const QString& moduleName);
 
 private:

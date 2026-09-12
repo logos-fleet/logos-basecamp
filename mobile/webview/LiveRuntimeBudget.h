@@ -11,16 +11,16 @@ namespace basecamp::web {
 //
 // A Downloaded module on a phone is two things, and only one of them is
 // expensive: a Wasm host (its own image, a few MB, answering calls) and a UI
-// page (the app's bundled Qt-for-WebAssembly QML runtime, measured at 185–240 MB
-// resident and 2.6–3 s of cold start in the spike). The container keeps every
-// installed module's Wasm host alive, because a background module still answers
-// its consumers, and keeps the RUNTIME alive only for what the user is looking
-// at. This is where "only for what the user is looking at" is decided, and what
-// makes it a budget rather than a rule is that a tablet can afford more than one
-// and a phone cannot.
+// page (the app's bundled Qt-for-WebAssembly QML runtime, measured at 290 MB
+// resident on a Samsung SM-G990B, and 2.6–3 s of cold start in the spike). The
+// container keeps every installed module's Wasm host alive, because a background
+// module still answers its consumers, and keeps the RUNTIME alive only for what
+// the user is looking at. This is where "only for what the user is looking at"
+// is decided, and what makes it a budget rather than a rule is that a tablet can
+// afford more than one and a phone cannot.
 //
 // IT DECIDES, IT DOES NOT ACT. show() returns the modules whose UI page must be
-// torn down and the caller tears them down — because the caller is the only
+// given up and the caller gives them up — because the caller is the only
 // thing that knows what a page IS on this platform (a WKWebView, an Android
 // WebView, a QWebEngineView) and because a policy that destroyed things could
 // not be tested without one.
@@ -32,15 +32,25 @@ namespace basecamp::web {
 // every flip.
 class LiveRuntimeBudget {
 public:
-    // What one QML runtime cost in the spike, at the top of the measured range.
-    // The pessimistic end deliberately: a budget derived from the optimistic one
-    // is a budget the OS disagrees with.
-    static constexpr qint64 kSpikeRuntimeBytes = 240LL * 1024 * 1024;
+    // WHAT ONE QML RUNTIME COSTS ON A PHONE, measured rather than estimated.
+    //
+    // 290 MB is the resident size of the surviving renderer process on a
+    // Samsung SM-G990B, sampled ten times a second from the host across a
+    // module switch and read once it had settled (2026-09-12). The spike's
+    // 185-240 MB was a DESKTOP browser's and is the number this used to carry;
+    // the device is half as much again, and a budget derived from the
+    // optimistic figure is a budget the OS disagrees with.
+    //
+    // It is a stated cost, not a measurement the container takes: neither phone
+    // lets an embedder weigh another process (iOS offers no API for another
+    // task's footprint, Android's renderer runs under a different uid), so what
+    // a container can do is count pages and multiply.
+    static constexpr qint64 kDeviceRuntimeBytes = 290LL * 1024 * 1024;
 
-    // One runtime is the phone's answer and the DEFAULT, because 240 MB is
+    // One runtime is the phone's answer and the DEFAULT, because 290 MB is
     // already most of what a mid-range phone will let a foreground app keep.
     explicit LiveRuntimeBudget(int maxLiveRuntimes = 1,
-                               qint64 runtimeFootprintBytes = kSpikeRuntimeBytes);
+                               qint64 runtimeFootprintBytes = kDeviceRuntimeBytes);
 
     // `module` is now the visible Downloaded module. Returns the modules whose
     // UI page the caller must drop to stay inside the budget, LEAST RECENTLY
