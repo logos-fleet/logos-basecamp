@@ -355,6 +355,24 @@ PlatformPageFactory iosPlatformPageFactory()
             else [superview sendSubviewToBack:view];
         };
         page.isAlive = [holder]() -> bool { return holder->view != nil; };
+        // ONE SCRIPT IN THE PAGE, and what it says it says through the page's
+        // own console -- which the bridge already carries back, so there is no
+        // completion value to plumb. On the main queue because WKWebView is
+        // main-thread-only and a host may ask from wherever it is driving.
+        page.evaluateJavaScript = [holder](const QString& script) {
+            NSString* source = toNs(script);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                WKWebView* view = holder->view;
+                if (!view) return;
+                [view evaluateJavaScript:source
+                       completionHandler:^(id, NSError* error) {
+                    if (error) {
+                        qWarning() << "Web module: a host script failed:"
+                                   << fromNs(error.localizedDescription);
+                    }
+                }];
+            });
+        };
         return page;
     };
 }

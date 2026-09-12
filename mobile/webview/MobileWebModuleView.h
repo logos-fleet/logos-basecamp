@@ -58,6 +58,20 @@ struct PlatformPage {
     // a desktop test drives) leaves it unset, and the backend then only keeps
     // the books.
     std::function<void(bool front)> setFrontmost;
+    // RUN ONE SCRIPT IN THE PAGE. Fire and forget: what the script has to say
+    // it says through the page's own console, which the bridge already carries
+    // back (`[webView evaluateJavaScript:...]`, `WebView.evaluateJavascript`).
+    //
+    // It exists for ONE reason and it is worth stating, because a seam that
+    // runs arbitrary JavaScript in a module's page invites others. A `web`
+    // variant draws into a canvas: there is no DOM node to touch and no text
+    // node to read, so a host that wants to show that a real key or a real
+    // finger reaches the view has no way to deliver one except through the
+    // page. Every other conversation with a module goes down the channel.
+    //
+    // Optional. A platform that cannot do it leaves it unset and a host that
+    // asks says so rather than reporting a silent success.
+    std::function<void(const QString& script)> evaluateJavaScript;
 };
 
 // What a platform backend is asked to build. Everything it needs and nothing
@@ -114,6 +128,64 @@ public:
     // A no-op on a platform whose page does not implement it.
     void setFrontmost(bool front);
 
+    // ── the live-runtime budget's other half ───────────────────────────────
+    //
+    // GIVE THE UI UP AND KEEP THE MODULE SERVING. A `ui_qml` module's `web`
+    // variant ships two entry documents (logos-module-builder's
+    // buildWebViewModule.nix): `index.html`, which is the app's ~26 MB QML
+    // runtime plus this module's view plus its Wasm host, and a headless one,
+    // which is the Wasm host alone. A module the user has navigated away from
+    // is swapped onto the second: its page stops costing a runtime and the
+    // module keeps answering calls.
+    //
+    // THE CHANNEL DOES NOT MOVE, and that is what makes this safe to do behind
+    // the container's back. This view object, its bridge and the channel the
+    // core holds are all untouched; what changes is which document the webview
+    // is showing. The core is never told, because from the core's side nothing
+    // happened -- a Call made across the swap is buffered by the bridge exactly
+    // as the first Subscribe is buffered while a page boots, and is answered
+    // when the new image polls.
+    //
+    // WHAT IS LOST, said plainly: the outgoing image's state goes with it. A
+    // `web` module's backend lives in the page, so an eviction is a restart of
+    // the module's host -- its properties come back at their defaults and a
+    // subscription the container made is not repeated. Calls are answered; a
+    // module that has to keep in-memory state across a background trip has to
+    // keep it somewhere the page is not.
+    bool hasUi() const { return m_hasUi; }
+    // Whether this module's package ships a headless document at all. A variant
+    // built before they existed does not, and the honest answer for one of
+    // those is for the host to unload the module rather than to guess at a file
+    // name.
+    bool canRunHeadless() const { return !m_headlessEntry.isEmpty(); }
+
+    // Swap this page onto the headless document, or back onto the UI one.
+    // False when the swap could not be made -- no headless document in the
+    // package, or the platform could not open the new page -- and the caller is
+    // then holding a module whose UI it must dispose of some other way.
+    bool evictUi();
+    bool restoreUi();
+
+    // Run one script in the page. False when this platform's page cannot.
+    bool runJavaScript(const QString& script);
+
+    // SEND ONE PROTOCOL FRAME INTO THIS MODULE'S PAGE, and watch what comes
+    // back (`observeFrames`, whose sink stays installed until an empty one
+    // replaces it).
+    //
+    // The frame goes down the SAME channel the core uses -- that is the point:
+    // what this shows is the module answering on its real wire, not on a second
+    // one built for the occasion. It exists because a host cannot ask the
+    // question any other way: neither ICoreRuntime nor liblogos' C API has a
+    // call-a-module entry point, and the only callers in the system are other
+    // modules. A phone host that has to show that a BACKGROUNDED module is
+    // still answering has no module to borrow.
+    //
+    // The core's own client sees the answer too and drops it, having no
+    // outstanding request with that id.
+    void observeFrames(std::function<void(const QString& frame)> sink);
+    bool sendFrame(const QString& frame);
+
     // Every line the page's own console produced. Already printed through Qt's
     // message handler; this is for a host that wants to WAIT for one -- which
     // for a view that draws into a canvas is the only way to know it came up.
@@ -136,12 +208,26 @@ public:
 
 private:
     void announceDeath();
+    // Open a page on one of this package's documents, against the bridge that
+    // is already there. Everything the platform is told is derived from the
+    // bridge, so the two entry documents differ in exactly one argument.
+    bool openPage(const QString& entryFile);
+    bool swapPageTo(const QString& entryFile);
 
     QString m_moduleName;
     QString m_startupError;
     std::shared_ptr<MobileWebBridge> m_bridge;
     logos::web::MessageChannelPtr m_channel;
     PlatformPage m_page;
+    // Held, because a swap builds a second page from the same ingredients.
+    PlatformPageFactory m_platform;
+    bool m_shimInDocument = false;
+    QString m_uiEntry;
+    QString m_headlessEntry;
+    bool m_hasUi = true;
+    // A page torn down on purpose must not be reported as a page that died.
+    // Same reason as the destructor's m_announced, at a smaller scale.
+    bool m_swapping = false;
     std::function<void()> m_onDied;
     std::function<void(const QString&, const QString&)> m_onPageLog;
     std::function<void()> m_onDestroyed;

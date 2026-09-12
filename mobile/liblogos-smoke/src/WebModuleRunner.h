@@ -57,7 +57,22 @@ private:
     qint64 bringUp(const QString& name);
     // Pump the event loop until a page line matches `pattern`, or `timeoutMs`.
     bool waitForPageLine(const QString& pattern, int timeoutMs);
+    // ...and the capture groups of the line that matched, or an empty list.
+    QStringList capturePageLine(const QString& pattern, int timeoutMs);
     void pump(int ms);
+
+    // DRIVE REAL INPUT AT `name`'s VIEW. A `web` variant draws into a canvas:
+    // there is no DOM node to touch and no text node to read, so the only way
+    // to put a key or a finger on what a user would touch is to dispatch the
+    // event in the page. What happens next the MODULE reports, on its own
+    // console, which is what these then wait for.
+    bool typeIntoView(const QString& name);
+    bool scrollViewList(const QString& name);
+
+    // ...and the one question that cannot be asked through the core: is this
+    // module still answering? Sends a logos-protocol Call into its page and
+    // waits for a Result carrying the same id.
+    bool callIntoPage(const QString& name, QString* answer);
 
     ICoreRuntime* m_core = nullptr;
     QString m_webModulesDir;

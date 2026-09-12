@@ -202,10 +202,15 @@ MobileWebBridge::~MobileWebBridge()
 
 QUrl MobileWebBridge::entryUrl() const
 {
-    QString file = m_entryFile;
-    while (file.startsWith(QLatin1Char('/'))) file.remove(0, 1);
-    if (file.isEmpty()) file = QStringLiteral("index.html");
-    return m_origin.url(QStringLiteral("/") + file);
+    return documentUrl(m_entryFile);
+}
+
+QUrl MobileWebBridge::documentUrl(const QString& file) const
+{
+    QString name = file;
+    while (name.startsWith(QLatin1Char('/'))) name.remove(0, 1);
+    if (name.isEmpty()) name = QStringLiteral("index.html");
+    return m_origin.url(QStringLiteral("/") + name);
 }
 
 QString MobileWebBridge::channelShim() const
@@ -370,10 +375,16 @@ void MobileWebBridge::handleSend(const QUrl& url, const QByteArray& body,
         // it would deadlock, and the peer above does exactly that when it
         // answers a Call inline.
         Receiver receiver;
+        std::function<void(const QString&)> observer;
         {
             std::lock_guard<std::recursive_mutex> guard(m_receiverMutex);
             receiver = m_receiver;
+            observer = m_observer;
         }
+        // The observer FIRST, and it is not arbitrary: the receiver may answer
+        // inline and produce more traffic, and an observer that saw the reply
+        // before the frame that caused it would read backwards.
+        if (observer) observer(frame);
         if (receiver) receiver(frame.toStdString());
     }
 
@@ -498,6 +509,12 @@ bool MobileWebBridge::isOpen() const
 {
     std::lock_guard<std::mutex> guard(m_mutex);
     return m_open;
+}
+
+void MobileWebBridge::setFrameObserver(std::function<void(const QString&)> observer)
+{
+    std::lock_guard<std::recursive_mutex> guard(m_receiverMutex);
+    m_observer = std::move(observer);
 }
 
 void MobileWebBridge::setOnPageClosed(std::function<void()> callback)

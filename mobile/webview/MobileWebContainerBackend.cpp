@@ -161,6 +161,32 @@ bool MobileWebContainerBackend::hasView(const QString& moduleName) const
     return m_views.contains(moduleName);
 }
 
+bool MobileWebContainerBackend::hasUiPage(const QString& moduleName) const
+{
+    MobileWebModuleView* view = m_views.value(moduleName, nullptr);
+    return view && view->hasUi();
+}
+
+void MobileWebContainerBackend::observeFramesFrom(const QString& moduleName,
+                                                 std::function<void(const QString&)> sink)
+{
+    if (MobileWebModuleView* view = m_views.value(moduleName, nullptr))
+        view->observeFrames(std::move(sink));
+}
+
+bool MobileWebContainerBackend::sendFrameTo(const QString& moduleName, const QString& frame)
+{
+    MobileWebModuleView* view = m_views.value(moduleName, nullptr);
+    return view && view->sendFrame(frame);
+}
+
+bool MobileWebContainerBackend::runJavaScriptIn(const QString& moduleName,
+                                                const QString& script)
+{
+    MobileWebModuleView* view = m_views.value(moduleName, nullptr);
+    return view && view->runJavaScript(script);
+}
+
 QStringList MobileWebContainerBackend::loadedModules() const
 {
     QStringList names = m_views.keys();
@@ -196,11 +222,36 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
     qInfo().noquote() << appMemoryLine(QStringLiteral("with %1 visible").arg(moduleName));
 
     for (const QString& name : evicted) {
+        MobileWebModuleView* view = m_views.value(name, nullptr);
+        // THE MODULE STAYS, THE RUNTIME GOES. A variant with a headless entry
+        // document is swapped onto it: same view, same bridge, same channel,
+        // and the core is not told because from its side nothing happened.
+        if (view && view->evictUi()) {
+            qInfo().noquote()
+                << QStringLiteral("Web container: over budget -- %1 gives up its UI page "
+                                  "and keeps its Wasm host (%2 reclaimed)")
+                       .arg(name, megabytes(m_budget.runtimeFootprintBytes()));
+            emit uiEvicted(name);
+            continue;
+        }
         qInfo().noquote()
             << QStringLiteral("Web container: over budget -- %1 gives up its UI page "
-                              "(%2 reclaimed)")
+                              "(%2 reclaimed); its package ships no headless document, "
+                              "so it has to be unloaded")
                    .arg(name, megabytes(m_budget.runtimeFootprintBytes()));
         emit uiEvictionRequired(name);
+    }
+
+    // ...AND THE MODULE THE USER CHOSE GETS ITS UI BACK. Last, so that the page
+    // coming up is the only live runtime at the moment it starts: a restore
+    // before the eviction would put two of them in the same webview process for
+    // the length of a load, which is the thing the budget exists to prevent.
+    MobileWebModuleView* shown = m_views.value(moduleName, nullptr);
+    if (shown && !shown->hasUi() && shown->restoreUi()) {
+        shown->setFrontmost(true);
+        qInfo().noquote()
+            << QStringLiteral("Web container: %1 was in the background; its UI page is "
+                              "coming back").arg(moduleName);
     }
     return evicted;
 }

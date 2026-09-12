@@ -5,8 +5,120 @@
 
 #include <QDir>
 #include <QEventLoop>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QTimer>
+
+namespace {
+
+// ── driving real input at a canvas ─────────────────────────────────────────
+//
+// A `web` variant's view is pixels in a canvas: there is no DOM node to touch,
+// no text node to read and no accessibility tree to drive. So a host that has
+// to show that a real key and a real finger reach the view dispatches the
+// events IN THE PAGE, and then waits for the module's own QML to say what
+// arrived. Everything asserted afterwards is the module reporting on itself.
+//
+// The same two gestures the browser end-to-end drives
+// (logos-module-builder's wasm/browser-e2e), for the same reason and with the
+// same two findings baked in:
+//
+//   * THE KEY EVENT ALONE. Qt takes the character off `keydown`; adding the
+//     `input` event a real IME would also fire types every character twice.
+//   * POINTER CAPTURE HAS TO BE DEFUSED. Qt captures the pointer on
+//     pointerdown and a browser refuses to capture an id no real input device
+//     owns -- which throws out of the dispatch and leaves a drag half
+//     delivered.
+//
+// And one that is this venue's own: the press and the keys cannot be in the
+// same turn of the page's event loop. Qt's focus change happens on ITS event
+// loop, so the keys are sent from a timer, after the click has landed.
+const char* kInputDriver = R"JS(
+(function () {
+  if (window.logosDrive) return;
+  var canvas = function () {
+    var host = document.querySelector('#qt-shadow-container');
+    var root = (host && host.shadowRoot) || document;
+    return { root: root, el: root.querySelector('canvas') };
+  };
+  var stub = function () {
+    if (Element.prototype.__logosCaptureStubbed) return;
+    Element.prototype.setPointerCapture = function () {};
+    Element.prototype.releasePointerCapture = function () {};
+    Element.prototype.__logosCaptureStubbed = true;
+  };
+  var pointAt = function (x, y) {
+    var c = canvas();
+    if (!c.el) return null;
+    var rect = c.el.getBoundingClientRect();
+    var cx = rect.left + x, cy = rect.top + y;
+    var target = (c.root.elementFromPoint ? c.root.elementFromPoint(cx, cy) : null) || c.el;
+    return { target: target, x: cx, y: cy };
+  };
+  var send = function (target, type, x, y, kind, extra) {
+    var init = { bubbles: true, cancelable: true, composed: true,
+                 clientX: x, clientY: y, screenX: x, screenY: y,
+                 pointerId: kind === 'touch' ? 2 : 1, pointerType: kind,
+                 isPrimary: true, width: 4, height: 4, pressure: 0.5 };
+    for (var k in extra) init[k] = extra[k];
+    target.dispatchEvent(new PointerEvent(type, init));
+  };
+  var deepActive = function () {
+    var node = document.activeElement;
+    while (node && node.shadowRoot && node.shadowRoot.activeElement)
+      node = node.shadowRoot.activeElement;
+    return node;
+  };
+
+  window.logosDrive = {
+    type: function (x, y, text) {
+      var p = pointAt(x, y);
+      if (!p) { console.log('logos-drive: no canvas'); return; }
+      stub();
+      send(p.target, 'pointermove', p.x, p.y, 'mouse', { button: -1, buttons: 0 });
+      send(p.target, 'pointerdown', p.x, p.y, 'mouse', { button: 0, buttons: 1 });
+      send(p.target, 'pointerup', p.x, p.y, 'mouse', { button: 0, buttons: 0, pressure: 0 });
+      // AFTER the click has been processed: Qt moves focus on its own event
+      // loop, and keys sent in this turn would land on whatever had it before.
+      setTimeout(function () {
+        var target = deepActive() || document.body;
+        console.log('logos-drive: keys to ' + target.tagName);
+        for (var i = 0; i < text.length; i++) {
+          var key = text[i];
+          var init = { key: key, code: 'Key' + key.toUpperCase(),
+                       bubbles: true, cancelable: true, composed: true };
+          target.dispatchEvent(new KeyboardEvent('keydown', init));
+          target.dispatchEvent(new KeyboardEvent('keyup', init));
+        }
+      }, 600);
+    },
+
+    drag: function (x, y, dy) {
+      var p = pointAt(x, y);
+      if (!p) { console.log('logos-drive: no canvas'); return; }
+      stub();
+      send(p.target, 'pointerdown', p.x, p.y, 'touch', { button: 0, buttons: 1 });
+      var step = 0;
+      var move = function () {
+        step++;
+        send(p.target, 'pointermove', p.x, p.y + (dy * step) / 8, 'touch',
+             { button: -1, buttons: 1 });
+        // ONE FRAME APART. Flickable has no velocity from a single sample, and
+        // eight moves delivered in one turn of the loop are one teleport.
+        if (step < 8) { setTimeout(move, 16); return; }
+        setTimeout(function () {
+          send(p.target, 'pointerup', p.x, p.y + dy, 'touch',
+               { button: 0, buttons: 0, pressure: 0 });
+        }, 16);
+      };
+      setTimeout(move, 16);
+    }
+  };
+})();
+)JS";
+
+} // namespace
 
 using basecamp::web::megabytes;
 using basecamp::web::MobileWebContainerBackend;
@@ -25,7 +137,9 @@ WebModuleRunner::WebModuleRunner(ICoreRuntime* core, QString webModulesDir, QObj
                 // `contains`, not `startsWith`: Qt's own console route prefixes
                 // a page's qml log with "qml: ".
                 if (message.contains(QStringLiteral("logos-view:"))
+                    || message.contains(QStringLiteral("logos-drive:"))
                     || message.contains(QStringLiteral("[logos-web-view"))
+                    || message.contains(QStringLiteral("[logos-web-host"))
                     || level == QLatin1String("error"))
                     emit log(QStringLiteral("web %1: %2").arg(module, message));
             });
@@ -49,6 +163,146 @@ bool WebModuleRunner::waitForPageLine(const QString& pattern, int timeoutMs)
         if (timer.elapsed() >= timeoutMs) return false;
         pump(100);
     }
+}
+
+QStringList WebModuleRunner::capturePageLine(const QString& pattern, int timeoutMs)
+{
+    const QRegularExpression re(pattern);
+    QElapsedTimer timer;
+    timer.start();
+    for (;;) {
+        // BACKWARDS. Every one of these lines is reported on a repeating timer
+        // by the fixture, so the list holds many; the last is the one that
+        // describes the view as it is NOW.
+        for (int i = m_pageLines.size() - 1; i >= 0; --i) {
+            const QRegularExpressionMatch match = re.match(m_pageLines.at(i));
+            if (match.hasMatch()) return match.capturedTexts();
+        }
+        if (timer.elapsed() >= timeoutMs) return {};
+        pump(100);
+    }
+}
+
+// ── the first criterion's second half ──────────────────────────────────────
+
+bool WebModuleRunner::typeIntoView(const QString& name)
+{
+    auto* backend = MobileWebContainerBackend::instance();
+    const QStringList at = capturePageLine(
+        QStringLiteral("logos-view: field-at ([1-9][0-9]*) ([1-9][0-9]*)"), 20000);
+    if (at.isEmpty()) {
+        emit log(QStringLiteral("web module %1: its view never reported a text field")
+                     .arg(name));
+        return false;
+    }
+
+    if (!backend->runJavaScriptIn(name, QString::fromUtf8(kInputDriver))
+        || !backend->runJavaScriptIn(
+            name, QStringLiteral("window.logosDrive.type(%1, %2, 'logos')")
+                      .arg(at.at(1), at.at(2)))) {
+        emit log(QStringLiteral("web module %1: this platform cannot put an event in "
+                                "the page").arg(name));
+        return false;
+    }
+
+    // WHAT THE MODULE SAYS IT GOT. `logos-view: typed logos` is the fixture's
+    // own TextField reporting its contents after five keydowns -- the fact a
+    // screenshot of a canvas cannot establish, and the fact a driver that
+    // merely dispatched events cannot claim.
+    const bool typed = waitForPageLine(QStringLiteral("logos-view: typed logos"), 20000);
+    const QStringList focus = capturePageLine(
+        QStringLiteral("logos-view: field-focus (true|false)"), 1000);
+    emit log(typed
+                 ? QStringLiteral("KEYBOARD: %1's text field has `logos` in it, typed by "
+                                  "five key events at its editor (focus=%2)")
+                       .arg(name, focus.size() > 1 ? focus.at(1) : QStringLiteral("?"))
+                 : QStringLiteral("WRONG: %1's text field never took the keys").arg(name));
+    return typed;
+}
+
+bool WebModuleRunner::scrollViewList(const QString& name)
+{
+    auto* backend = MobileWebContainerBackend::instance();
+    const QStringList at = capturePageLine(
+        QStringLiteral("logos-view: list-at ([1-9][0-9]*) ([1-9][0-9]*)"), 20000);
+    if (at.isEmpty()) {
+        emit log(QStringLiteral("web module %1: its view never reported a list").arg(name));
+        return false;
+    }
+
+    if (!backend->runJavaScriptIn(name, QString::fromUtf8(kInputDriver))
+        || !backend->runJavaScriptIn(
+            name, QStringLiteral("window.logosDrive.drag(%1, %2, -90)")
+                      .arg(at.at(1), at.at(2)))) {
+        emit log(QStringLiteral("web module %1: this platform cannot put a gesture in "
+                                "the page").arg(name));
+        return false;
+    }
+
+    // THE ROW, not only the offset. A list that moved its content without
+    // rebinding a delegate has not scrolled in any sense a user would name, so
+    // the fixture reports the index it put at the top and this waits for one
+    // that is not the first.
+    const bool scrolled = waitForPageLine(
+        QStringLiteral("logos-view: scrolled contentY=[1-9][0-9]* first=[1-9]"), 20000);
+    const QStringList where = capturePageLine(
+        QStringLiteral("logos-view: scrolled contentY=(\\d+) first=(-?\\d+)"), 1000);
+    emit log(scrolled
+                 ? QStringLiteral("SCROLLING: %1's list followed a drag to contentY=%2 "
+                                  "with row %3 at the top")
+                       .arg(name, where.value(1), where.value(2))
+                 : QStringLiteral("WRONG: %1's list did not follow the drag (%2)")
+                       .arg(name, where.isEmpty() ? QStringLiteral("no scroll line")
+                                                  : where.at(0)));
+    return scrolled;
+}
+
+// ── the third criterion ────────────────────────────────────────────────────
+
+bool WebModuleRunner::callIntoPage(const QString& name, QString* answer)
+{
+    auto* backend = MobileWebContainerBackend::instance();
+
+    // A `Methods` FRAME, AND IT IS THE CONTAINER'S OWN QUESTION. liblogos'
+    // WebContainer decides a `web` module is serving by asking its page for its
+    // interface and getting an answer (WebContainer::awaitLoad), and the wasm
+    // host answers it off the live backend QObject's metaobject. So a
+    // MethodsResult coming back here is not a proxy for "the module is
+    // answering" -- it is the same evidence the container itself uses, taken
+    // while the module's UI page is gone.
+    //
+    // A Call would be the more obvious frame and would prove less: a `ui_qml`
+    // module's backend is reached by a QtRO replica, so its wasm host refuses
+    // Calls on this transport BY DESIGN and a refusal would be ambiguous.
+    const int id = 990001;
+    const QString frame =
+        QStringLiteral("{\"type\":7,\"payload\":{\"id\":%1,\"authToken\":\"\","
+                       "\"object\":\"%2\"}}")
+            .arg(QString::number(id), name);
+
+    QString reply;
+    backend->observeFramesFrom(name, [&reply, id](const QString& text) {
+        if (!reply.isEmpty()) return;
+        const QJsonObject envelope = QJsonDocument::fromJson(text.toUtf8()).object();
+        // ONLY OUR ANSWER. The page is talking to the core on this wire at the
+        // same time; everything that is not a MethodsResult carrying the id we
+        // minted belongs to someone else.
+        if (envelope.value(QStringLiteral("type")).toInt() != 8) return;
+        const QJsonObject payload = envelope.value(QStringLiteral("payload")).toObject();
+        if (payload.value(QStringLiteral("id")).toInt() != id) return;
+        reply = text;
+    });
+    if (!backend->sendFrameTo(name, frame)) {
+        backend->observeFramesFrom(name, nullptr);
+        return false;
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    while (reply.isEmpty() && timer.elapsed() < 20000) pump(100);
+    backend->observeFramesFrom(name, nullptr);
+    if (answer) *answer = reply;
+    return !reply.isEmpty();
 }
 
 QStringList WebModuleRunner::available() const
@@ -134,47 +388,69 @@ bool WebModuleRunner::run()
                  : QStringLiteral("web module %1: its view never reported a button position")
                        .arg(first));
 
+    // ── a real key and a real finger, at a canvas ──────────────────────────
+    //
+    // Slice 28's first criterion, and the half a rendered view does not
+    // establish. Both go in as DOM events at the page and both are reported by
+    // the module's own QML; see kInputDriver for why they cannot be anything
+    // else.
+    const bool typed = typeIntoView(first);
+    const bool scrolled = scrollViewList(first);
+
     if (modules.size() < 2) {
         emit log(QStringLiteral("live-runtime budget: only one web module is installed, "
                                 "so there is nothing to evict"));
-        return laidOut;
+        return laidOut && typed && scrolled;
     }
 
     // ── the second module, and the budget ──────────────────────────────────
     const QString second = modules.at(1);
     QStringList evicted;
     const auto evictConnection =
-        connect(backend, &MobileWebContainerBackend::uiEvictionRequired, this,
+        connect(backend, &MobileWebContainerBackend::uiEvicted, this,
                 [&evicted](const QString& name) { evicted.append(name); });
+    // The other answer, for a package that ships no headless document. Counted
+    // separately so a run against an older variant says which happened.
+    QStringList unloadable;
+    const auto unloadConnection =
+        connect(backend, &MobileWebContainerBackend::uiEvictionRequired, this,
+                [&unloadable](const QString& name) { unloadable.append(name); });
 
+    const qint64 held = basecamp::web::appResidentBytes();
     const qint64 secondMs = bringUp(second);
     disconnect(evictConnection);
+    disconnect(unloadConnection);
     if (secondMs < 0) return false;
     emit log(QStringLiteral("COLD START: %1's UI ready at %2 ms").arg(second).arg(secondMs));
 
     if (!evicted.contains(first)) {
-        emit log(QStringLiteral("WRONG: showing %1 did not put %2 over the live-runtime budget")
-                     .arg(second, first));
+        emit log(unloadable.contains(first)
+                     ? QStringLiteral("WRONG: %1's package ships no headless entry "
+                                      "document, so it could only be unloaded")
+                           .arg(first)
+                     : QStringLiteral("WRONG: showing %1 did not put %2 over the "
+                                      "live-runtime budget").arg(second, first));
         return false;
     }
 
-    // ANSWERING THE EVICTION IS THE HOST'S JOB, and it is done through the
-    // core: the page belongs to liblogos' container, which destroys it when the
-    // module unloads. A shell that tore the view down itself would leave a
-    // published module with a dead channel.
-    const qint64 held = basecamp::web::appResidentBytes();
-    for (const QString& name : evicted) m_core->unloadModule(name, /*withDependents=*/false);
+    // THE CONTAINER ANSWERED IT ITSELF, which is what is new here. A module
+    // whose package ships a headless entry document is not unloaded: its page
+    // is swapped onto that document, so the view, the bridge and the channel
+    // the core holds are all still the same objects and the core was never
+    // told. The host's only job is to stop mounting a surface that is gone.
+    //
     // The webview's own teardown is asynchronous on both platforms, and what is
     // reclaimed is reclaimed by the OS afterwards. Two seconds is what the
     // number is worth reading after.
     pump(2000);
     const qint64 after = basecamp::web::appResidentBytes();
 
-    const bool released = !backend->hasView(first);
+    const bool released = backend->hasView(first) && !backend->hasUiPage(first);
     emit log(released
-                 ? QStringLiteral("live-runtime budget: %1 gave up its UI page for %2")
-                       .arg(first, second)
-                 : QStringLiteral("WRONG: %1 still holds a page after being unloaded").arg(first));
+                 ? QStringLiteral("live-runtime budget: %1 gave up its UI page for %2 "
+                                  "and stayed loaded").arg(first, second)
+                 : QStringLiteral("WRONG: %1 still holds a UI page after being evicted")
+                       .arg(first));
     emit log(QStringLiteral("live-runtime budget: %1 of %2 held by %3 live runtime(s)")
                  .arg(megabytes(backend->budget().projectedBytes()),
                       megabytes(backend->budget().budgetBytes()),
@@ -194,21 +470,32 @@ bool WebModuleRunner::run()
                             "embedder cannot weigh)")
                  .arg(megabytes(held), megabytes(after)));
 
-    // ── and the evicted module is still there, as a module ─────────────────
-    // KNOWN LIMIT, REPORTED AS ONE. A `ui_qml` module's `web` variant today is
-    // ONE page carrying both the QML runtime and its own Qt-wasm backend image
-    // (logos-module-builder's buildWebViewModule.nix), so giving up the UI gives
-    // up the Wasm host with it. Slice 28 asks for a background module that keeps
-    // answering, and that needs the variant to ship a second, headless entry
-    // document. Nothing in the container changes when it does -- the budget
-    // already governs UI pages only -- so what is checked here is the half that
-    // IS true: the module is still installed and can be brought back.
-    const bool stillKnown = m_core->knownModules().contains(first);
-    emit log(stillKnown
-                 ? QStringLiteral("web module %1: still installed with its UI evicted; its Wasm "
-                                  "host went with the page (one entry document per variant)")
-                       .arg(first)
-                 : QStringLiteral("WRONG: %1 disappeared from the installed set").arg(first));
+    // ── and the evicted module is still ANSWERING ──────────────────────────
+    //
+    // Slice 28's third criterion. Three facts, in the order they build on each
+    // other: the core still has the module loaded; its headless page said its
+    // Wasm host came up; and a frame sent into that page came back answered.
+    const bool stillLoaded = m_core->loadedModules().contains(first);
+    emit log(stillLoaded
+                 ? QStringLiteral("web module %1: still loaded with its UI evicted").arg(first)
+                 : QStringLiteral("WRONG: %1 left the core's loaded set").arg(first));
 
-    return laidOut && released && stillKnown;
+    const bool hostUp = waitForPageLine(
+        QStringLiteral("\\[logos-web-host %1\\] serving with no UI").arg(first), 60000);
+    emit log(hostUp
+                 ? QStringLiteral("web module %1: its Wasm host reports itself serving with "
+                                  "no UI, from the headless entry document").arg(first)
+                 : QStringLiteral("WRONG: %1's headless page never reported a serving host")
+                       .arg(first));
+
+    QString answer;
+    const bool answered = callIntoPage(first, &answer);
+    emit log(answered
+                 ? QStringLiteral("BACKGROUND CALL: %1 answered the container's own "
+                                  "interface query with its UI evicted -- %2")
+                       .arg(first, answer.left(160))
+                 : QStringLiteral("WRONG: %1 did not answer a frame sent into its "
+                                  "headless page").arg(first));
+
+    return laidOut && typed && scrolled && released && stillLoaded && hostUp && answered;
 }

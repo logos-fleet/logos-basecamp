@@ -184,6 +184,19 @@ public final class LogosWebPage {
         parent.requestLayout();
     }
 
+    /**
+     * Run one script in the page, and forget it.
+     *
+     * <p>What the script has to say it says through the page's own console,
+     * which the bridge already carries back to the host -- so there is no
+     * result callback here and nothing to correlate. Called from the Android UI
+     * thread, which is the only thread a WebView may be touched from.
+     */
+    public void evaluateJavaScript(String script) {
+        if (mWebView == null) return;
+        mWebView.evaluateJavascript(script, null);
+    }
+
     /** Tear the page down. Called from the Android UI thread. */
     public void destroy() {
         if (mWebView == null) return;
