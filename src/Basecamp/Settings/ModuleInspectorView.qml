@@ -45,6 +45,21 @@ Item {
     // any of them from the inspector would take the app's own plumbing down.
     readonly property var protectedModules: ["package_manager", "package_downloader", "capability_module"]
 
+    // ─── Compact (handset / tablet) layout ───
+    // The desktop column set's minimums add up to `desktopMinimumWidth`.
+    // Narrower than that, LogosTable pins every column to its minimum and
+    // scrolls horizontally instead — which puts the row's action, the LAST
+    // column, off the right edge. Qt delivers a press by coordinate, so that
+    // control is then not merely awkward but unreachable: on a phone, and on a
+    // 13-inch iPad in portrait, nothing can be loaded or unloaded by hand
+    // (logos-workspace#84).
+    //
+    // So below it the row keeps only what it cannot do without: which module
+    // it is, and the control. Status, CPU and memory fold into the module cell,
+    // and the Interface drill-down moves to the row itself.
+    readonly property int desktopMinimumWidth: 700
+    readonly property bool compact: root.width > 0 && root.width < desktopMinimumWidth
+
     // Open a specific module's Interface screen (methods + events) by name.
     // Equivalent to clicking that module's "Interface" button — exposed for UI
     // automation/tests, which can't disambiguate the per-row buttons by their
@@ -101,7 +116,9 @@ Item {
                 Layout.bottomMargin: Theme.spacing.large
 
                 model: tableModel
-                rowHeight: 56
+                // Two lines of module cell when the stats columns are folded
+                // into it.
+                rowHeight: root.compact ? 72 : 56
                 sortRole: "label"
                 sortOrder: Qt.AscendingOrder
                 emptyText: tableModel.totalCount === 0
@@ -114,10 +131,41 @@ Item {
                     tableModel.applySortOrder(order)
                 }
 
+                // Compact rows carry no Interface button, so the row itself is
+                // the way in — same destination, one tap.
+                onRowClicked: function(index, row) {
+                    if (root.compact && row && row.isLoaded) root.openInterface(row.name)
+                }
+
                 // Keep every row instantiated — see AppsInspectorView for why.
                 Component.onCompleted: if (view) view.cacheBuffer = 20000
 
-                columns: [
+                columns: root.compact ? compactColumns : desktopColumns
+
+                // ─── Compact: what the module is, and the control ───
+                property list<QtObject> compactColumns: [
+                    LogosTableColumn {
+                        title: qsTr("Module")
+                        role: "label"
+                        minWidth: 140
+                        preferredWidth: 200
+                        fillWidth: true
+                        sortable: true
+                        cellDelegate: compactModuleCellComponent
+                    },
+                    LogosTableColumn {
+                        title: ""
+                        // The toggle (100) plus this table's cell padding on
+                        // both sides. Below it the button would be clipped,
+                        // which is the whole bug.
+                        minWidth: 100 + 2 * modulesTable.defaultCellPadding
+                        preferredWidth: minWidth
+                        alignment: Qt.AlignRight | Qt.AlignVCenter
+                        cellDelegate: actionsCellComponent
+                    }
+                ]
+
+                property list<QtObject> desktopColumns: [
                     LogosTableColumn {
                         title: qsTr("Module")
                         role: "label"
@@ -189,6 +237,51 @@ Item {
                     }
                 }
 
+                // The compact row's whole left side: the module, then the
+                // status badge with the stats beside it. The badge keeps the
+                // same automation handle it has in the Status column — the
+                // Shell's iOS driver counts the rows on screen by it, and a
+                // row is a row whichever layout drew it.
+                Component {
+                    id: compactModuleCellComponent
+
+                    ColumnLayout {
+                        spacing: Theme.spacing.tiny
+
+                        LogosText {
+                            Layout.fillWidth: true
+                            text: rowItem ? rowItem.label : ""
+                            font.pixelSize: Theme.typography.primaryText
+                            font.weight: Theme.typography.weightMedium
+                            color: Theme.palette.text
+                            elide: Text.ElideRight
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.small
+
+                            ModuleStatusBadge {
+                                objectName: "moduleInspector.status."
+                                            + (rowItem && rowItem.name ? rowItem.name : "")
+                                row: rowItem
+                            }
+
+                            LogosText {
+                                Layout.fillWidth: true
+                                visible: rowItem && rowItem.isLoaded
+                                text: rowItem
+                                      ? Number(rowItem.cpu).toFixed(1) + "%  ·  "
+                                        + Number(rowItem.memory).toFixed(1) + " MB"
+                                      : ""
+                                font.pixelSize: Theme.typography.secondaryText
+                                color: Theme.palette.textTertiary
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+                }
+
                 Component {
                     id: statusCellComponent
 
@@ -248,7 +341,10 @@ Item {
                             row: rowItem
                             busy: root.loading
                             locked: !!rowItem && root.protectedModules.indexOf(rowItem.name) !== -1
-                            interfaceEnabled: true
+                            // Compact rows have room for one control, and the
+                            // toggle is the one that cannot be reached another
+                            // way; Interface moves to the row (onRowClicked).
+                            interfaceEnabled: !root.compact
 
                             onLoadToggleRequested: {
                                 if (rowItem.isLoaded) root.unloadRequested(rowItem.name)

@@ -7,9 +7,9 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QGuiApplication>
-#include <QMetaObject>
 #include <QMouseEvent>
 #include <QRectF>
+#include <QVariant>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QUrl>
@@ -108,6 +108,29 @@ QQuickItem* ShellModulesDriver::waitFor(const QString& objectName, int timeoutMs
     }
 }
 
+void ShellModulesDriver::scrollIntoView(QQuickItem* item)
+{
+    if (!item) return;
+    // The nearest ancestor that has a contentX is the flickable this item
+    // rides in -- QQuickItem has no such property, Flickable and every view
+    // built on it does. Asking by property rather than by type keeps this off
+    // Qt's private headers.
+    for (QQuickItem* p = item->parentItem(); p; p = p->parentItem()) {
+        const QVariant contentX = p->property("contentX");
+        if (!contentX.isValid()) continue;
+        const qreal left = item->mapToItem(p, QPointF(0, 0)).x();
+        const qreal overflow = left + item->width() - p->width();
+        if (overflow > 0)
+            p->setProperty("contentX", contentX.toReal() + overflow);
+        else if (left < 0)
+            p->setProperty("contentX", contentX.toReal() + left);
+        else
+            return;
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        return;
+    }
+}
+
 bool ShellModulesDriver::tap(QQuickItem* item)
 {
     QQuickWidget* surface = surfaceOf(item);
@@ -126,30 +149,21 @@ bool ShellModulesDriver::tap(QQuickItem* item)
     // scrolled-away button", it is a press on whatever is at that coordinate
     // -- which is silence, and looks exactly like a button that does nothing.
     //
-    // This is not hypothetical on a phone: the Module Inspector's table is the
-    // desktop's, about a thousand logical pixels of columns, and the action
-    // column is the last of them. Making the Shell's tables narrow enough for
-    // a handset is a slice of its own; until then, say which of the two
-    // happened.
+    // This used to be a workaround: the Module Inspector's table was the
+    // desktop's, about a thousand logical pixels of columns with the action
+    // column last, so on a phone the toggle sat off the right edge and the
+    // driver activated the row's own control instead of pressing it. That kept
+    // these verdicts green while nobody could load a module by hand
+    // (logos-workspace#84). The Settings views collapse to the row and its
+    // action below ~700 px now, so a control off the viewport is a layout
+    // regression and this says so instead of working around it.
     if (!QRectF(QPointF(0, 0), QSizeF(surface->size())).contains(centre)) {
-        emit log(QStringLiteral("drive: '%1' is at (%2, %3), outside the %4x%5 viewport "
-                                "-- the Shell's desktop table is wider than this screen; "
-                                "activating the control instead of pressing it")
+        emit log(QStringLiteral("WRONG: '%1' is at (%2, %3), outside the %4x%5 viewport "
+                                "-- no touch can reach it on this screen")
                      .arg(item->objectName())
                      .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
                      .arg(surface->width()).arg(surface->height()));
-        // Still the Shell's own control and the Shell's own signal chain --
-        // LogosButton.onClicked -> loadToggleRequested -> ModuleInspectorView
-        // -> SettingsView -> ContentViews -> the backend. The only thing
-        // skipped is UIKit's delivery of the touch to a pixel that is not on
-        // this screen.
-        if (!QMetaObject::invokeMethod(item, "clicked")) {
-            emit log(QStringLiteral("drive: '%1' has no clicked() to activate")
-                         .arg(item->objectName()));
-            return false;
-        }
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        return true;
+        return false;
     }
 
     const QPointF global = surface->mapToGlobal(centre);
@@ -179,6 +193,8 @@ void ShellModulesDriver::run()
         dumpNames(QStringLiteral("no Module Inspector section in the Settings view"));
         return;
     }
+    // The strip a phone draws the sections in scrolls; swipe it first.
+    scrollIntoView(section);
     if (!tap(section)) return;
 
     QQuickItem* view = waitFor(QStringLiteral("moduleInspectorView"), 5000);

@@ -57,8 +57,14 @@ private:
     void dumpNames(const QString& why);
     QQuickWidget* surfaceOf(QQuickItem* item) const;
     // A press and a release at the item's centre, entering the scene where a
-    // finger's would.
+    // finger's would. Fails, rather than working around it, when that centre
+    // is off the viewport -- see the comment in tap().
     bool tap(QQuickItem* item);
+    // Scroll the nearest enclosing flickable so `item` is on screen. Used for
+    // the phone's section strip, which is a horizontal scroller BY DESIGN and
+    // which a finger would swipe; NOT for a row's action, whose whole
+    // requirement is to be reachable without scrolling sideways.
+    void scrollIntoView(QQuickItem* item);
     // Spin the event loop until `item` exists or the deadline passes. Delegate
     // creation is asynchronous -- the rows of a view that just became visible
     // do not exist in the same tick.

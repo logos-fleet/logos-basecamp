@@ -68,50 +68,95 @@ Rectangle {
             selectedIndex === sectionModuleInspector
 
         onSelectedIndexChanged: searchText = ""
+
+        // ─── Narrow (handset / tablet) layout ───
+        // The desktop page is a 200-px section rail beside a pane, inside
+        // 40-px insets: 252 px of the width is gone before the table starts,
+        // and the inspectors' columns want ~700 more. On a phone — and on a
+        // 13-inch iPad in portrait — that does not fit, and a Qt layout given
+        // less than its minimum does not shrink, it OVERFLOWS: the pane ran
+        // past the right edge of the screen, taking each row's Load/Unload
+        // control with it (logos-workspace#84).
+        //
+        // Below this the rail becomes a strip above the pane and the insets
+        // become a phone's, which hands the pane the whole width. Every text
+        // on the page also declares a zero minimum, because one long label
+        // with an implicit minimum is enough to push the page wide again.
+        readonly property int narrowBelow: 900
+        readonly property bool narrow: root.width > 0 && root.width < narrowBelow
+        readonly property int pageMargin: narrow ? Theme.spacing.medium
+                                                 : Theme.spacing.xxlarge
+        readonly property int stripHeight: 40
+    }
+
+    Component {
+        id: sectionsHeader
+
+        LogosText {
+            width: sectionsList.width
+            topPadding: Theme.spacing.tiny
+            bottomPadding: Theme.spacing.tiny
+            text: qsTr("Sections")
+            font.pixelSize: Theme.typography.subtitleText
+            font.weight: Theme.typography.weightRegular
+            color: Theme.palette.text
+        }
     }
 
     color: Theme.palette.background
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Theme.spacing.xxlarge
-        spacing: Theme.spacing.xlarge
+        anchors.margins: d.pageMargin
+        spacing: d.narrow ? Theme.spacing.medium : Theme.spacing.xlarge
 
         // ─── Header ───
         // Title + subtitle on the left; when an inspector is selected, a
         // page-level search bar joins on the right — same layout as
-        // AppManagerView so the two feel familiar side by side.
-        RowLayout {
+        // AppManagerView so the two feel familiar side by side. Narrow, the
+        // search bar drops to its own row underneath rather than squeezing
+        // the title off the page.
+        GridLayout {
             Layout.fillWidth: true
-            spacing: Theme.spacing.xlarge
+            Layout.minimumWidth: 0
+            columns: d.narrow ? 1 : 2
+            columnSpacing: Theme.spacing.xlarge
+            rowSpacing: Theme.spacing.medium
 
             ColumnLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 spacing: Theme.spacing.tiny
 
                 LogosText {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: qsTr("Settings")
                     font.pixelSize: Theme.typography.pageTitleText
                     font.weight: Theme.typography.weightBold
                     color: Theme.palette.text
+                    elide: Text.ElideRight
                 }
 
                 LogosText {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: qsTr("Manage modules, apps and dashboards.")
                     font.pixelSize: Theme.typography.primaryText
                     color: Theme.palette.textSecondary
+                    elide: Text.ElideRight
                 }
             }
-
-            Item { Layout.fillWidth: true }
 
             LogosSearchBar {
                 id: searchBar
                 objectName: "settings.searchField"
                 visible: d.searchable
-                Layout.alignment: Qt.AlignRight
+                Layout.alignment: d.narrow ? Qt.AlignLeft : Qt.AlignRight
+                Layout.fillWidth: true
                 Layout.preferredWidth: 605
-                Layout.minimumWidth: 200
+                Layout.maximumWidth: 605
+                Layout.minimumWidth: 0
                 text: d.searchText
                 placeholderText: d.selectedIndex === d.sectionAppsInspector
                                  ? qsTr("Search apps…")
@@ -134,37 +179,43 @@ Rectangle {
             }
         }
 
-        RowLayout {
+        // Two cells side by side on the desktop; stacked, rail first, when
+        // narrow. One GridLayout rather than two layouts behind a Loader, so
+        // the sections list and the pane are the same items either way —
+        // switching would rebuild the pane and lose the open section.
+        GridLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Theme.spacing.medium
+            Layout.minimumWidth: 0
+            columns: d.narrow ? 1 : 2
+            columnSpacing: Theme.spacing.medium
+            rowSpacing: Theme.spacing.medium
 
-            // ─── Sections sidebar ───
+            // ─── Sections: a rail on the desktop, a strip on a phone ───
             LogosListView {
                 id: sectionsList
 
-                Layout.preferredWidth: 200
-                Layout.minimumWidth: 160
-                Layout.maximumWidth: 200
-                Layout.fillHeight: true
+                orientation: d.narrow ? ListView.Horizontal : ListView.Vertical
+
+                Layout.fillWidth: d.narrow
+                Layout.fillHeight: !d.narrow
+                Layout.minimumWidth: 0
+                Layout.preferredWidth: d.narrow ? 0 : 200
+                Layout.maximumWidth: d.narrow ? Number.POSITIVE_INFINITY : 200
+                Layout.preferredHeight: d.narrow ? d.stripHeight : 0
 
                 model: d.sections
                 currentIndex: d.selectedIndex
 
-                header: LogosText {
-                    width: sectionsList.width
-                    topPadding: Theme.spacing.tiny
-                    bottomPadding: Theme.spacing.tiny
-                    text: qsTr("Sections")
-                    font.pixelSize: Theme.typography.subtitleText
-                    font.weight: Theme.typography.weightRegular
-                    color: Theme.palette.text
-                }
+                // The strip has no room for a heading, and the page title two
+                // rows up already says where we are.
+                header: d.narrow ? null : sectionsHeader
 
                 delegate: LogosItemDelegate {
                     id: cell
                     objectName: "settings.section." + modelData.key
-                    width: ListView.view.width
+                    width: d.narrow ? implicitWidth : ListView.view.width
+                    height: d.narrow ? d.stripHeight : implicitHeight
                     text: modelData.label
                     highlighted: ListView.isCurrentItem
                     radius: Theme.spacing.radiusLarge
@@ -177,10 +228,14 @@ Rectangle {
                 }
             }
 
-            // ─── Right pane ───
+            // ─── The pane ───
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                // Without this the pane keeps the desktop table's minimum and
+                // the row of which it is a part overflows the page instead of
+                // handing it what there is.
+                Layout.minimumWidth: 0
                 color: Theme.palette.surfaceRaised
                 radius: Theme.spacing.radiusXlarge
                 clip: true
