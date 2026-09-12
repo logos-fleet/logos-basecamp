@@ -17,7 +17,22 @@ TOPIC=${LOGOS_SMOKE_TOPIC:-logos-smoke}
 PORT=${LIBP2P_PORT:-9500}
 
 core() { "$LOGOSCORE" --config-dir "$CONFIG" "$@"; }
+# The answer half of a `logoscore call`'s `{module, method, result, status}`
+# envelope...
 value() { core call "$@" --json | jq -c '.result'; }
+# ...and of a `result`-returning method, which nests one further inside
+# `{success, value, error}`. Every libp2p_module method below is one of those,
+# so a caller that used `value` would hand the whole envelope on -- which is
+# how `--peer` came out as `/ip4/.../tcp/9500/p2p/{ "error": null, ... }`.
+result() {
+  local method="$2" out
+  out=$(value "$@")
+  if [ "$(echo "$out" | jq -r '.success')" != true ]; then
+    echo "libp2p_module.$method failed: $(echo "$out" | jq -r '.error')" >&2
+    return 1
+  fi
+  echo "$out" | jq -c '.value'
+}
 
 rm -rf "$CONFIG"; mkdir -p "$CONFIG"
 core -D -m "$MODULES" > "$CONFIG/daemon.log" 2>&1 &
@@ -30,15 +45,18 @@ core status >/dev/null || { echo "the daemon never came up; see $CONFIG/daemon.l
 core load-module libp2p_module >/dev/null
 # `str:`, not `json:`: createNode's parameter is a tstr the module parses
 # itself, unlike chat's init, which takes a record.
-value libp2p_module createNode \
-  "str:{\"addrs\":[\"/ip4/0.0.0.0/tcp/$PORT\"],\"transport\":\"tcp\",\"mountGossipsub\":true}" >/dev/null
-value libp2p_module start >/dev/null
-value libp2p_module gossipsubSubscribe "$TOPIC" >/dev/null
+# gossipsubTriggerSelf off, for the same reason the phone turns it off: the
+# default delivers this node's own publishes back to it, and this loop would
+# then report `desktop-hello-N` as "from the phone".
+result libp2p_module createNode \
+  "str:{\"addrs\":[\"/ip4/0.0.0.0/tcp/$PORT\"],\"transport\":\"tcp\",\"mountGossipsub\":true,\"gossipsubTriggerSelf\":false}" >/dev/null
+result libp2p_module start >/dev/null
+result libp2p_module gossipsubSubscribe "$TOPIC" >/dev/null
 
-peer_id=$(value libp2p_module getNodeInfo PeerId | jq -r '.')
+peer_id=$(result libp2p_module getNodeInfo PeerId | jq -r '.')
 # The LAN address, because a phone cannot reach 127.0.0.1. Whichever
 # non-loopback v4 address the node is actually listening on.
-addr=$(value libp2p_module getNodeInfo Multiaddrs \
+addr=$(result libp2p_module getNodeInfo Multiaddrs \
   | jq -r '.. | strings | select(startswith("/ip4/") and (contains("/ip4/127.") | not))' \
   | head -1)
 
@@ -56,10 +74,13 @@ echo "==> publishing and reading on '$TOPIC' (^C to stop)"
 n=0
 while :; do
   n=$((n + 1))
-  value libp2p_module gossipsubPublish "$TOPIC" "desktop-hello-$n" >/dev/null || true
-  got=$(value libp2p_module gossipsubNextMessage "$TOPIC" 1000 2>/dev/null || true)
+  result libp2p_module gossipsubPublish "$TOPIC" "desktop-hello-$n" >/dev/null || true
+  # An empty queue is an ordinary outcome and comes back as a FAILED result
+  # ("timeout waiting for message"), so the failure is swallowed here rather
+  # than printed once a second.
+  got=$(result libp2p_module gossipsubNextMessage "$TOPIC" 1000 2>/dev/null | jq -r '. // ""' || true)
   case "$got" in
-    ""|null) ;;
+    ""|null|desktop-hello-*) ;;
     *) echo "  from the phone: $got" ;;
   esac
   sleep 1

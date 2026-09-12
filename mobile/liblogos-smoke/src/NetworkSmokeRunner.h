@@ -49,6 +49,12 @@ signals:
     void chatUsable();
 
 private:
+    // Whether the app SHIPS `name`, which is a different question from
+    // whether it is running.
+    bool inSet(const QString& name) const;
+    // `name` is in the set and the core has it loaded, loading it if it did
+    // not. False when the set does not carry it, or it would not load.
+    bool ensureLoaded(const QString& name);
     // One libp2p node, created and started in the module inside this process.
     bool runLibp2p();
     // The dial + gossipsub exchange against the desktop peer. Only reached when

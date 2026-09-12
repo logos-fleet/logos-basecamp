@@ -23,6 +23,7 @@ namespace {
 const QLatin1String kLibp2p("libp2p_module");
 const QLatin1String kDelivery("delivery_module");
 const QLatin1String kChat("chat_module");
+const QLatin1String kCapability("capability_module");
 const QLatin1String kPeerIdSeparator("/p2p/");
 // The group both ends open messages in. Spelled once here and printed on the
 // phone's log, so the desktop half can find the conversation by name rather
@@ -84,10 +85,38 @@ NetworkSmokeRunner::NetworkSmokeRunner(BundledSetCoreRuntime* core, QObject* par
 
 NetworkSmokeRunner::~NetworkSmokeRunner() = default;
 
+bool NetworkSmokeRunner::inSet(const QString& name) const
+{
+    for (const QVariant& entry : m_core->bundledSet()) {
+        if (entry.toMap().value(QStringLiteral("name")).toString() == name)
+            return true;
+    }
+    return false;
+}
+
 bool NetworkSmokeRunner::hasWork() const
 {
-    const QStringList loaded = m_core->loadedModules();
-    return loaded.contains(kLibp2p) || loaded.contains(kChat);
+    // The SET, not what is loaded. A Bundled set is registered at start and
+    // loaded on demand, and which of the two has happened by the time this is
+    // asked is the HOST's business, not the criterion's: the smoke probe
+    // brings the whole set up before it gets here, and the Shell leaves
+    // loading to the Modules tab -- so asking loadedModules() answered "none
+    // in this Bundled set" in a Shell whose set was four networking modules.
+    return inSet(kLibp2p) || inSet(kChat);
+}
+
+// Loading is idempotent from a caller's point of view but not free, so this
+// only asks for what the set has and the core has not got yet.
+bool NetworkSmokeRunner::ensureLoaded(const QString& name)
+{
+    if (!inSet(name))
+        return false;
+    if (m_core->loadedModules().contains(name))
+        return true;
+    if (m_core->loadModule(name))
+        return true;
+    emit log(QStringLiteral("%1: in the Bundled set but would not load").arg(name));
+    return false;
 }
 
 bool NetworkSmokeRunner::call(LogosAPIClient* client, const QString& module,
@@ -127,17 +156,32 @@ bool NetworkSmokeRunner::call(LogosAPIClient* client, const QString& module,
 bool NetworkSmokeRunner::run()
 {
     bool ok = true;
-    const QStringList loaded = m_core->loadedModules();
 
-    if (loaded.contains(kLibp2p))
+    // THE BROKER FIRST, and it is not optional wiring: a module-to-module call
+    // mints its token through capability_module (LogosAPIClient's
+    // auto-requestModule path), and without it loaded the call goes out with
+    // no token and the target's ModuleProxy refuses it. Measured on an iPad:
+    // chat_module's delivery_module.createNode came back "token not
+    // recognized (re-exchange failed)" and the chat core reported
+    // delivery_state `error`. The smoke probe never saw this because it loads
+    // the whole set before it gets here; the Shell loads on demand, so the
+    // broker has to be asked for by the code that needs it.
+    if (inSet(kCapability) && !ensureLoaded(kCapability))
+        emit log(QStringLiteral("capability_module: in the set but not loaded -- "
+                                "module-to-module calls will be refused"));
+
+    if (ensureLoaded(kLibp2p))
         ok = runLibp2p() && ok;
     else
         emit log(QStringLiteral("libp2p_module: not in this Bundled set"));
 
-    if (loaded.contains(kDelivery))
+    // Before chat, and by name: chat_module declares delivery_module as a
+    // dependency so the core would pull it in anyway, but a set that carries
+    // delivery and not chat still has something to say.
+    if (ensureLoaded(kDelivery))
         emit log(QStringLiteral("delivery_module: loaded (the chat core below runs on it)"));
 
-    if (loaded.contains(kChat))
+    if (ensureLoaded(kChat))
         ok = runChat() && ok;
     else
         emit log(QStringLiteral("chat_module: not in this Bundled set"));
