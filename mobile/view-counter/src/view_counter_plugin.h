@@ -1,5 +1,7 @@
 #pragma once
 #include <QString>
+#include <QVariant>
+#include <QVariantList>
 #include "view_counter_interface.h"
 #include "LogosViewPluginBase.h"
 #include "rep_view_counter_source.h"
@@ -30,5 +32,10 @@ public:
     int add(int a, int b) override;
 
 private:
+    // One call into bare_counter, with the one failure path both slots share.
+    // Returns an invalid QVariant when the call did not happen or did not
+    // succeed; the status property already carries the reason by then.
+    QVariant callCounter(const QString& method, const QVariantList& args);
+
     LogosAPI* m_logosAPI = nullptr;
 };

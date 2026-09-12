@@ -166,6 +166,18 @@ async function visibilityOf(app, objectName) {
   return res.result;
 }
 
+// WelcomePage's own QML `visible` stays true inside its offscreen QQuickWidget
+// host; what observably shows and hides the welcome page is that host —
+// WorkspaceArea (objectName "workspace"), the stack page a section switch
+// leaves. It is a widget rather than a QML item, so its property is read
+// instead of evaluated in scope.
+async function workspaceHostVisibility(app) {
+  const workspace = await findByObjectName(app.inspector, "workspace");
+  if (!workspace) throw new Error("workspace area (welcome page host) not found");
+  const props = await app.inspector.send("getProperties", { objectId: workspace.id });
+  return props.properties?.find((p) => p.name === "visible")?.value;
+}
+
 test("welcome: Recently Closed is hidden until an app has been closed", async (app) => {
   const page = await findWelcomePage(app);
   if (!page) throw new Error("no WelcomePage instance in the QML tree");
@@ -280,9 +292,62 @@ test("welcome: the page declares a ⌘K shortcut for the bridge to mirror", asyn
 });
 
 const CI_MODE = process.argv.includes("--ci");
+
+// ShellSection::Workspace — app/interfaces/ShellSections.h. The sidebar's
+// Workspace button is workspaceSections index 0, which is the same number.
+const SHELL_SECTION_WORKSPACE = 0;
+
+// The welcome page must be the current page before A2 types anything into it.
+//
+// Every later assertion in A2 passes trivially when it is not — the
+// Applications view is already rendered, the section index already reads
+// Applications, the workspace host is already hidden — and the only one left
+// to fail is the search-text one, which then blames WorkspaceArea for
+// something WorkspaceArea never had the chance to do. The click really is a
+// no-op all the way down: MainUIBackend::setCurrentActiveSectionIndex returns
+// early on an unchanged index, so no section change reaches MainContainer, the
+// QStackedWidget never switches page, WorkspaceArea never gets a QHideEvent,
+// and clearWelcomeSearch never runs — leaving the query A2 just typed.
+//
+// A suite gets handed an app in that state when it is driving an app it did
+// not launch: two runners on one fixed inspector port, the failure mode #54
+// fixed by giving every app a port of its own. Named here so it is reported as
+// what it is.
+async function assertWelcomePageIsCurrent(app) {
+  const page = await findWelcomePage(app);
+  if (!page) throw new Error("no WelcomePage instance in the QML tree");
+
+  const sectionRes = await app.inspector.send("evaluate", {
+    objectId: page.id, expression: "backend.currentActiveSectionIndex",
+  });
+  if (sectionRes.error) {
+    throw new Error(
+      `evaluate(backend.currentActiveSectionIndex) failed: ${sectionRes.error}`);
+  }
+  if (sectionRes.result !== SHELL_SECTION_WORKSPACE) {
+    throw new Error(
+      `the app is not on the welcome page at the start of this test: ` +
+      `backend.currentActiveSectionIndex=${sectionRes.result} ` +
+      `(expected ${SHELL_SECTION_WORKSPACE}, Workspace). Navigating away from a ` +
+      `page that is already gone cannot be tested. The usual cause is a runner ` +
+      `driving an app it did not launch — see the inspector isolation guard, ` +
+      `tests/inspector-isolation-tests.mjs.`);
+  }
+
+  const visible = await workspaceHostVisibility(app);
+  if (visible !== true) {
+    throw new Error(
+      `the welcome page host is already hidden at the start of this test: ` +
+      `workspace visible=${JSON.stringify(visible)} (expected true). Same cause ` +
+      `as above — this runner is looking at an app somebody else navigated.`);
+  }
+}
+
 // --- Welcome page (A2) — must run right after A1: navigating clicks the
 // welcome page away ---
 test('welcome: "Discover Applications" navigates to Applications', async (app) => {
+  await assertWelcomePageIsCurrent(app);
+
   // Typed before navigating, asserted after: the welcome search is INVOCATION
   // search — summoned, used, left — so it must not survive the page going
   // away. Checked here rather than in its own test because navigation is
@@ -355,14 +420,7 @@ test('welcome: "Discover Applications" navigates to Applications', async (app) =
     }
   }, { timeout: 10000, interval: 500, description: "active section to become Applications" });
 
-  // WelcomePage's own QML `visible` stays true inside its offscreen
-  // QQuickWidget host; what observably hides it is that host — WorkspaceArea
-  // (objectName "workspace"), the stack page the section switch left.
-  const wsHits = await app.findByProperty("objectName", "workspace");
-  const workspace = (wsHits.matches ?? [])[0];
-  if (!workspace) throw new Error("workspace area (welcome page host) not found");
-  const props = await app.inspector.send("getProperties", { objectId: workspace.id });
-  const visible = props.properties?.find((p) => p.name === "visible")?.value;
+  const visible = await workspaceHostVisibility(app);
   if (visible !== false) {
     throw new Error(
       `welcome page still visible: workspace visible=` +

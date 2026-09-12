@@ -49,15 +49,29 @@
     logos-liblogos.inputs.logos-module.follows = "logos-module";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
-    # The capability broker. It is a BUNDLED module now (mobile catalog, below),
-    # so it is compiled against logos-protocol's headers and stamped with the
-    # version it saw, exactly like the three networking modules -- and the host
-    # gates that stamp at load. Its builder has to be this flake's.
+    # The capability broker, and a MEMBER of the mobile dev catalog
+    # (mobileCatalogFor below): the catalog carries its `bare` output, reached
+    # as `legacyPackages.<buildSystem>.mobile.<target>.bare`. A module-to-module
+    # call on a phone mints its token through this module, so the networking set
+    # cannot run without it.
     #
-    # LOCKED TO THE logos-fleet FORK, like the rest of the mobile chain: the
-    # `bare` outputs the catalog reaches for do not exist upstream, and neither
-    # does the module's own Bare build (it included boost/uuid until the fork).
+    # LOCKED TO THE logos-fleet FORK, for the same reason and with the same
+    # consequence as logos-module-builder below: upstream publishes no mobile
+    # keys and no Bare build of its own (it included boost/uuid until the fork),
+    # so a bare `nix flake update` walks the lock back to logos-co and the
+    # mobile outputs stop EVALUATING ("attribute 'legacyPackages' missing").
+    # Re-pin with
+    #   nix flake lock --override-input logos-capability-module \
+    #     github:logos-fleet/logos-capability-module/<rev>
     logos-capability-module.url = "github:logos-co/logos-capability-module";
+    # ONE builder in the closure, for the reason the logos-module-builder block
+    # below states for bare_counter and which now applies here too: the app
+    # embeds capability_module's `bare` artifact, a Bare module is stamped with
+    # the logos-protocol version it was compiled against, and the host gates
+    # that stamp at load. Two builders means two protocol pins and an app that
+    # refuses its own bundled module -- and without the follows the mobile keys
+    # do not exist at all, because this module's OWN pin predates them
+    # ("attribute 'legacyPackages' missing").
     logos-capability-module.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-modules-state-module.url = "github:logos-co/logos-modules-state-module";
     logos-package.url = "github:logos-co/logos-package";
@@ -155,6 +169,13 @@
     # same Bundled set actually implements.
     logos-chat-module.inputs.logos-delivery-module.follows = "logos-delivery-module";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
+    # LOCKED TO THE logos-fleet FORK, not to this URL: the test framework's
+    # per-app inspector port (launchAppWithInspector) is not upstream yet, and
+    # without it integration-test, host-services-test and shutdown-test all
+    # serve their app's inspector on 3768 -- so whichever two nix happens to
+    # build in parallel end up driving the same app. Re-pin with
+    #   nix flake lock --override-input logos-qt-mcp \
+    #     github:logos-fleet/logos-qt-mcp/<rev>
     logos-qt-mcp.url = "github:logos-co/logos-qt-mcp";
     nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
     nix-bundle-macos-app = {
@@ -340,6 +361,15 @@
       viewCounter = logos-module-builder.lib.mkLogosQmlModule {
         src = ./mobile/view-counter;
         configFile = ./mobile/view-counter/metadata.json;
+        # The two modules it calls, by the name metadata.json declares them
+        # under (snake_case, not the flake spelling) -- that is what
+        # collectAllModuleDeps matches on. Each publishes a LIDL contract, which
+        # is what a declared dependency has to do since the copy-headers-out-of-
+        # the-built-plugin fallback was removed.
+        flakeInputs = {
+          bare_counter = bareCounter;
+          capability_module = logos-capability-module;
+        };
       };
 
       # ── the Bundled set ───────────────────────────────────────────────────
@@ -367,11 +397,22 @@
       # smoke app takes -- there is no second, shorter route that only the app
       # uses and only the app tests.
       #
-      # Two ROOTS rather than a dependency edge between them: the view counter
-      # does not call the bare counter, and writing a dependency into a signed
-      # manifest to make a closure come out the right size would be a lie the
-      # core would later act on. A real multi-level closure is exercised by
-      # nix/bundled-set-test.nix.
+      # THREE PACKAGES, TWO ROOTS. capability_module is the third, and it is a
+      # REAL cross build of repos/logos-capability-module rather than a fixture:
+      # the trust root every module-to-module call mints its token through
+      # (logos-protocol's LogosAPIClient auto-`requestModule` path), published
+      # here so the set the app carries is not limited to the two demo modules
+      # that live in this repo. It cross-builds because logos-module-builder now
+      # puts a module's own `nix.packages` on the mobile Bare build's CMake
+      # roots and include path -- capability_module's only third-party use is
+      # header-only boost/uuid, which logos-nix does cross-build for both mobile
+      # sets, and nothing was naming it to the compile.
+      #
+      # bare_counter and view_counter stay two ROOTS rather than gaining a
+      # dependency edge between them: the view counter does not call the bare
+      # counter, and writing a dependency into a signed manifest to make a
+      # closure come out the right size would be a lie the core would later act
+      # on. A real multi-level closure is exercised by nix/bundled-set-test.nix.
       mobileCatalogFor = { system, androidBuildSystem }:
         let
           chain = (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; }).${system};
@@ -392,6 +433,10 @@
           # published under `<name>_bare` and signed with the dev key. Nothing
           # here knows that one of them carries a nim libp2p, another a nim
           # delivery core plus zerokit's rln, and the third a Rust chat core.
+          #
+          # `legacyPackages.<buildSystem>.mobile`, not `packages.<system>`: a
+          # cross derivation's `system` is its BUILD platform, and the Android
+          # leg has to be the one this machine can realise.
           #
           # `dependencies` is the module's own metadata.json answer, not a
           # convenience: the Bundled set resolves a CLOSURE out of it, so
@@ -441,9 +486,9 @@
             # (hostServicesJsonFor) -- so bundling it is the whole of the wiring.
             capability_module = mkBareSpec {
               name = "capability_module";
-              version = "1.0.0";
-              category = "system";
-              description = "The capability broker, as a Bundled Bare module";
+              version = logos-capability-module.config.version;
+              category = "security";
+              description = "Coordinates permissions between modules";
               module = logos-capability-module;
             };
 
@@ -479,7 +524,14 @@
               description = "A QML counter over a .rep backend, as one embedded framework";
               view = "qml/Main.qml";
               icon = ./mobile/catalog/icon.png;
-              dependencies = [ ];
+              # THE CLOSURE, and it is the module's own -- read off
+              # mobile/view-counter/metadata.json rather than listed here, so
+              # the signed manifest cannot drift from what the code does.
+              # ViewCounterPlugin renders bare_counter's count by calling it,
+              # and a module-to-module call mints its token through
+              # capability_module. `--bundle view_counter` therefore resolves
+              # all three.
+              dependencies = viewCounter.config.dependencies;
               variants.${target} = viewPayload;
               inherit signingKey;
             };
@@ -495,12 +547,17 @@
             packages = nixpkgs.lib.mapAttrsToList
               (n: spec: { inherit spec; drv = drvs.${n}; }) specs;
           };
+          # On iOS ONE name is enough: view_counter's own declared
+          # dependencies resolve the rest, so the set comes out as
+          # view_counter -> bare_counter -> capability_module.
+          #
           # Android's Qt is shared objects, so a ui_qml module there is a
-          # different artifact that logos-module-builder does not publish yet --
-          # which is exactly the case `--bundle view_counter --target
-          # android-arm64` must refuse by name rather than half-build.
+          # different artifact that logos-module-builder does not publish yet.
+          # The two core members are named directly instead, and
+          # `--bundle view_counter --target android-arm64` is exactly the case
+          # the set must refuse by name rather than half-build.
           defaultApps =
-            if isAndroid then [ "bare_counter" ] else [ "bare_counter" "view_counter" ];
+            if isAndroid then [ "capability_module" "bare_counter" ] else [ "view_counter" ];
         };
 
       mobileBundledSetFor = { system, androidBuildSystem }:
@@ -1020,6 +1077,13 @@
             inherit pkgs src logosQtMcp; appPkg = app;
           };
 
+          # Two apps at once, one inspector each. The guard that the
+          # app-driving checks above can run in parallel -- which is how nix
+          # runs them. Build: nix build .#inspector-isolation-test
+          inspector-isolation-test = import ./nix/inspector-isolation-test.nix {
+            inherit pkgs src logosQtMcp; appPkg = app;
+          };
+
           # Shutdown tests (SIGTERM, SIGINT, Ctrl+Q / ⌘Q). Spawns a fresh
           # app per case and asserts orderly exit (code 0).
           shutdown-test = import ./nix/shutdown-test.nix {
@@ -1131,6 +1195,7 @@
         integration-test = self.packages.${system}.integration-test;
         shutdown-test = self.packages.${system}.shutdown-test;
         host-services-test = self.packages.${system}.host-services-test;
+        inspector-isolation-test = self.packages.${system}.inspector-isolation-test;
         symbol-gate = self.packages.${system}.symbol-gate;
         symbol-gate-negative = self.packages.${system}.symbol-gate-negative;
         mock-tests = self.packages.${system}.mock-tests;

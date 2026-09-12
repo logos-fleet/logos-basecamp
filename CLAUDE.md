@@ -145,7 +145,7 @@ Build the logos-qt-mcp package (one-time, includes MCP server + test framework):
 nix build .#logos-qt-mcp -o result-mcp
 ```
 
-The app runs an inspector server (default: localhost:3768) that the `qml-inspector` MCP tools connect to.
+The app runs an inspector server that the `qml-inspector` MCP tools connect to. It binds `localhost:3768` by default, or whatever `QML_INSPECTOR_PORT` says — the nix test checks set that per app, so two of them can run at once (see `nix/inspector-isolation-test.nix`).
 
 **Prefer high-level tools over tree exploration:**
 - Use `qml_find_and_click({text: "..."})` to click buttons, tabs, sidebar items, etc. It supports partial, case-insensitive matching — e.g., `find_and_click({text: "package"})` will find "package_manager_ui".

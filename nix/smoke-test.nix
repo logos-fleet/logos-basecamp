@@ -35,6 +35,12 @@ pkgs.runCommand "logos-basecamp-smoke-test" {
   export QT_FORCE_STDERR_LOGGING=1
   export QT_LOGGING_RULES="qt.*.debug=false;default.debug=true"
 
+  # 0 = "any free port". Nothing here talks to the inspector -- this is a boot
+  # heartbeat -- but the app starts one anyway, and on the default port (3768)
+  # it would squat the one integration-test, host-services-test and
+  # shutdown-test need while nix builds them in parallel with this check.
+  export QML_INSPECTOR_PORT=0
+
   ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
     export QT_PLUGIN_PATH="${pkgs.qt6.qtbase}/${pkgs.qt6.qtbase.qtPluginPrefix}"
     export LD_LIBRARY_PATH="${pkgs.libGL}/lib:${pkgs.libglvnd}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
