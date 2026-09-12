@@ -24,9 +24,11 @@ let
     inherit (pkgs) writeShellApplication;
   };
 
-  # Everything but `frameworks` is scenery: the text under test does not care
-  # what the toolchain file is called, only how many frameworks it loops over.
-  fixture = name: frameworks: mkRunners {
+  # Everything but `frameworks` and `webAssetsPath` is scenery: the text under
+  # test does not care what the toolchain file is called, only how many
+  # frameworks it loops over and whether it ships a `web` half.
+  fixture = name: frameworks: webAssetsPath: mkRunners {
+    inherit webAssetsPath;
     pname = "lint-${name}";
     appName = "Lint";
     project = "LintIos";
@@ -53,14 +55,25 @@ let
     three = [ "a_bare.framework" "b_view.framework" "c_bare.framework" ];
   };
 
-  cases = lib.concatLists (lib.mapAttrsToList
+  # BOTH SHAPES OF THE `web` HALF, and that is a second regression axis rather
+  # than thoroughness: the assets path is known at EVAL, so a runtime `[ -n
+  # "<literal>" ]` around the assertion is SC2157 and shellcheck refuses the
+  # script. An app that ships no `web` assets (the Shell today) and one that
+  # does (the smoke host) render different text, and only rendering both
+  # catches the one that does not lint.
+  webHalves = { none = ""; shipped = "/fixture/web-assets"; };
+
+  cases = lib.concatLists (lib.concatLists (lib.mapAttrsToList
     (name: frameworks:
-      let runners = fixture name frameworks; in
-      [
-        { inherit frameworks; drv = runners.runSim; }
-        { inherit frameworks; drv = runners.runDevice; }
-      ])
-    sizes);
+      lib.mapAttrsToList
+        (half: webAssetsPath:
+          let runners = fixture "${name}-${half}" frameworks webAssetsPath; in
+          [
+            { inherit frameworks; drv = runners.runSim; }
+            { inherit frameworks; drv = runners.runDevice; }
+          ])
+        webHalves)
+    sizes));
 
   # Via mainProgram rather than by spelling `run-lint-<name>-ios-<kind>` out
   # again here: ios-runner.nix names its own runners, and one copy of that

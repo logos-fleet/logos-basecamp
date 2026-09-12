@@ -66,6 +66,57 @@ else()
         "the core and then report every module in its manifest as missing.")
 endif()
 
+# ── the `web` half: the QML runtime and the Downloaded `web` modules ──────
+# Copied INTO <App>.app, which on iOS is what NSBundle answers for
+# `resourcePath` -- so `iosQmlRuntimeDir()` finds `<App>.app/logos-runtime` and
+# the Web container's modules directory is `<App>.app/web-modules`, with no
+# path negotiated between the build and the host.
+#
+# A POST_BUILD copy rather than a source list: this is 33 MB of wasm and
+# JavaScript in a few thousand files, and naming each as a CMake source would
+# make the Xcode project unusable. It runs as the LAST build phase, before
+# Xcode validates and signs, so the bytes are inside the signature.
+#
+# THE DESTINATION IS PASSED IN, not `$<TARGET_BUNDLE_CONTENT_DIR>`. Under the
+# Xcode generator that genex expands to a path containing Xcode's own
+# `$(EFFECTIVE_PLATFORM_NAME)`, and CMake ESCAPES the dollar when it writes the
+# post-build shell script -- so the copy lands in a directory literally called
+# `Debug${EFFECTIVE_PLATFORM_NAME}` and the app ships nothing. Measured on this
+# project, 2026-09-12. The runner already computes the .app path it will install
+# and hands it here, which has no `$` in it at all.
+#
+# READ-ONLY SOURCE, WRITABLE DESTINATION: the assets come out of the nix store,
+# so the copy is made writable -- an incremental rebuild has to be able to
+# overwrite what the previous one put there.
+set(LOGOS_IOS_WEB_ASSETS "" CACHE STRING
+    "Directory holding logos-runtime/ and web-modules/ to ship in the app")
+set(LOGOS_IOS_APP_BUNDLE_DIR "" CACHE STRING
+    "The <App>.app this build produces; where the web assets are copied")
+if(LOGOS_IOS_WEB_ASSETS)
+    if(NOT IS_DIRECTORY "${LOGOS_IOS_WEB_ASSETS}")
+        message(FATAL_ERROR "LOGOS_IOS_WEB_ASSETS is not a directory: ${LOGOS_IOS_WEB_ASSETS}")
+    endif()
+    if(NOT LOGOS_IOS_APP_BUNDLE_DIR)
+        message(FATAL_ERROR
+            "LOGOS_IOS_WEB_ASSETS was given without LOGOS_IOS_APP_BUNDLE_DIR; there "
+            "is nowhere to copy the assets to. See the note above on why the bundle "
+            "directory cannot be derived here.")
+    endif()
+    add_custom_command(TARGET LiblogosSmoke POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "${LOGOS_IOS_APP_BUNDLE_DIR}/logos-runtime"
+                "${LOGOS_IOS_APP_BUNDLE_DIR}/web-modules"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${LOGOS_IOS_WEB_ASSETS}" "${LOGOS_IOS_APP_BUNDLE_DIR}"
+        COMMAND chmod -R u+w "${LOGOS_IOS_APP_BUNDLE_DIR}"
+        COMMENT "Staging the QML runtime and the Downloaded web modules into the app"
+        VERBATIM)
+else()
+    message(WARNING
+        "LiblogosSmoke: no LOGOS_IOS_WEB_ASSETS -- the app ships no QML runtime "
+        "and no `web` module, so the Web container has nothing to load.")
+endif()
+
 # ── the symbols the module resolves upward ────────────────────────────────
 # ADR 0006: a Bare module leaves every `lp_*` undefined and binds it to the app
 # image at dlopen. In a fully static iOS app neither half of that is a linker

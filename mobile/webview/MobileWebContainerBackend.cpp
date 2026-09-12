@@ -1,5 +1,7 @@
 #include "webview/MobileWebContainerBackend.h"
 
+#include "webview/AppMemory.h"
+
 #include <QDebug>
 #include <QDir>
 #include <QFileInfo>
@@ -72,6 +74,20 @@ MobileWebModuleView* MobileWebContainerBackend::createView(
         delete view;
         return nullptr;
     }
+
+    // THE PAGE'S CONSOLE, ANNOUNCED. Wired before the registry entry and before
+    // anyone is told the view exists, so a host that wants to wait for a line
+    // the view will print cannot miss it: the webview's first request has not
+    // been served yet -- both platforms load asynchronously.
+    // QUEUED, for the reason WebPageProbe's sink is: Android calls
+    // `shouldInterceptRequest` on a Chromium background thread, so a page's
+    // console line arrives on it -- and a shell connected to this signal appends
+    // to a widget. Qt Widgets from a second thread is an immediate SIGSEGV.
+    view->setOnPageLog([this, name](const QString& level, const QString& message) {
+        QMetaObject::invokeMethod(this, [this, name, level, message] {
+            emit pageLog(name, level, message);
+        }, Qt::QueuedConnection);
+    });
 
     m_views.insert(name, view);
     // The view is the CONTAINER's, so the container's destruction is what takes
@@ -157,15 +173,32 @@ QStringList MobileWebContainerBackend::loadedModules() const
     return names;
 }
 
+QString MobileWebContainerBackend::appMemoryLine(const QString& occasion)
+{
+    const qint64 bytes = appResidentBytes();
+    return bytes < 0
+        ? QStringLiteral("Web container: app memory %1: this platform does not say")
+              .arg(occasion)
+        : QStringLiteral("Web container: app memory %1: %2").arg(occasion, megabytes(bytes));
+}
+
 QStringList MobileWebContainerBackend::show(const QString& moduleName)
 {
     const QStringList evicted = m_budget.show(moduleName);
+
+    // THE SURFACE FOLLOWS THE BOOKS. A page is mounted behind the host's own
+    // view, so a module the budget considers visible is still invisible until
+    // its page is brought forward -- and the one that was in front has to go
+    // back, or it would cover the new one whatever the budget thinks.
+    for (auto it = m_views.constBegin(); it != m_views.constEnd(); ++it)
+        it.value()->setFrontmost(it.key() == moduleName);
 
     qInfo().noquote()
         << QStringLiteral("Web container: %1 is visible; %2 live runtime(s), %3 of %4")
                .arg(moduleName, QString::number(m_budget.live().size()),
                     megabytes(m_budget.projectedBytes()),
                     megabytes(m_budget.budgetBytes()));
+    qInfo().noquote() << appMemoryLine(QStringLiteral("with %1 visible").arg(moduleName));
 
     for (const QString& name : evicted) {
         qInfo().noquote()

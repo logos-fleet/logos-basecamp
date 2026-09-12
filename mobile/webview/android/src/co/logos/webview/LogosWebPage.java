@@ -163,6 +163,27 @@ public final class LogosWebPage {
         return mWebView;
     }
 
+    /**
+     * Put this page in front of Qt's own surface, or behind it again.
+     *
+     * <p>Z-ORDER, NOT VISIBILITY. A WebView that is GONE or INVISIBLE is
+     * throttled -- requestAnimationFrame stops -- so a background module that
+     * is still answering calls has to stay in the hierarchy and merely lose the
+     * front. Called from the Android UI thread.
+     */
+    public void setFrontmost(boolean front) {
+        if (mWebView == null) return;
+        ViewGroup parent = (ViewGroup) mWebView.getParent();
+        if (parent == null) return;
+        if (front) {
+            parent.bringChildToFront(mWebView);
+        } else {
+            parent.removeView(mWebView);
+            parent.addView(mWebView, 0);
+        }
+        parent.requestLayout();
+    }
+
     /** Tear the page down. Called from the Android UI thread. */
     public void destroy() {
         if (mWebView == null) return;

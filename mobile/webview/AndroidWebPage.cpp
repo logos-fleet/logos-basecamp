@@ -6,6 +6,9 @@
 #include <jni.h>
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
 #include <QFuture>
 #include <QDebug>
 #include <QDir>
@@ -151,6 +154,91 @@ QString androidQmlRuntimeDir()
     return bundledQmlRuntimeDir(QDir(appData).filePath(QStringLiteral("logos-runtime")));
 }
 
+QString androidWebModulesDir()
+{
+    const QString appData =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString dir = QDir(appData).filePath(QStringLiteral("web-modules"));
+    return QFileInfo(dir).isDir() ? QDir(dir).absolutePath() : QString();
+}
+
+// ── unpacking the `web` half of the APK ────────────────────────────────────
+//
+// AN APK'S ASSETS ARE NOT FILES. Qt reaches them through `assets:/`, which is a
+// virtual file engine: it can open and read, but it cannot answer
+// `canonicalFilePath()` -- and canonical-on-both-sides is exactly how
+// LogosWebPaths::resolveUnder refuses a traversal out of the package. Serving a
+// page straight out of `assets:/` would mean either a second, weaker traversal
+// rule for one platform or no rule at all, and the whole point of
+// LogosWebPaths is that all three containers answer "which file does this URL
+// name" the same way.
+//
+// So the bytes are copied ONCE, on first launch, into the app's data directory
+// where they are ordinary files. A stamp records what was unpacked; a new app
+// build unpacks again, an unchanged one does not.
+namespace {
+
+bool copyAssetTree(const QString& from, const QString& to, qint64* bytes)
+{
+    QDir().mkpath(to);
+    const QDir source(from);
+    for (const QFileInfo& entry :
+         source.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QString target = QDir(to).filePath(entry.fileName());
+        if (entry.isDir()) {
+            if (!copyAssetTree(entry.filePath(), target, bytes)) return false;
+            continue;
+        }
+        QFile::remove(target);
+        if (!QFile::copy(entry.filePath(), target)) {
+            qWarning() << "Web container: could not unpack" << entry.filePath();
+            return false;
+        }
+        // A file copied out of the APK comes out read-only, and an unpack that
+        // has to overwrite it next time would then fail.
+        QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        if (bytes) *bytes += entry.size();
+    }
+    return true;
+}
+
+} // namespace
+
+void unpackAndroidWebAssets(const QString& stamp)
+{
+    const QString appData =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString stampFile = QDir(appData).filePath(QStringLiteral(".web-assets-stamp"));
+
+    QFile existing(stampFile);
+    if (existing.open(QIODevice::ReadOnly)
+        && QString::fromUtf8(existing.readAll()).trimmed() == stamp) {
+        qInfo().noquote() << QStringLiteral("Web container: assets already unpacked (%1)")
+                                 .arg(stamp);
+        return;
+    }
+    existing.close();
+
+    const QString root = QStringLiteral("assets:/logos-web");
+    if (!QFileInfo(root).isDir()) {
+        qWarning() << "Web container: this APK carries no assets/logos-web; it ships no "
+                      "QML runtime and no `web` module";
+        return;
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    qint64 bytes = 0;
+    QDir().mkpath(appData);
+    if (!copyAssetTree(root, appData, &bytes)) return;
+
+    QFile record(stampFile);
+    if (record.open(QIODevice::WriteOnly)) record.write(stamp.toUtf8());
+    qInfo().noquote() << QStringLiteral("Web container: unpacked %1 MB of web assets in %2 ms")
+                             .arg(double(bytes) / (1024.0 * 1024.0), 0, 'f', 1)
+                             .arg(timer.elapsed());
+}
+
 PlatformPageFactory androidPlatformPageFactory()
 {
     return [](const PlatformPageRequest& request) -> PlatformPage {
@@ -211,6 +299,18 @@ PlatformPageFactory androidPlatformPageFactory()
         };
         platform.isAlive = [page]() -> bool {
             return page->isValid() && page->callMethod<jboolean>("isAlive") != JNI_FALSE;
+        };
+        // ON THE ANDROID UI THREAD like every other touch of the view, and
+        // blocking: the shell's next act is to say the module is visible, and a
+        // z-order change still queued when that is read is a page the user does
+        // not see.
+        platform.setFrontmost = [page](bool front) {
+            if (!page->isValid()) return;
+            QJniObject held = *page;
+            QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
+                [held, front]() {
+                    held.callMethod<void>("setFrontmost", "(Z)V", jboolean(front));
+                }).waitForFinished();
         };
         return platform;
     };

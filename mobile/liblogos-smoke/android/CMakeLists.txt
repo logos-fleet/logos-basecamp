@@ -35,7 +35,9 @@ qt_add_executable(LiblogosSmoke
     ${WEBVIEW}/LiveRuntimeBudget.cpp ${WEBVIEW}/LiveRuntimeBudget.h
     ${WEBVIEW}/MobileWebContainerBackend.cpp ${WEBVIEW}/MobileWebContainerBackend.h
     ${WEBVIEW}/WebPageProbe.cpp ${WEBVIEW}/WebPageProbe.h
-    ${WEBVIEW}/AndroidWebPage.cpp ${WEBVIEW}/AndroidWebPage.h)
+    ${WEBVIEW}/AppMemory.cpp ${WEBVIEW}/AppMemory.h
+    ${WEBVIEW}/AndroidWebPage.cpp ${WEBVIEW}/AndroidWebPage.h
+    ${SRC}/WebModuleRunner.cpp ${SRC}/WebModuleRunner.h)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(LiblogosSmoke PRIVATE "${LOGOS_INCLUDE_ROOTS}")
@@ -109,6 +111,31 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/platform/
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package)
 file(COPY ${WEBVIEW}/android/src
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package)
+
+# ── the `web` half: the QML runtime and the Downloaded `web` modules ──────
+# Into the package source dir's `assets/`, which is what gradle packages and
+# what an APK can carry a directory tree in at all -- a .so is the only other
+# thing an APK holds, and these are wasm and JavaScript.
+#
+# AN ASSET IS NOT A FILE, which is why the app unpacks them on first launch
+# (unpackAndroidWebAssets): Qt reads `assets:/` through a virtual file engine
+# that cannot answer canonicalFilePath(), and canonical-on-both-sides is how
+# LogosWebPaths refuses a traversal out of a package. The STAMP is the store
+# path's name, so a new app build unpacks again and an unchanged one does not.
+set(LOGOS_ANDROID_WEB_ASSETS "" CACHE STRING
+    "Directory holding logos-runtime/ and web-modules/ to ship in the APK")
+if(LOGOS_ANDROID_WEB_ASSETS)
+    file(COPY ${LOGOS_ANDROID_WEB_ASSETS}/
+         DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package/assets/logos-web)
+    get_filename_component(_web_assets_stamp "${LOGOS_ANDROID_WEB_ASSETS}" NAME)
+else()
+    set(_web_assets_stamp "none")
+    message(WARNING
+        "LiblogosSmoke: no LOGOS_ANDROID_WEB_ASSETS -- the APK ships no QML "
+        "runtime and no `web` module, so the Web container has nothing to load.")
+endif()
+target_compile_definitions(LiblogosSmoke
+    PRIVATE LOGOS_WEB_ASSETS_STAMP="${_web_assets_stamp}")
 
 set_target_properties(LiblogosSmoke PROPERTIES
     QT_ANDROID_PACKAGE_NAME "co.logos.liblogos.smoke"
