@@ -66,6 +66,17 @@ private:
     // to put a key or a finger on what a user would touch is to dispatch the
     // event in the page. What happens next the MODULE reports, on its own
     // console, which is what these then wait for.
+    //
+    // Each is the same three steps: ask the view where the control is, put the
+    // gesture in the page, and wait for what the view says arrived.
+    //
+    // The `logos-view: <label>-at X Y` line the fixture reports for `label`,
+    // captured; empty when the view never reported one.
+    QStringList viewPointFor(const QString& label);
+    // Run one `window.logosDrive.*` call in `name`'s page, loading the driver
+    // first. False (and logged) when this platform cannot run a script there.
+    bool drive(const QString& name, const QString& call);
+
     bool tapButton(const QString& name);
     bool typeIntoView(const QString& name);
     bool scrollViewList(const QString& name);

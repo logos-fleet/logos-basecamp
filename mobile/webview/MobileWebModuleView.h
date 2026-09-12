@@ -153,16 +153,14 @@ public:
     // module that has to keep in-memory state across a background trip has to
     // keep it somewhere the page is not.
     bool hasUi() const { return m_hasUi; }
-    // Whether this module's package ships a headless document at all. A variant
-    // built before they existed does not, and the honest answer for one of
-    // those is for the host to unload the module rather than to guess at a file
-    // name.
-    bool canRunHeadless() const { return !m_headlessEntry.isEmpty(); }
 
     // Swap this page onto the headless document, or back onto the UI one.
     // False when the swap could not be made -- no headless document in the
-    // package, or the platform could not open the new page -- and the caller is
-    // then holding a module whose UI it must dispose of some other way.
+    // package (a variant built before they existed ships none, and the honest
+    // answer for one of those is for the host to unload the module rather than
+    // to guess at a file name), or the platform could not open the new page --
+    // and the caller is then holding a module whose UI it must dispose of some
+    // other way.
     bool evictUi();
     bool restoreUi();
 

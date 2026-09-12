@@ -429,7 +429,7 @@ private slots:
     {
         auto* backend = MobileWebContainerBackend::instance();
         QCOMPARE(backend->budget().maxLiveRuntimes(), 1);
-        QCOMPARE(backend->budget().budgetBytes(), LiveRuntimeBudget::kSpikeRuntimeBytes);
+        QCOMPARE(backend->budget().budgetBytes(), LiveRuntimeBudget::kDeviceRuntimeBytes);
     }
 };
 

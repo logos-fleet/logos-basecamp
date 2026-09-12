@@ -10,6 +10,8 @@
 #include <QRegularExpression>
 #include <QTimer>
 
+#include <mutex>
+
 namespace {
 
 // ── driving real input at a canvas ─────────────────────────────────────────
@@ -280,20 +282,38 @@ QStringList WebModuleRunner::capturePageLine(const QString& pattern, int timeout
 
 // ── the first criterion's second half ──────────────────────────────────────
 
+QStringList WebModuleRunner::viewPointFor(const QString& label)
+{
+    // WHERE THE VIEW SAYS THE THING IS, in window coordinates -- the fixture
+    // reports `logos-view: <label>-at X Y` on a repeating timer. Only POSITIVE
+    // coordinates match: a view that never got geometry reports 0 0, and a
+    // gesture aimed there would land in the window's corner and look like a
+    // platform that swallows events.
+    return capturePageLine(
+        QStringLiteral("logos-view: %1-at ([1-9][0-9]*) ([1-9][0-9]*)").arg(label), 20000);
+}
+
+bool WebModuleRunner::drive(const QString& name, const QString& call)
+{
+    // THE DRIVER, THEN THE CALL. kInputDriver installs itself once and returns
+    // immediately when it is already in the page, so every gesture can ask for
+    // it without keeping track of which page has it.
+    auto* backend = MobileWebContainerBackend::instance();
+    if (backend->runJavaScriptIn(name, QString::fromUtf8(kInputDriver))
+        && backend->runJavaScriptIn(name, call))
+        return true;
+    emit log(QStringLiteral("web module %1: this platform cannot put an event in "
+                            "the page").arg(name));
+    return false;
+}
+
 bool WebModuleRunner::tapButton(const QString& name)
 {
-    auto* backend = MobileWebContainerBackend::instance();
-    const QStringList at = capturePageLine(
-        QStringLiteral("logos-view: button-at ([1-9][0-9]*) ([1-9][0-9]*)"), 20000);
+    const QStringList at = viewPointFor(QStringLiteral("button"));
     if (at.isEmpty()) return false;
-
-    if (!backend->runJavaScriptIn(name, QString::fromUtf8(kInputDriver))
-        || !backend->runJavaScriptIn(name, QStringLiteral("window.logosDrive.tap(%1, %2)")
-                                               .arg(at.at(1), at.at(2)))) {
-        emit log(QStringLiteral("web module %1: this platform cannot put an event in "
-                                "the page").arg(name));
+    if (!drive(name, QStringLiteral("window.logosDrive.tap(%1, %2)")
+                         .arg(at.at(1), at.at(2))))
         return false;
-    }
 
     // THE WHOLE ROUND TRIP, FROM ONE TAP: the view's button calls the backend
     // over the MessagePort, the backend's property changes, and the change
@@ -309,23 +329,15 @@ bool WebModuleRunner::tapButton(const QString& name)
 
 bool WebModuleRunner::typeIntoView(const QString& name)
 {
-    auto* backend = MobileWebContainerBackend::instance();
-    const QStringList at = capturePageLine(
-        QStringLiteral("logos-view: field-at ([1-9][0-9]*) ([1-9][0-9]*)"), 20000);
+    const QStringList at = viewPointFor(QStringLiteral("field"));
     if (at.isEmpty()) {
         emit log(QStringLiteral("web module %1: its view never reported a text field")
                      .arg(name));
         return false;
     }
-
-    if (!backend->runJavaScriptIn(name, QString::fromUtf8(kInputDriver))
-        || !backend->runJavaScriptIn(
-            name, QStringLiteral("window.logosDrive.type(%1, %2, 'logos')")
-                      .arg(at.at(1), at.at(2)))) {
-        emit log(QStringLiteral("web module %1: this platform cannot put an event in "
-                                "the page").arg(name));
+    if (!drive(name, QStringLiteral("window.logosDrive.type(%1, %2, 'logos')")
+                         .arg(at.at(1), at.at(2))))
         return false;
-    }
 
     // WHAT THE MODULE SAYS IT GOT. `logos-view: typed logos` is the fixture's
     // own TextField reporting its contents after five keydowns -- the fact a
@@ -344,22 +356,14 @@ bool WebModuleRunner::typeIntoView(const QString& name)
 
 bool WebModuleRunner::scrollViewList(const QString& name)
 {
-    auto* backend = MobileWebContainerBackend::instance();
-    const QStringList at = capturePageLine(
-        QStringLiteral("logos-view: list-at ([1-9][0-9]*) ([1-9][0-9]*)"), 20000);
+    const QStringList at = viewPointFor(QStringLiteral("list"));
     if (at.isEmpty()) {
         emit log(QStringLiteral("web module %1: its view never reported a list").arg(name));
         return false;
     }
-
-    if (!backend->runJavaScriptIn(name, QString::fromUtf8(kInputDriver))
-        || !backend->runJavaScriptIn(
-            name, QStringLiteral("window.logosDrive.drag(%1, %2, -90)")
-                      .arg(at.at(1), at.at(2)))) {
-        emit log(QStringLiteral("web module %1: this platform cannot put a gesture in "
-                                "the page").arg(name));
+    if (!drive(name, QStringLiteral("window.logosDrive.drag(%1, %2, -90)")
+                         .arg(at.at(1), at.at(2))))
         return false;
-    }
 
     // THE ROW, not only the offset. A list that moved its content without
     // rebinding a delegate has not scrolled in any sense a user would name, so
@@ -402,9 +406,18 @@ bool WebModuleRunner::callIntoPage(const QString& name, QString* answer)
                        "\"object\":\"%2\"}}")
             .arg(QString::number(id), name);
 
+    // UNDER A LOCK, because the observer is NOT this thread. The bridge calls it
+    // from whatever thread the page's request arrived on -- the Android UI
+    // thread is not Qt's -- while this one is pumping and reading the same
+    // QString, and a QString read while another thread assigns it is not a stale
+    // value but a corrupt one.
+    std::mutex replyMutex;
     QString reply;
-    backend->observeFramesFrom(name, [&reply, id](const QString& text) {
-        if (!reply.isEmpty()) return;
+    const auto answerSoFar = [&replyMutex, &reply] {
+        std::lock_guard<std::mutex> guard(replyMutex);
+        return reply;
+    };
+    backend->observeFramesFrom(name, [&replyMutex, &reply, id](const QString& text) {
         const QJsonObject envelope = QJsonDocument::fromJson(text.toUtf8()).object();
         // ONLY OUR ANSWER. The page is talking to the core on this wire at the
         // same time; everything that is not a MethodsResult carrying the id we
@@ -412,7 +425,8 @@ bool WebModuleRunner::callIntoPage(const QString& name, QString* answer)
         if (envelope.value(QStringLiteral("type")).toInt() != 8) return;
         const QJsonObject payload = envelope.value(QStringLiteral("payload")).toObject();
         if (payload.value(QStringLiteral("id")).toInt() != id) return;
-        reply = text;
+        std::lock_guard<std::mutex> guard(replyMutex);
+        if (reply.isEmpty()) reply = text;
     });
     if (!backend->sendFrameTo(name, frame)) {
         backend->observeFramesFrom(name, nullptr);
@@ -421,10 +435,13 @@ bool WebModuleRunner::callIntoPage(const QString& name, QString* answer)
 
     QElapsedTimer timer;
     timer.start();
-    while (reply.isEmpty() && timer.elapsed() < 20000) pump(100);
+    while (answerSoFar().isEmpty() && timer.elapsed() < 20000) pump(100);
+    // THE SINK GOES BEFORE THE LOCALS IT CAPTURES, on every path out of here --
+    // which is why the early return above clears it too.
     backend->observeFramesFrom(name, nullptr);
-    if (answer) *answer = reply;
-    return !reply.isEmpty();
+    const QString answered = answerSoFar();
+    if (answer) *answer = answered;
+    return !answered.isEmpty();
 }
 
 QStringList WebModuleRunner::available() const
@@ -503,8 +520,7 @@ bool WebModuleRunner::run()
 
     // Laid out, not merely alive: the fixture reports where its button is in
     // window coordinates, and a view that never got geometry reports 0 0.
-    const bool laidOut = waitForPageLine(
-        QStringLiteral("logos-view: button-at ([1-9][0-9]*) ([1-9][0-9]*)"), 20000);
+    const bool laidOut = !viewPointFor(QStringLiteral("button")).isEmpty();
     emit log(laidOut
                  ? QStringLiteral("web module %1: its view is laid out inside the page").arg(first)
                  : QStringLiteral("web module %1: its view never reported a button position")
@@ -541,9 +557,10 @@ bool WebModuleRunner::run()
     //
     // A run driven that way satisfies these exactly as an in-page run does: the
     // assertions are the MODULE's reports, not the dispatch.
-    const int reacted = int(tapped) + int(typed) + int(scrolled);
-    const bool inputDriven = reacted > 0;
-    if (!inputDriven) {
+    const bool anyInputLanded = tapped || typed || scrolled;
+    // This half's verdict, then: all three, or nothing at all.
+    const bool inputOk = !anyInputLanded || (tapped && typed && scrolled);
+    if (!anyInputLanded) {
         emit log(QStringLiteral(
             "INPUT: nothing this host dispatched into %1's page reached the scene. "
             "Drive it from outside instead (`adb shell input tap|text|swipe`) at the "
@@ -554,7 +571,7 @@ bool WebModuleRunner::run()
     if (modules.size() < 2) {
         emit log(QStringLiteral("live-runtime budget: only one web module is installed, "
                                 "so there is nothing to evict"));
-        return laidOut && (!inputDriven || (tapped && typed && scrolled));
+        return laidOut && inputOk;
     }
 
     // ── the second module, and the budget ──────────────────────────────────
@@ -651,6 +668,5 @@ bool WebModuleRunner::run()
                  : QStringLiteral("WRONG: %1 did not answer a frame sent into its "
                                   "headless page").arg(first));
 
-    return laidOut && (!inputDriven || (tapped && typed && scrolled))
-           && released && stillLoaded && hostUp && answered;
+    return laidOut && inputOk && released && stillLoaded && hostUp && answered;
 }
