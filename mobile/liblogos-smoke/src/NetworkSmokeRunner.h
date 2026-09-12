@@ -50,6 +50,9 @@ private:
     bool exchangeWithPeer(LogosAPIClient* client);
     // chat_module over the delivery_module beneath it.
     bool runChat();
+    // Block until the chat core reports its delivery node online, or the bound
+    // expires. Answers the state it last saw.
+    QString awaitDeliveryOnline(LogosAPIClient* client, int timeoutMs);
 
     // A `result`-returning universal method: unwrap the LogosResult the Native
     // container re-materialises from the module's JSON, log its error if it

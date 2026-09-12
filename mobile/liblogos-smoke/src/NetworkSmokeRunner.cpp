@@ -9,6 +9,8 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QEventLoop>
+#include <QTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -289,6 +291,20 @@ bool NetworkSmokeRunner::runChat()
     }
     emit log(QStringLiteral("chat_module: init ok"));
 
+    // DELIVERY FIRST, and this is a wait rather than a read. `init` returns as
+    // soon as the state is installed; joining the delivery network happens on
+    // callbacks afterwards (chat's start_delivery_bootstrap -> createNode ->
+    // start), so everything below would otherwise race a node that is still
+    // dialling. A conversation opened against a peer while the node is
+    // `initialising` is created LOCALLY and its invite goes nowhere -- the
+    // phone reports a convo_id and the desktop never hears of it, which is the
+    // one failure this criterion cannot tell from success by looking at the
+    // phone.
+    if (awaitDeliveryOnline(client, 120000) != QLatin1String("online")) {
+        emit log(QStringLiteral("chat_module: the delivery node is not online"));
+        return false;
+    }
+
     // Where the chat core is writing its own account of this run, inside the
     // instance directory the host assigned. Printed because it is the only way
     // to see what the Rust core thought when a later call goes wrong, and on a
@@ -331,4 +347,49 @@ bool NetworkSmokeRunner::runChat()
     emit log(ok ? QStringLiteral("CHAT CONVERSATION OK")
                 : QStringLiteral("WRONG: chat_module created no conversation"));
     return ok;
+}
+
+// status() is the only window onto the bootstrap, and it is a poll because the
+// module's `delivery_state_changed` event is an IPC event channel this host does
+// not subscribe to. 500 ms between reads: the transition is a network join, so
+// a tighter loop would only add calls.
+QString NetworkSmokeRunner::awaitDeliveryOnline(LogosAPIClient* client, int timeoutMs)
+{
+    QElapsedTimer clock;
+    clock.start();
+    QString state;
+    bool announced = false;
+    for (;;) {
+        QVariant out;
+        if (call(client, kChat, QStringLiteral("status"), QVariantList{}, &out,
+                 15000, /*quiet=*/true)) {
+            const QVariantMap status = out.toMap();
+            state = status.value(QStringLiteral("delivery_state")).toString();
+            if (state == QLatin1String("online")) {
+                emit log(QStringLiteral("  delivery node online in %1 ms").arg(clock.elapsed()));
+                return state;
+            }
+            // An `error` is terminal -- the bootstrap reported a failed
+            // createNode or start and nothing retries it -- so waiting out the
+            // bound would only delay the same answer.
+            if (state == QLatin1String("error")) {
+                emit log(QStringLiteral("  delivery node failed: %1")
+                             .arg(status.value(QStringLiteral("detail")).toString()));
+                return state;
+            }
+        }
+        if (clock.elapsed() >= timeoutMs)
+            return state;
+        if (!announced) {
+            emit log(QStringLiteral("  waiting for the delivery node to come online..."));
+            announced = true;
+        }
+        // A nested event loop rather than processEvents(): the host's loop has
+        // to keep turning for the IPC replies, and processEvents returns the
+        // instant the queue is empty -- which would turn the interval into a
+        // busy poll of a 15-second call.
+        QEventLoop idle;
+        QTimer::singleShot(500, &idle, &QEventLoop::quit);
+        idle.exec();
+    }
 }
