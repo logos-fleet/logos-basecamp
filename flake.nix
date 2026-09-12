@@ -863,6 +863,36 @@
             inherit logosQtMcp;
             appBin = "${macosAppTest}/LogosBasecamp.app/Contents/MacOS/LogosBasecamp";
           };
+
+          # ── the Web container's end-to-end check, and why it is optional ──
+          #
+          # It loads a `ui_qml` module's `web` variant through the real core
+          # into a real webview and clicks it (nix/web-container-test.nix). Its
+          # fixture is a CROSS-REPO package: logos-module-builder exposes
+          # `web-view-counter` — the only `web` variant whose QML reports what
+          # it did — only from the revisions carrying slice 27's fifth
+          # increment, and that package exists there only when the builder's own
+          # logos-view-module-runtime publishes `qml-runtime-wasm`.
+          #
+          # ABSENT rather than broken while this repo's lock predates both, and
+          # the workspace runs it meanwhile — its `follows` put ONE builder and
+          # ONE runtime in the closure:
+          #
+          #     ws test logos-basecamp --local logos-module-builder
+          #
+          # The day the pin lands, the check appears with no edit here.
+          #
+          # Windows is excluded for the reason the whole Web-container path is:
+          # the view backend is Qt WebEngine and POSIX (logoscore's page host
+          # says the same, about the same thing).
+          webContainerFixture =
+            (logos-module-builder.packages.${system} or {}).web-view-counter or null;
+          webContainerRuntime =
+            (logos-view-module-runtime.packages.${system} or {}).qml-runtime-wasm or null;
+          hasWebContainerTest =
+            !pkgs.stdenv.hostPlatform.isWindows
+            && webContainerFixture != null
+            && webContainerRuntime != null;
         in
         {
           # Individual outputs.
@@ -990,18 +1020,6 @@
             inherit pkgs src logosPackageHeaders logosDesignSystem;
           };
 
-          # The Web container, end to end: a `ui_qml` module's `web` variant
-          # loaded through the real core into a real webview, rendered, clicked.
-          # See nix/web-container-test.nix for what it proves that the browser
-          # end-to-end and the runtime's own tests cannot.
-          web-container-test = import ./nix/web-container-test.nix {
-            inherit pkgs src;
-            liblogos = logosLiblogos;
-            logosCppSdk = logosSdk;
-            webVariant = logos-module-builder.packages.${system}.web-view-counter;
-            qmlRuntime = logos-view-module-runtime.packages.${system}.qml-runtime-wasm;
-          };
-
           # Coverage report for the unit-test suite: same targets as
           # .#unit-tests, compiled with --coverage and reported via gcovr.
           # Report-only for now (failUnderLine = 0) — raise the threshold as
@@ -1044,6 +1062,14 @@
 
           # Default package
           default = app;
+        } // pkgs.lib.optionalAttrs hasWebContainerTest {
+          web-container-test = import ./nix/web-container-test.nix {
+            inherit pkgs src;
+            liblogos = logosLiblogos;
+            logosCppSdk = logosSdk;
+            webVariant = webContainerFixture;
+            qmlRuntime = webContainerRuntime;
+          };
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           bin-appimage = nix-bundle-appimage.lib.${system}.mkAppImage {
             drv = appDistributed;
@@ -1151,11 +1177,11 @@
         mock-tests = self.packages.${system}.mock-tests;
         bundled-set = self.packages.${system}.bundled-set-tests;
         ios-runner-lint = self.packages.${system}.ios-runner-lint;
-      } // pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isWindows) {
-        # Qt WebEngine is POSIX-only in this workspace (logoscore's page host
-        # says the same, for the same reason), and the container's view backend
-        # is what this builds.
+      } // pkgs.lib.optionalAttrs (self.packages.${system} ? web-container-test) {
+        # The Web container, end to end. Absent only while this repo's lock
+        # predates the fixture it loads — see the binding in `packages`.
         web-container-test = self.packages.${system}.web-container-test;
+      } // pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isWindows) {
         link-gate = self.packages.${system}.link-gate;
         link-gate-negative = self.packages.${system}.link-gate-negative;
       } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
