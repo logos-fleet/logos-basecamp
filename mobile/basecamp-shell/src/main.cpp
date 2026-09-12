@@ -122,7 +122,6 @@ int main(int argc, char* argv[])
     window.setCentralWidget(shellWidget);
     host.replaySection();
     window.showFullScreen();
-    console(QStringLiteral("shell on screen, %1 ms since main()").arg(sinceMain.elapsed()));
     console(QStringLiteral("COLD START: Shell shown at %1 ms").arg(sinceMain.elapsed()));
 
     // ── the two things the Shell is driven through, in the order a user
@@ -130,10 +129,8 @@ int main(int argc, char* argv[])
     //
     // Chat FIRST, and that ordering is the measurement: "cold start to Chat
     // usable" is how long the user waits before they can type, and putting
-    // the Modules tab's own 2.5-second settle in front of it would report
-    // that delay as part of the chat bring-up. The Modules tab is driven
-    // after, when the scene has had several seconds of frames -- more than
-    // the one it needs.
+    // the Modules tab's own settle in front of it would report that delay as
+    // part of the chat bring-up.
     //
     // Both run off the event loop rather than before it: a QML item has no
     // geometry until the first frame, and the chat bring-up spends its wait
@@ -153,10 +150,17 @@ int main(int argc, char* argv[])
             const bool ok = network->run();
             console(ok ? QStringLiteral("networking modules: PASS")
                        : QStringLiteral("networking modules: FAIL"));
+            // The chat bring-up has just spent seconds turning the event
+            // loop, so the scene has had far more than the one frame the
+            // driver needs.
+            driver->run();
         } else {
             console(QStringLiteral("networking modules: none in this Bundled set"));
+            // Nothing ran ahead of it, so the tab needs its own settle: a QML
+            // item has no geometry until the scene has painted, and a press
+            // at the centre of a zero-sized button lands on nothing.
+            QTimer::singleShot(2500, driver, &ShellModulesDriver::run);
         }
-        driver->run();
     });
 
     auto shutdown = [&]() {

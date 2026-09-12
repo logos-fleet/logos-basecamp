@@ -20,33 +20,10 @@ CONFIG=${2:-${TMPDIR:-/tmp}/logos-chat-peer}
 LOGOSCORE=${LOGOSCORE:-logoscore}
 PRESET=${CHAT_PRESET:-logos.test}
 
-core() { "$LOGOSCORE" --config-dir "$CONFIG" "$@"; }
-# The answer half of a `logoscore call`, which wraps every answer in a
-# `{module, method, result, status}` envelope.
-value() { core call "$@" --json | jq -c '.result'; }
-# ...and the answer half of a `result`-returning method, which nests one
-# further inside `{success, value, error}`. Separate from `value` on purpose:
-# a `result` whose success is false still comes back as a perfectly good JSON
-# object, so a caller that used `value` for both would read `null` as an id
-# and carry on -- which is how `add_group_member` was handed a whole envelope
-# as a convo_id and answered "conversation not found".
-result() {
-  local method="$2" out
-  out=$(value "$@")
-  if [ "$(echo "$out" | jq -r '.success')" != true ]; then
-    echo "chat_module.$method failed: $(echo "$out" | jq -r '.error')" >&2
-    return 1
-  fi
-  echo "$out" | jq -r '.value'
-}
+# shellcheck source=mobile/liblogos-smoke/desktop-peers/_peer.sh
+source "$(dirname "$0")/_peer.sh"
 
-rm -rf "$CONFIG"; mkdir -p "$CONFIG"
-core -D -m "$MODULES" > "$CONFIG/daemon.log" 2>&1 &
-trap 'kill %1 2>/dev/null || true' EXIT
-
-echo "==> waiting for the daemon"
-for _ in $(seq 1 60); do core status >/dev/null 2>&1 && break; sleep 1; done
-core status >/dev/null || { echo "the daemon never came up; see $CONFIG/daemon.log" >&2; exit 1; }
+start_peer_daemon
 
 # chat_module pulls delivery_module in by its own declared dependency.
 core load-module chat_module >/dev/null

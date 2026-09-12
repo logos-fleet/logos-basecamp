@@ -376,7 +376,7 @@ bool NetworkSmokeRunner::runChat()
     // is still created -- "chat_module can open a conversation" is answerable
     // on a phone with nothing else running -- and the exchange is skipped by
     // name rather than failed.
-    bool ok;
+    bool ok = false;
     if (!m_chatPeer.isEmpty()) {
         ok = exchangeInGroup(client);
     } else {
@@ -393,7 +393,7 @@ bool NetworkSmokeRunner::runChat()
         emit log(QStringLiteral("  chat status: %1").arg(asJson(out)));
 
     emit log(ok ? QStringLiteral("CHAT CONVERSATION OK")
-                : QStringLiteral("WRONG: chat_module created no conversation"));
+                : QStringLiteral("WRONG: chat_module did not see its conversation through"));
     return ok;
 }
 

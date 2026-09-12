@@ -16,31 +16,10 @@ LOGOSCORE=${LOGOSCORE:-logoscore}
 TOPIC=${LOGOS_SMOKE_TOPIC:-logos-smoke}
 PORT=${LIBP2P_PORT:-9500}
 
-core() { "$LOGOSCORE" --config-dir "$CONFIG" "$@"; }
-# The answer half of a `logoscore call`'s `{module, method, result, status}`
-# envelope...
-value() { core call "$@" --json | jq -c '.result'; }
-# ...and of a `result`-returning method, which nests one further inside
-# `{success, value, error}`. Every libp2p_module method below is one of those,
-# so a caller that used `value` would hand the whole envelope on -- which is
-# how `--peer` came out as `/ip4/.../tcp/9500/p2p/{ "error": null, ... }`.
-result() {
-  local method="$2" out
-  out=$(value "$@")
-  if [ "$(echo "$out" | jq -r '.success')" != true ]; then
-    echo "libp2p_module.$method failed: $(echo "$out" | jq -r '.error')" >&2
-    return 1
-  fi
-  echo "$out" | jq -c '.value'
-}
+# shellcheck source=mobile/liblogos-smoke/desktop-peers/_peer.sh
+source "$(dirname "$0")/_peer.sh"
 
-rm -rf "$CONFIG"; mkdir -p "$CONFIG"
-core -D -m "$MODULES" > "$CONFIG/daemon.log" 2>&1 &
-trap 'kill %1 2>/dev/null || true' EXIT
-
-echo "==> waiting for the daemon"
-for _ in $(seq 1 60); do core status >/dev/null 2>&1 && break; sleep 1; done
-core status >/dev/null || { echo "the daemon never came up; see $CONFIG/daemon.log" >&2; exit 1; }
+start_peer_daemon
 
 core load-module libp2p_module >/dev/null
 # `str:`, not `json:`: createNode's parameter is a tstr the module parses

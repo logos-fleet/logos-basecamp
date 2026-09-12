@@ -7,7 +7,9 @@ halves have to be visible from the DESKTOP end, and these two scripts are that
 end.
 
 Each is a `logoscore` daemon over this workspace's own module builds, with its
-own `--config-dir` — two daemons sharing one would drive each other.
+own `--config-dir` — two daemons sharing one would drive each other. The daemon
+itself, and the two ways to read an answer out of it, are `_peer.sh`, which
+both source.
 
 ```bash
 # One modules directory both peers load from. `--install` is the output that
