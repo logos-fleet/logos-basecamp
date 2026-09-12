@@ -108,6 +108,37 @@ QQuickItem* ShellModulesDriver::waitFor(const QString& objectName, int timeoutMs
     }
 }
 
+QPointF ShellModulesDriver::settledCentre(QQuickItem* item)
+{
+    // Unchanged for a quarter of a second of WALL CLOCK, not for N turns of
+    // the loop: processEvents returns the moment the queue is empty, so a
+    // "stable for eight reads" rule can be satisfied in microseconds while the
+    // next polish pass is still pending. Observed on the iPad: a first press
+    // at x=190 -- the row's left edge, where the toggle sat before the table's
+    // columns took their widths -- then a second, a second later, at the real
+    // x=826.
+    const auto centreOf = [](QQuickItem* i) {
+        return i->mapToScene(QPointF(i->width() / 2.0, i->height() / 2.0));
+    };
+    QElapsedTimer total;
+    total.start();
+    QElapsedTimer still;
+    still.start();
+    QPointF previous = centreOf(item);
+    while (total.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        const QPointF centre = centreOf(item);
+        if (centre != previous) {
+            previous = centre;
+            still.restart();
+            continue;
+        }
+        if (still.elapsed() >= 250)
+            return centre;
+    }
+    return previous;
+}
+
 void ShellModulesDriver::scrollIntoView(QQuickItem* item)
 {
     if (!item) return;
@@ -140,9 +171,9 @@ bool ShellModulesDriver::tap(QQuickItem* item)
         return false;
     }
     // Scene coordinates ARE widget coordinates for a QQuickWidget, so the
-    // centre of the item in the scene is where the press goes.
-    const QPointF centre = item->mapToScene(
-        QPointF(item->width() / 2.0, item->height() / 2.0));
+    // centre of the item in the scene is where the press goes -- once the
+    // layout has stopped moving it there.
+    const QPointF centre = settledCentre(item);
 
     // ...but only if the scene actually shows that point. Qt delivers a press
     // by COORDINATE, so a point outside the viewport is not "a press on a
@@ -166,14 +197,26 @@ bool ShellModulesDriver::tap(QQuickItem* item)
         return false;
     }
 
+    emit log(QStringLiteral("drive: press '%1' at (%2, %3) in %4x%5")
+                 .arg(item->objectName())
+                 .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
+                 .arg(surface->width()).arg(surface->height()));
+
     const QPointF global = surface->mapToGlobal(centre);
     QMouseEvent press(QEvent::MouseButtonPress, centre, global,
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QMouseEvent release(QEvent::MouseButtonRelease, centre, global,
                         Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
     QGuiApplication::sendEvent(surface, &press);
+    // A gap between the two, and an event loop turn to spend it in. The table
+    // rides in a Flickable, and a Flickable does not hand a press straight to
+    // the child under it -- it holds it until the gesture has declared itself,
+    // then replays press and release together. Sent back to back in one turn
+    // that replay is a coin flip: the row's control got the pair on some runs
+    // and nothing at all on others. A finger takes about this long.
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 80);
     QGuiApplication::sendEvent(surface, &release);
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 120);
     return true;
 }
 

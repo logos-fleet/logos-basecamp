@@ -15,6 +15,7 @@
 #pragma once
 
 #include <QObject>
+#include <QPointF>
 #include <QString>
 #include <QStringList>
 
@@ -60,6 +61,12 @@ private:
     // finger's would. Fails, rather than working around it, when that centre
     // is off the viewport -- see the comment in tap().
     bool tap(QQuickItem* item);
+    // The item's centre in scene coordinates, once it has stopped moving.
+    // Geometry lands over several polish passes -- a Settings panel's width
+    // cascades StackLayout -> ColumnLayout -> table -> Flickable -> ListView
+    // -> row -- and a press aimed at where a control was two passes ago lands
+    // on nothing at all, which reads exactly like a button that does not work.
+    QPointF settledCentre(QQuickItem* item);
     // Scroll the nearest enclosing flickable so `item` is on screen. Used for
     // the phone's section strip, which is a horizontal scroller BY DESIGN and
     // which a finger would swipe; NOT for a row's action, whose whole

@@ -78,6 +78,20 @@ WRONG: 'moduleRow.loadToggle.bare_counter' is at (1000, 327), outside the
 The one thing it does scroll is the section strip, which is a horizontal
 scroller by design and which a finger would swipe (`scrollIntoView`).
 
+Two things about the press itself, both found by running this on the iPad:
+`settledCentre` waits until the control has not moved for a quarter of a
+second of wall clock before aiming — a panel's width lands over several polish
+passes, and a press aimed at where the toggle was two passes ago hit the row's
+left edge (x=190 instead of x=826) and did nothing. And the press and the
+release are a real interval apart: the table rides in a Flickable, which holds
+a press until the gesture declares itself and then replays the pair, and back
+to back in one event-loop turn that replay was a coin flip. The run prints
+where each press went, so a future miss is diagnosable from the log:
+
+```
+[shell] drive: press 'moduleRow.loadToggle.bare_counter' at (826, 272) in 928x1326
+```
+
 `tests/qml/tst_SettingsMobileLayout.qml` (in `nix build .#qml-tests`, seconds,
 no Mac) is the same assertion without a device: it builds the real
 `SettingsView` at 402×874, 928×1326 and 1440×900, checks each row's toggle is
