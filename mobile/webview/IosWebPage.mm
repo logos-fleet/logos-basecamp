@@ -356,21 +356,25 @@ PlatformPageFactory iosPlatformPageFactory()
         };
         page.isAlive = [holder]() -> bool { return holder->view != nil; };
         // ONE SCRIPT IN THE PAGE, and what it says it says through the page's
-        // own console -- which the bridge already carries back, so there is no
-        // completion value to plumb. On the main queue because WKWebView is
-        // main-thread-only and a host may ask from wherever it is driving.
+        // own console -- which the bridge already carries back. On the main
+        // queue because WKWebView is main-thread-only and a host may ask from
+        // wherever it is driving.
+        //
+        // completionHandler:nil, AND IT IS NOT TIDINESS. A completion handler
+        // makes WebKit deserialize the script's result, which builds a
+        // JSVirtualMachine on the main thread -- and that traps in
+        // JSC::sanitizeStackForVM under Qt's separate main stack. MEASURED: an
+        // iPhone 16 Pro simulator, SIGTRAP on the first script, 2026-09-12.
+        // Same trap, same cause, as the WKScriptMessageHandler finding that put
+        // the channel on a URL scheme in the first place (MobileWebBridge.h);
+        // this is the second thing in WebKit that cannot be used from a Qt iOS
+        // app, and the answer is the same -- do not ask WebKit for a value.
         page.evaluateJavaScript = [holder](const QString& script) {
             NSString* source = toNs(script);
             dispatch_async(dispatch_get_main_queue(), ^{
                 WKWebView* view = holder->view;
                 if (!view) return;
-                [view evaluateJavaScript:source
-                       completionHandler:^(id, NSError* error) {
-                    if (error) {
-                        qWarning() << "Web module: a host script failed:"
-                                   << fromNs(error.localizedDescription);
-                    }
-                }];
+                [view evaluateJavaScript:source completionHandler:nil];
             });
         };
         return page;
