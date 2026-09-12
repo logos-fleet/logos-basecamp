@@ -252,6 +252,12 @@
         logosPackageManagerUI = logos-package-manager-ui.packages.${system}.default;
         logosDesignSystem = logos-design-system.packages.${system}.default;
         logosViewModuleRuntime = logos-view-module-runtime.packages.${system}.default;
+        # The app's bundled Qt-wasm QML runtime, served to every `web` variant's
+        # page (ADR 0004). Absent on Windows, where the whole Web-container path
+        # is — see nix/app.nix.
+        qmlRuntimeWasm =
+          if pkgs.stdenv.hostPlatform.isWindows then null
+          else logos-view-module-runtime.packages.${system}.qml-runtime-wasm;
         # logos-qt-mcp is the QML inspector used by the UI test harness. It has
         # no Windows target and is not needed to RUN the app -- nix/app.nix
         # already takes `logosQtMcp ? null` and gates the inspector on it -- so
@@ -565,7 +571,7 @@
       mobileSmoke = mobileSmokeFor.x86_64-linux;
     in
     {
-      packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosLgx, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, logosQtMcp, installDev, installPortable, dirBundler, ... }:
+      packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosLgx, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, qmlRuntimeWasm, logosQtMcp, installDev, installPortable, dirBundler, ... }:
         let
           # Common configuration
           common = import ./nix/default.nix {
@@ -616,7 +622,7 @@
           # App package (development build)
           app = import ./nix/app.nix {
             inherit pkgs common src logosModule logosLiblogos logosSdk logosProtocolPkg logosQtHost logosQtSdk logosDesignSystem logosViewModuleRuntime logosPackageManagerModule logosPackageDownloaderModule logosPackageHeaders buildInfo logosSdkBuild;
-            inherit logosQtMcp mainUIPlugin;
+            inherit logosQtMcp mainUIPlugin qmlRuntimeWasm;
             installedModules = installedDev;
           };
 
@@ -984,6 +990,18 @@
             inherit pkgs src logosPackageHeaders logosDesignSystem;
           };
 
+          # The Web container, end to end: a `ui_qml` module's `web` variant
+          # loaded through the real core into a real webview, rendered, clicked.
+          # See nix/web-container-test.nix for what it proves that the browser
+          # end-to-end and the runtime's own tests cannot.
+          web-container-test = import ./nix/web-container-test.nix {
+            inherit pkgs src;
+            liblogos = logosLiblogos;
+            logosCppSdk = logosSdk;
+            webVariant = logos-module-builder.packages.${system}.web-view-counter;
+            qmlRuntime = logos-view-module-runtime.packages.${system}.qml-runtime-wasm;
+          };
+
           # Coverage report for the unit-test suite: same targets as
           # .#unit-tests, compiled with --coverage and reported via gcovr.
           # Report-only for now (failUnderLine = 0) — raise the threshold as
@@ -1134,6 +1152,10 @@
         bundled-set = self.packages.${system}.bundled-set-tests;
         ios-runner-lint = self.packages.${system}.ios-runner-lint;
       } // pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isWindows) {
+        # Qt WebEngine is POSIX-only in this workspace (logoscore's page host
+        # says the same, for the same reason), and the container's view backend
+        # is what this builds.
+        web-container-test = self.packages.${system}.web-container-test;
         link-gate = self.packages.${system}.link-gate;
         link-gate-negative = self.packages.${system}.link-gate-negative;
       } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {

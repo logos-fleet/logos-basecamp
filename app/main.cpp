@@ -32,6 +32,11 @@
 #include "logos_provider_object.h"
 #include "qt_provider_object.h"
 #include "BuildInfo.h"
+#ifdef LOGOS_WITH_WEBENGINE
+#include "web/LogosWebScheme.h"
+#include "web/WebContainerBackend.h"
+#include <QtWebEngineQuick/QtWebEngineQuick>
+#endif
 #ifdef LOGOS_MOCK_BACKEND
 #include "FixtureCoreRuntime.h"
 #include "MockBackendFixture.h"
@@ -100,11 +105,30 @@ int main(int argc, char *argv[])
     // plugin upgrades physically immune to that class of staleness
     qputenv("QML_DISABLE_DISK_CACHE", "1");
 
+#ifdef LOGOS_WITH_WEBENGINE
+    // BOTH OF THESE MUST PRECEDE THE QApplication, and neither says so at the
+    // call site if it is moved: a custom URL scheme registered after the
+    // application exists is silently ignored (the symptom is a `web` module's
+    // page loading nothing, with no diagnostic), and QtWebEngine requires its
+    // own initialize() before the application object. See app/web/.
+    basecamp::web::registerLogosWebScheme();
+    QtWebEngineQuick::initialize();
+#endif
+
     // Create QApplication first
     QApplication app(argc, argv);
     app.setOrganizationName("Logos");
     app.setApplicationName("LogosBasecamp");
     app.styleHints()->setTabFocusBehavior(Qt::TabFocusAllControls);
+
+#ifdef LOGOS_WITH_WEBENGINE
+    // Fill liblogos' webview seam. Before the core starts, because a `web`
+    // module discovered at startup is loaded through it — with no backend
+    // installed the container reports the missing bridge instead of opening a
+    // page.
+    basecamp::web::WebContainerBackend::instance()->install(
+        basecamp::web::WebContainerBackend::logosQmlRuntimeDir());
+#endif
 
     // Inter-module access policy, resolved from the CLI below. Empty ⇒ install
     // nothing (enforcement off) — Basecamp's default, unchanged. See the

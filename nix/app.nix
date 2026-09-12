@@ -3,7 +3,7 @@
 # producing a Basecamp that serves fixture data and contains no Logos runtime.
 # Exposed only via the .#app-mock output — never from a release target.
 # See mock/README.md.
-{ pkgs, common, src, logosModule, logosLiblogos, logosSdk, logosSdkBuild ? logosSdk, logosProtocolPkg, logosQtHost, logosQtSdk, logosDesignSystem, logosViewModuleRuntime, logosPackageManagerModule, logosPackageDownloaderModule, logosPackageHeaders, buildInfo, logosQtMcp ? null, mainUIPlugin, installedModules ? [], portable ? false, enableInspector ? true , useMockBackend ? false }:
+{ pkgs, common, src, logosModule, logosLiblogos, logosSdk, logosSdkBuild ? logosSdk, logosProtocolPkg, logosQtHost, logosQtSdk, logosDesignSystem, logosViewModuleRuntime, logosPackageManagerModule, logosPackageDownloaderModule, logosPackageHeaders, buildInfo, logosQtMcp ? null, qmlRuntimeWasm ? null, mainUIPlugin, installedModules ? [], portable ? false, enableInspector ? true , useMockBackend ? false }:
 
 let
   # webkitgtk became ABI-versioned; pick the newest available while staying
@@ -27,6 +27,32 @@ let
   qtWebview = pkgs.lib.optional (!pkgs.stdenv.hostPlatform.isWindows) pkgs.qt6.qtwebview;
   qtWebviewQml = pkgs.lib.optional (!pkgs.stdenv.hostPlatform.isWindows)
     "${pkgs.qt6.qtwebview}/lib/qt-6/qml";
+
+  # QT WEBENGINE — the Web container's view backend (app/web/, gated in
+  # app/CMakeLists.txt by LOGOS_WITH_WEBENGINE).
+  #
+  # A `web` module is a page, and this is the only browser in the tree that can
+  # be EMBEDDED: logoscore spawns its page host as a child process, which a
+  # shell cannot do because the page has to be a widget inside its own window.
+  #
+  # Not on Windows: the whole Web-container path is POSIX here, for the reason
+  # logoscore's own webhost states.
+  withWebEngine = !pkgs.stdenv.hostPlatform.isWindows;
+  qtWebEngine = pkgs.lib.optionals withWebEngine [
+    pkgs.qt6.qtwebengine
+    pkgs.qt6.qtwebchannel
+  ];
+
+  # THE APP'S BUNDLED QML RUNTIME, served to every `web` variant's page.
+  #
+  # One image for the whole app rather than one per module: a `ui_qml` module's
+  # `web` variant ships only its own QML and a ~4 MB backend image, and plugs
+  # both into this (ADR 0004). It is staged as a directory of plain files
+  # because that is what the page fetches -- the container serves it on
+  # `logos://module/logos-runtime/`, and WebContainerBackend::logosQmlRuntimeDir
+  # is what finds it here.
+  qmlRuntimeDir = pkgs.lib.optionalString
+    (withWebEngine && qmlRuntimeWasm != null) "${qmlRuntimeWasm}/www";
 
   # DLLs Windows itself provides. An import of one of these is satisfied out of
   # %SystemRoot%, never by us; everything NOT on this list has to ship with the
@@ -78,7 +104,7 @@ pkgs.stdenv.mkDerivation rec {
 
   inherit src;
   # Platform-specific build inputs for system webviews
-  buildInputs = common.buildInputs ++ qtWebview ++ [
+  buildInputs = common.buildInputs ++ qtWebview ++ qtWebEngine ++ [
     pkgs.qt6.qtdeclarative
     # Qt host split: the app links logos-qt-host::logos_qt_host, which carries
     # the logos-protocol link interface (OpenSSL, Boost::system, nlohmann_json).
@@ -831,6 +857,23 @@ WRAPPER_EOF
     # a static initializer and QML registration is process-global, so a second
     # image aborts startup with "Cannot add multiple registrations for
     # Logos.Icons". Nothing to copy to $out/lib/Logos.
+
+    # ── the app's bundled Qt-wasm QML runtime ───────────────────────────
+    #
+    # ONE directory for the whole app, not part of any module's package: a
+    # `ui_qml` module's `web` variant ships its own QML and a ~4 MB backend
+    # image and plugs both into this ~26 MB one (ADR 0004). Plain files,
+    # because the page FETCHES them -- the container serves this directory on
+    # `logos://module/logos-runtime/` and nothing else in the app reads it.
+    #
+    # share/, which is where WebContainerBackend::logosQmlRuntimeDir looks
+    # second (`<app>/../share/logos-runtime`).
+    ${pkgs.lib.optionalString (qmlRuntimeDir != "") ''
+      mkdir -p $out/share/logos-runtime
+      cp -r ${qmlRuntimeDir}/. $out/share/logos-runtime/
+      chmod -R u+w $out/share/logos-runtime
+      echo "Bundled QML runtime: $(du -sh $out/share/logos-runtime | cut -f1)"
+    ''}
 
     # Install desktop file and icon for FreeDesktop / Wayland icon lookup (Linux only)
     if [ "$(uname)" = "Linux" ]; then

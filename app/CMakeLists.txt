@@ -24,6 +24,36 @@ endif()
 
 find_package(Qt6 COMPONENTS Widgets RemoteObjects Quick Qml QuickWidgets QuickControls2 Network REQUIRED)
 
+# ── the Web container's view backend ─────────────────────────────────────────
+#
+# liblogos registers the Web container in every process and leaves the WEBVIEW
+# unset, because it is linked into a headless CLI, a desktop shell and a static
+# iOS core and exactly one of those can host a Chromium. app/web/ is this
+# shell's answer: the `logos:` scheme a module's package is served on, the
+# QWebChannel channel its page speaks the web transport over, and the widget
+# the workspace mounts. Without it a `web` module here reports the missing
+# bridge, which is the honest answer for a build with no browser in it.
+#
+# AN OPTION because Qt WebEngine is a large dependency and not every consumer of
+# this tree wants Chromium linked into the shell: the mobile Shell host, the
+# Windows cross and the mock build all build this same directory. Default ON on
+# the desktop platforms that have it; the app compiles and runs either way.
+if(NOT DEFINED LOGOS_WITH_WEBENGINE)
+    if(WIN32 OR IOS OR ANDROID OR LOGOS_USE_MOCK_BACKEND)
+        set(LOGOS_WITH_WEBENGINE OFF)
+    else()
+        set(LOGOS_WITH_WEBENGINE ON)
+    endif()
+endif()
+
+if(LOGOS_WITH_WEBENGINE)
+    find_package(Qt6 COMPONENTS WebChannel WebEngineQuick WebEngineWidgets REQUIRED)
+    message(STATUS "Web container: building the Qt WebEngine view backend")
+else()
+    message(STATUS "Web container: no webview backend in this build "
+                   "(-DLOGOS_WITH_WEBENGINE=ON to add one)")
+endif()
+
 # QML Inspector (Qt DevTools-like inspection over TCP)
 # Enabled by default in Debug builds, disabled in Release.
 # Override with -DENABLE_QML_INSPECTOR=ON/OFF
@@ -329,6 +359,14 @@ if(APPLE)
     list(APPEND PROJECT_SOURCES macos/macWindowStyle.mm)
 endif()
 
+if(LOGOS_WITH_WEBENGINE)
+    list(APPEND PROJECT_SOURCES
+        web/LogosWebScheme.cpp
+        web/WebModulePageView.cpp
+        web/WebContainerBackend.cpp
+    )
+endif()
+
 option(LOGOS_PORTABLE_BUILD "Build as a portable/distributed app (no /nix/store dependencies at runtime)" OFF)
 
 qt_add_executable(LogosBasecamp
@@ -343,6 +381,28 @@ target_include_directories(LogosBasecamp PRIVATE
     ${LOGOS_VIEW_MODULE_RUNTIME_ROOT}/include
     ${GENERATED_LOGOS_SDK_DIR}
 )
+
+if(LOGOS_WITH_WEBENGINE)
+    target_compile_definitions(LogosBasecamp PRIVATE LOGOS_WITH_WEBENGINE)
+    target_link_libraries(LogosBasecamp PRIVATE
+        Qt6::WebChannel
+        Qt6::WebEngineQuick
+        Qt6::WebEngineWidgets
+    )
+    # web_module_view.h is one of the two headers liblogos installs, and it
+    # includes <message_channel.h>, which logos-protocol installs one directory
+    # deeper. Both are re-exported by the liblogos prefix; only the second needs
+    # naming. The source checkout keeps them where they are written.
+    if(_liblogos_is_source)
+        target_include_directories(LogosBasecamp PRIVATE
+            ${LOGOS_LIBLOGOS_ROOT}/src/logos_core
+            ${LOGOS_PROTOCOL_ROOT}/include/implementations/web)
+    else()
+        target_include_directories(LogosBasecamp PRIVATE
+            ${LOGOS_LIBLOGOS_ROOT}/include
+            ${LOGOS_LIBLOGOS_ROOT}/include/implementations/web)
+    endif()
+endif()
 
 if(LOGOS_PORTABLE_BUILD)
     target_compile_definitions(LogosBasecamp PRIVATE LOGOS_PORTABLE_BUILD)

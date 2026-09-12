@@ -24,6 +24,10 @@
 
 #include "LogosQmlBridge.h"
 
+#ifdef LOGOS_WITH_WEBENGINE
+#include "web/WebContainerBackend.h"
+#endif
+
 #include <ViewModuleHost.h>
 
 namespace {
@@ -72,7 +76,73 @@ UIPluginManager::UIPluginManager(LogosAPI* logosAPI,
             this, &UIPluginManager::onPluginLoadFailed);
     connect(m_pluginLoader, &PluginLoader::loadingChanged,
             this, &UIPluginManager::loadingModulesChanged);
+
+#ifdef LOGOS_WITH_WEBENGINE
+    // THE WEB CONTAINER'S VIEWS, which arrive from the other direction.
+    //
+    // Every other UI plugin is loaded BY this class and mounted when its loader
+    // reports back. A `web` variant is loaded by the CORE — its page is the
+    // module, so the container opens it as part of loading it — and the widget
+    // appears as a side effect. So this listens instead of asking, and the
+    // mount is the same one every other plugin gets.
+    //
+    // The container OWNS the widget: it destroys the view when the module
+    // unloads or its page dies, whichever comes first. viewClosed is therefore
+    // the only honest place to forget it.
+    auto* webBackend = basecamp::web::WebContainerBackend::instance();
+    connect(webBackend, &basecamp::web::WebContainerBackend::viewOpened,
+            this, &UIPluginManager::onWebViewOpened);
+    connect(webBackend, &basecamp::web::WebContainerBackend::viewClosed,
+            this, &UIPluginManager::onWebViewClosed);
+#endif
 }
+
+#ifdef LOGOS_WITH_WEBENGINE
+void UIPluginManager::onWebViewOpened(const QString& name, QWidget* widget)
+{
+    if (!widget) return;
+    m_uiModuleWidgets[name] = widget;
+    m_loadedApps.insert(name);
+    reloadLoadedPluginIcon(name, widget);
+
+    emit uiModulesChanged();
+    emit launcherAppsChanged();
+    emit pluginWindowRequested(widget, name);
+    emit navigateToApps();
+    emit appReady(name);
+    qDebug() << "Mounted the Web container's view for" << name;
+}
+
+void UIPluginManager::onWebViewClosed(const QString& name)
+{
+    if (!m_uiModuleWidgets.contains(name)) return;
+    // NOT DELETED HERE. The widget belongs to the container's view, which is
+    // already gone or going; this only stops pointing at it.
+    m_uiModuleWidgets.remove(name);
+    m_loadedApps.remove(name);
+    if (m_currentVisibleApp == name) m_currentVisibleApp.clear();
+    m_recentlyClosed->record(name);
+    emit uiModulesChanged();
+    emit launcherAppsChanged();
+    emit currentVisibleAppChanged();
+    qDebug() << "The Web container's view for" << name << "is gone";
+}
+
+bool UIPluginManager::isWebVariant(const QString& name) const
+{
+    // BY THE RESOLVED `main`, exactly as liblogos' own discovery decides it
+    // (module_registry.cpp::looksLikeWebModule): a web variant's entry point is
+    // a page, and that is the only thing visible without opening it. The
+    // manifest's `logos_web_runtime` says which runtime the page wants, not
+    // whether it is one.
+    if (!isQmlPlugin(name)) return false;
+    const QString main = m_uiPluginMetadata.value(name).value("mainFilePath").toString();
+    return main.endsWith(QStringLiteral(".html"), Qt::CaseInsensitive)
+        || main.endsWith(QStringLiteral(".htm"), Qt::CaseInsensitive);
+}
+#else
+bool UIPluginManager::isWebVariant(const QString&) const { return false; }
+#endif
 
 UIPluginManager::~UIPluginManager()
 {
@@ -151,7 +221,15 @@ void UIPluginManager::onUiPluginsFetched(const QVariantList& uiPlugins)
         // Other types require "mainFilePath" (the backend lib).
         const QString type = pluginInfo.value("type").toString();
         if (type == QStringLiteral("ui_qml")) {
-            if (pluginInfo.value("view").toString().isEmpty()) continue;
+            // A `web` VARIANT HAS NO `view`, and that is not a malformed
+            // manifest: its QML is named by `logos_web_view.qml` and fetched by
+            // the page, because the document is compiled inside the bundled
+            // Qt-wasm runtime rather than by an engine in this process (ADR
+            // 0004). What it has instead is a page for `main`.
+            const QString mainPath = pluginInfo.value("mainFilePath").toString();
+            const bool isPage = mainPath.endsWith(QStringLiteral(".html"), Qt::CaseInsensitive)
+                             || mainPath.endsWith(QStringLiteral(".htm"), Qt::CaseInsensitive);
+            if (!isPage && pluginInfo.value("view").toString().isEmpty()) continue;
         } else {
             if (pluginInfo.value("mainFilePath").toString().isEmpty()) continue;
         }
@@ -279,6 +357,20 @@ void UIPluginManager::loadUiModule(const QString& moduleName)
         qDebug() << "UI module" << moduleName << "blocked by deps (" << summary
                  << "):" << blockers;
         emit missingDepsPopupRequested(moduleName, blockers, summary);
+        return;
+    }
+
+    if (isWebVariant(moduleName)) {
+        // THE CORE LOADS IT, not PluginLoader. A `web` variant's page IS the
+        // module: the Web container opens it, publishes it under its own
+        // identity and only then reports the module loaded, and the widget
+        // arrives on viewOpened. Handing it to PluginLoader would build a
+        // QQuickWidget for a QML document this process cannot compile — its
+        // imports live in the Qt-for-WebAssembly runtime, not here.
+        if (m_coreModuleManager && !m_coreModuleManager->loadModule(moduleName))
+            emit pluginLoadFailedNotice(
+                moduleName,
+                tr("The Web container could not bring up this app's page."));
         return;
     }
 
@@ -424,6 +516,14 @@ void UIPluginManager::unloadUiModule(const QString& moduleName)
 void UIPluginManager::unloadUiModuleImpl(const QString& moduleName)
 {
     qDebug() << "Unloading UI module:" << moduleName;
+
+    if (isWebVariant(moduleName)) {
+        // Symmetrical with the load: the core owns a `web` variant's lifetime,
+        // and onWebViewClosed is what takes the widget out of the maps when the
+        // container has actually destroyed it.
+        if (m_coreModuleManager) m_coreModuleManager->unloadModule(moduleName);
+        return;
+    }
 
     bool isQml = m_qmlPluginWidgets.contains(moduleName);
     bool isCpp = m_loadedUiModules.contains(moduleName);
