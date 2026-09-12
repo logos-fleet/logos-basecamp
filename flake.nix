@@ -282,6 +282,19 @@
         logosPackageManagerUI = logos-package-manager-ui.packages.${system}.default;
         logosDesignSystem = logos-design-system.packages.${system}.default;
         logosViewModuleRuntime = logos-view-module-runtime.packages.${system}.default;
+        # The app's bundled Qt-wasm QML runtime, served to every `web` variant's
+        # page (ADR 0004).
+        #
+        # null on Windows, where the whole Web-container path is — and null
+        # while this repo's lock predates the runtime, which is the same
+        # condition `webContainerFixture` reads for the check. The app still
+        # builds and still opens a page; a `web` variant whose manifest asks for
+        # the qml runtime then fails IN THE PAGE with a message naming what is
+        # missing, which is the honest answer for a build that shipped without
+        # one (see WebContainerBackend::install).
+        qmlRuntimeWasm =
+          if pkgs.stdenv.hostPlatform.isWindows then null
+          else (logos-view-module-runtime.packages.${system} or {}).qml-runtime-wasm or null;
         # logos-qt-mcp is the QML inspector used by the UI test harness. It has
         # no Windows target and is not needed to RUN the app -- nix/app.nix
         # already takes `logosQtMcp ? null` and gates the inspector on it -- so
@@ -633,7 +646,7 @@
       mobileSmoke = mobileSmokeFor.x86_64-linux;
     in
     {
-      packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosLgx, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, logosQtMcp, installDev, installPortable, dirBundler, ... }:
+      packages = forAllSystems ({ pkgs, system, logosSdk, logosSdkBuild, logosProtocolPkg, logosQtHost, logosQtSdk, logosModule, logosLiblogos, logosLiblogosPortable, logosPackageManagerLibrary, logosPackageManagerModule, logosPackageManagerModuleLib, logosPackageManagerModuleLibPortable, logosPackageDownloaderModule, logosPackageDownloaderModuleLib, logosPackageLib, logosPackageHeaders, logosLgx, logosPackageManagerUI, logosCapabilityModule, logosModulesStateModule, logosDesignSystem, logosViewModuleRuntime, qmlRuntimeWasm, logosQtMcp, installDev, installPortable, dirBundler, ... }:
         let
           # Common configuration
           common = import ./nix/default.nix {
@@ -684,7 +697,7 @@
           # App package (development build)
           app = import ./nix/app.nix {
             inherit pkgs common src logosModule logosLiblogos logosSdk logosProtocolPkg logosQtHost logosQtSdk logosDesignSystem logosViewModuleRuntime logosPackageManagerModule logosPackageDownloaderModule logosPackageHeaders buildInfo logosSdkBuild;
-            inherit logosQtMcp mainUIPlugin;
+            inherit logosQtMcp mainUIPlugin qmlRuntimeWasm;
             installedModules = installedDev;
           };
 
@@ -925,6 +938,48 @@
             inherit logosQtMcp;
             appBin = "${macosAppTest}/LogosBasecamp.app/Contents/MacOS/LogosBasecamp";
           };
+
+          # ── the Web container's end-to-end check, and why it is optional ──
+          #
+          # It loads a `ui_qml` module's `web` variant through the real core
+          # into a real webview and clicks it (nix/web-container-test.nix). Its
+          # fixture is a CROSS-REPO package: logos-module-builder exposes
+          # `web-view-counter` — the only `web` variant whose QML reports what
+          # it did — only from the revisions carrying slice 27's fifth
+          # increment, and that package exists there only when the builder's own
+          # logos-view-module-runtime publishes `qml-runtime-wasm`.
+          #
+          # ABSENT rather than broken while this repo's lock predates both, and
+          # the workspace runs it meanwhile — its `follows` put ONE builder and
+          # ONE runtime in the closure:
+          #
+          #     ws test logos-basecamp --local logos-module-builder
+          #
+          # The day the pin lands, the check appears with no edit here.
+          #
+          # Windows is excluded for the reason the whole Web-container path is:
+          # the view backend is Qt WebEngine and POSIX (logoscore's page host
+          # says the same, about the same thing).
+          webContainerFixture =
+            (logos-module-builder.packages.${system} or {}).web-view-counter or null;
+          # The runtime the APP bundles, not a second resolution of it: the
+          # check has to serve the page the same image `nix/app.nix` stages
+          # under share/logos-runtime, or it would be measuring a runtime this
+          # build does not ship.
+          webContainerRuntime = qmlRuntimeWasm;
+          # The other two modules in that check's directory: the native module
+          # the view calls by name, and the broker that makes the call legal.
+          # Both are Bare images, so the check stays one process.
+          webContainerNativeModule =
+            (logos-module-builder.packages.${system} or {}).bare-greeter or null;
+          webContainerCapabilityModule =
+            (logos-capability-module.packages.${system} or {}).bare or null;
+          hasWebContainerTest =
+            !pkgs.stdenv.hostPlatform.isWindows
+            && webContainerFixture != null
+            && webContainerRuntime != null
+            && webContainerNativeModule != null
+            && webContainerCapabilityModule != null;
         in
         {
           # Individual outputs.
@@ -1094,6 +1149,16 @@
 
           # Default package
           default = app;
+        } // pkgs.lib.optionalAttrs hasWebContainerTest {
+          web-container-test = import ./nix/web-container-test.nix {
+            inherit pkgs src;
+            liblogos = logosLiblogos;
+            logosCppSdk = logosSdk;
+            webVariant = webContainerFixture;
+            qmlRuntime = webContainerRuntime;
+            nativeModule = webContainerNativeModule;
+            capabilityModule = webContainerCapabilityModule;
+          };
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           bin-appimage = nix-bundle-appimage.lib.${system}.mkAppImage {
             drv = appDistributed;
@@ -1201,6 +1266,10 @@
         mock-tests = self.packages.${system}.mock-tests;
         bundled-set = self.packages.${system}.bundled-set-tests;
         ios-runner-lint = self.packages.${system}.ios-runner-lint;
+      } // pkgs.lib.optionalAttrs (self.packages.${system} ? web-container-test) {
+        # The Web container, end to end. Absent only while this repo's lock
+        # predates the fixture it loads — see the binding in `packages`.
+        web-container-test = self.packages.${system}.web-container-test;
       } // pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isWindows) {
         link-gate = self.packages.${system}.link-gate;
         link-gate-negative = self.packages.${system}.link-gate-negative;

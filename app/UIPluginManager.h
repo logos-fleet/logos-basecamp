@@ -231,6 +231,14 @@ private slots:
     // needed for widget loading.
     void onUiPluginsFetched(const QVariantList& uiPlugins);
 
+#ifdef LOGOS_WITH_WEBENGINE
+    // The Web container's views arrive from the container rather than from
+    // PluginLoader — see the connects in the constructor for why this class
+    // listens for a `web` variant instead of loading one.
+    void onWebViewOpened(const QString& name, QWidget* widget);
+    void onWebViewClosed(const QString& name);
+#endif
+
     // Landing slot for a deferred-teardown plugin's unloadFinished() signal.
     // Reached through the string-based connect() in beginDeferredTeardown --
     // that overload needs a real slot on the receiving side, which a lambda is
@@ -253,6 +261,12 @@ private:
     // Force-reload a currently-loaded plugin's widget windowIcon from
     // disk, bypassing Qt's path-keyed pixmap cache
     void reloadLoadedPluginIcon(const QString& name, QWidget* widget) const;
+
+    // Is this app's INSTALLED artifact a `web` variant — a page rather than a
+    // QML document plus a Qt plugin? Always false in a build with no webview
+    // backend, which is what keeps the load and unload dispatch below single-
+    // branch there.
+    bool isWebVariant(const QString& name) const;
     void loadLegacyUiModule(const QString& moduleName);
     QString resolveQmlViewPath(const QVariantMap& meta) const;
     QString getPluginPath(const QString& name) const;

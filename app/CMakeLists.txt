@@ -176,6 +176,59 @@ endif()
 
 endif() # LOGOS_USE_MOCK_BACKEND
 
+# Where the Web container's seam header lives in each of the two liblogos
+# layouts. Read by the LOGOS_WITH_WEBENGINE default below and by the include
+# path the backend compiles with (_logos_web_module_view_dir, derived from this
+# one value) so the probe and the include can never disagree.
+if(LOGOS_USE_MOCK_BACKEND)
+    set(_logos_web_module_view_h "")
+elseif(_liblogos_is_source)
+    set(_logos_web_module_view_h "${LOGOS_LIBLOGOS_ROOT}/src/logos_core/web_module_view.h")
+else()
+    set(_logos_web_module_view_h "${LOGOS_LIBLOGOS_ROOT}/include/web_module_view.h")
+endif()
+get_filename_component(_logos_web_module_view_dir "${_logos_web_module_view_h}" DIRECTORY)
+
+# ── the Web container's view backend ─────────────────────────────────────────
+#
+# liblogos registers the Web container in every process and leaves the WEBVIEW
+# unset, because it is linked into a headless CLI, a desktop shell and a static
+# iOS core and exactly one of those can host a Chromium. app/web/ is this
+# shell's answer: the `logos:` scheme a module's package is served on, the
+# QWebChannel channel its page speaks the web transport over, and the widget the
+# workspace mounts. Without it a `web` module here reports the missing bridge,
+# which is the honest answer for a build with no browser in it.
+#
+# AN OPTION because Qt WebEngine is a large dependency and not every consumer of
+# this tree wants Chromium linked into the shell: the mobile Shell host, the
+# Windows cross and the mock build all build this same directory.
+#
+# AND IT NEEDS `web_module_view.h`, which is the SEAM — one of the two headers
+# liblogos installs, because the backend is filled in from outside. A liblogos
+# pin that predates it cannot be built against, and the failure would otherwise
+# be a `file not found` on a header nobody named, so the probe is explicit and
+# the build says which pin it is short of.
+if(NOT DEFINED LOGOS_WITH_WEBENGINE)
+    if(WIN32 OR IOS OR ANDROID OR LOGOS_USE_MOCK_BACKEND)
+        set(LOGOS_WITH_WEBENGINE OFF)
+    elseif(NOT EXISTS "${_logos_web_module_view_h}")
+        message(STATUS "Web container: this logos-liblogos pin does not install "
+                       "web_module_view.h (looked for ${_logos_web_module_view_h}); "
+                       "building without a webview backend")
+        set(LOGOS_WITH_WEBENGINE OFF)
+    else()
+        set(LOGOS_WITH_WEBENGINE ON)
+    endif()
+endif()
+
+if(LOGOS_WITH_WEBENGINE)
+    find_package(Qt6 COMPONENTS WebChannel WebEngineQuick WebEngineWidgets REQUIRED)
+    message(STATUS "Web container: building the Qt WebEngine view backend")
+else()
+    message(STATUS "Web container: no webview backend in this build "
+                   "(-DLOGOS_WITH_WEBENGINE=ON to add one)")
+endif()
+
 # ── logos-view-module-runtime (provides ViewModuleHost.h + the ui-host lib) ───
 # Load-bearing: UIPluginManager/PluginLoader compile into the exe.
 if(NOT DEFINED LOGOS_VIEW_MODULE_RUNTIME_ROOT)
@@ -329,6 +382,14 @@ if(APPLE)
     list(APPEND PROJECT_SOURCES macos/macWindowStyle.mm)
 endif()
 
+if(LOGOS_WITH_WEBENGINE)
+    list(APPEND PROJECT_SOURCES
+        web/LogosWebScheme.cpp
+        web/WebModulePageView.cpp
+        web/WebContainerBackend.cpp
+    )
+endif()
+
 option(LOGOS_PORTABLE_BUILD "Build as a portable/distributed app (no /nix/store dependencies at runtime)" OFF)
 
 qt_add_executable(LogosBasecamp
@@ -343,6 +404,27 @@ target_include_directories(LogosBasecamp PRIVATE
     ${LOGOS_VIEW_MODULE_RUNTIME_ROOT}/include
     ${GENERATED_LOGOS_SDK_DIR}
 )
+
+if(LOGOS_WITH_WEBENGINE)
+    target_compile_definitions(LogosBasecamp PRIVATE LOGOS_WITH_WEBENGINE)
+    target_link_libraries(LogosBasecamp PRIVATE
+        Qt6::WebChannel
+        Qt6::WebEngineQuick
+        Qt6::WebEngineWidgets
+    )
+    # web_module_view.h is one of the two headers liblogos installs, and it
+    # includes <message_channel.h>, which logos-protocol installs one directory
+    # deeper. Both are re-exported by the liblogos prefix; only the second needs
+    # naming. The source checkout keeps them where they are written.
+    target_include_directories(LogosBasecamp PRIVATE ${_logos_web_module_view_dir})
+    if(_liblogos_is_source)
+        target_include_directories(LogosBasecamp PRIVATE
+            ${LOGOS_PROTOCOL_ROOT}/include/implementations/web)
+    else()
+        target_include_directories(LogosBasecamp PRIVATE
+            ${LOGOS_LIBLOGOS_ROOT}/include/implementations/web)
+    endif()
+endif()
 
 if(LOGOS_PORTABLE_BUILD)
     target_compile_definitions(LogosBasecamp PRIVATE LOGOS_PORTABLE_BUILD)
