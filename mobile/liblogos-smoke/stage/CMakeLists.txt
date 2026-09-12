@@ -30,6 +30,8 @@ add_library(liblogos_smoke_host STATIC
     ${SRC}/SmokeRunner.h
     ${SRC}/BundledSetRunner.cpp
     ${SRC}/BundledSetRunner.h
+    ${SRC}/NetworkSmokeRunner.cpp
+    ${SRC}/NetworkSmokeRunner.h
     ${SRC}/BundledSetCoreRuntime.cpp
     ${SRC}/BundledSetCoreRuntime.h
     ${SRC}/ViewModuleRunner.cpp
@@ -114,11 +116,19 @@ target_link_libraries(liblogos_smoke_host PUBLIC
     z                            # lgx's gzip handler; libz is in the iOS SDK
     "-framework CoreFoundation"  # LGX_UNICODE_COREFOUNDATION
     "-framework Foundation"
+    # SecRandomCopyBytes / CCRandomGenerateBytes. A Bare module carries every
+    # third-party library inside its own image, but NOT the system ones: iOS has
+    # no /dev/urandom a sandboxed app may open, so zerokit's rln and the chat
+    # core reach the kernel CSPRNG through Security.framework and leave those two
+    # symbols for the app to resolve. Named here rather than discovered, because
+    # an iOS framework is linked `-undefined dynamic_lookup` and a missing one is
+    # not a link error -- it is a crash at the first key generation.
+    "-framework Security"
 )
 
 set_target_properties(liblogos_smoke_host PROPERTIES EXPORT_NAME LiblogosSmokeHost)
 install(TARGETS liblogos_smoke_host EXPORT LiblogosSmokeHostTargets ARCHIVE DESTINATION lib)
-install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledSetRunner.h
+install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledSetRunner.h ${SRC}/NetworkSmokeRunner.h
         ${SRC}/BundledSetCoreRuntime.h ${SRC}/ViewModuleRunner.h
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../app/interfaces/ICoreRuntime.h
         DESTINATION include/liblogos-smoke-host)

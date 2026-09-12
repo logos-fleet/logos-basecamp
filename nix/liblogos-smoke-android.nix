@@ -184,7 +184,20 @@ let
     echo "run-liblogos-smoke-android: installing $apk on $ANDROID_SERIAL ($(du -k "$apk" | cut -f1) KB)"
     "$adb" install -r "$apk" >/dev/null || { "$adb" uninstall "$pkg" >/dev/null; "$adb" install -r "$apk"; }
     "$adb" logcat -c || true
-    "$adb" shell am start -W -n "$pkg/${activity}" >/dev/null
+    # The app's own command line, if this runner was given one. Qt reads it off
+    # the `extraappparams` intent extra, base64 of a plain argument string, and
+    # only in a debuggable build -- which an `assembleDebug` APK is
+    # (QtActivityLoader: "Not in debug mode! It is not allowed to use extra
+    # arguments in non-debug mode."). It is the Android half of the trailing
+    # arguments simctl and devicectl take, and it is how the smoke host is told
+    # which desktop peer to dial.
+    if [ "$#" -gt 0 ]; then
+      params=$(printf '%s ' "$@" | ${pkgs.buildPackages.coreutils}/bin/base64 | tr -d '\n')
+      echo "run-liblogos-smoke-android: app arguments: $*"
+      "$adb" shell am start -W -n "$pkg/${activity}" --es extraappparams "$params" >/dev/null
+    else
+      "$adb" shell am start -W -n "$pkg/${activity}" >/dev/null
+    fi
     pid=$("$adb" shell pidof "$pkg" | tr -d '\r')
     echo "run-liblogos-smoke-android: $pkg pid $pid; console follows (Ctrl-C to stop)"
     "$adb" logcat --pid="$pid" -v raw '*:V' \

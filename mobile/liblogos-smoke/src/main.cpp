@@ -21,6 +21,7 @@
 
 #include "BundledSetCoreRuntime.h"
 #include "BundledSetRunner.h"
+#include "NetworkSmokeRunner.h"
 #include "SmokeRunner.h"
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
 #include "ViewModuleRunner.h"
@@ -164,6 +165,22 @@ int main(int argc, char* argv[])
     const bool bundledOk = bundled.run() && bundled.callCounter();
     say(bundledOk ? QStringLiteral("bundled module: PASS")
                   : QStringLiteral("bundled module: FAIL"));
+
+    // ...and what the networking modules DO once they are up, if --bundle put
+    // any of them in the set: a libp2p node created and started, dialled at a
+    // desktop peer and exchanging a gossipsub message, and a chat conversation
+    // over delivery_module. A set without them says so and passes -- loading is
+    // the container's job and is already reported above; this is the modules'
+    // own.
+    NetworkSmokeRunner network(&core);
+    QObject::connect(&network, &NetworkSmokeRunner::log, &say);
+    if (network.hasWork()) {
+        const bool networkOk = network.run();
+        say(networkOk ? QStringLiteral("networking modules: PASS")
+                      : QStringLiteral("networking modules: FAIL"));
+    } else {
+        say(QStringLiteral("networking modules: none in this Bundled set"));
+    }
 
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
     // ...and the app's Bundled VIEW module, if --bundle put one in the set,
