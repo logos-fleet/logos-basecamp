@@ -181,13 +181,17 @@ PlatformPageFactory androidPlatformPageFactory()
         // only be constructed there, and the container is waiting for a view.
         auto page = std::make_shared<QJniObject>();
         const QString url = request.entryUrl.toString();
+        const QString host = request.entryUrl.host();
         QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
-            [page, handle, url]() {
+            [page, handle, url, host]() {
                 QJniObject activity = QNativeInterface::QAndroidApplication::context();
                 *page = QJniObject::callStaticObjectMethod(
                     kPageClass, "create",
-                    "(Landroid/app/Activity;JLjava/lang/String;)Lco/logos/webview/LogosWebPage;",
-                    activity.object(), handle, QJniObject::fromString(url).object<jstring>());
+                    "(Landroid/app/Activity;JLjava/lang/String;Ljava/lang/String;)"
+                    "Lco/logos/webview/LogosWebPage;",
+                    activity.object(), handle,
+                    QJniObject::fromString(url).object<jstring>(),
+                    QJniObject::fromString(host).object<jstring>());
             }).waitForFinished();
 
         if (!page->isValid()) {

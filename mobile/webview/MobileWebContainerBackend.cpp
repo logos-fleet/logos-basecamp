@@ -43,7 +43,8 @@ MobileWebModuleView* MobileWebContainerBackend::createView(
 {
     const QString name = QString::fromStdString(request.moduleName);
 
-    auto* view = new MobileWebModuleView(request, runtimeDir, m_platform, m_shimInDocument);
+    auto* view = new MobileWebModuleView(request, runtimeDir, m_platform, m_shimInDocument,
+                                        m_origin);
     if (!view->startupError().isEmpty()) {
         delete view;
         return nullptr;
@@ -69,11 +70,13 @@ void MobileWebContainerBackend::forget(const QString& moduleName)
 void MobileWebContainerBackend::install(const QString& runtimeDir,
                                         PlatformPageFactory platform,
                                         const LiveRuntimeBudget& budget,
-                                        bool shimInDocument)
+                                        bool shimInDocument,
+                                        WebOrigin origin)
 {
     m_platform = std::move(platform);
     m_budget = budget;
     m_shimInDocument = shimInDocument;
+    m_origin = std::move(origin);
 
     if (runtimeDir.isEmpty()) {
         qWarning() << "Web container: this build ships no bundled QML runtime. A `web` "

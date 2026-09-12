@@ -73,7 +73,8 @@ public:
     MobileWebModuleView(const LogosCore::WebModuleViewRequest& request,
                         const QString& runtimeDir,
                         const PlatformPageFactory& platform,
-                        bool shimInDocument = false);
+                        bool shimInDocument = false,
+                        WebOrigin origin = {});
     ~MobileWebModuleView() override;
 
     logos::web::MessageChannelPtr channel() const override;

@@ -34,6 +34,7 @@ qt_add_executable(LiblogosSmoke
     ${WEBVIEW}/MobileWebModuleView.cpp ${WEBVIEW}/MobileWebModuleView.h
     ${WEBVIEW}/LiveRuntimeBudget.cpp ${WEBVIEW}/LiveRuntimeBudget.h
     ${WEBVIEW}/MobileWebContainerBackend.cpp ${WEBVIEW}/MobileWebContainerBackend.h
+    ${WEBVIEW}/WebPageProbe.cpp ${WEBVIEW}/WebPageProbe.h
     ${WEBVIEW}/AndroidWebPage.cpp ${WEBVIEW}/AndroidWebPage.h)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)

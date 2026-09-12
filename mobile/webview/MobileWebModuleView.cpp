@@ -49,7 +49,8 @@ private:
 MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& request,
                                          const QString& runtimeDir,
                                          const PlatformPageFactory& platform,
-                                         bool shimInDocument)
+                                         bool shimInDocument,
+                                         WebOrigin origin)
     : m_moduleName(QString::fromStdString(request.moduleName))
 {
     const QString moduleDir = QString::fromStdString(request.moduleDir);
@@ -66,7 +67,8 @@ MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& 
         return;
     }
 
-    m_bridge = std::make_shared<MobileWebBridge>(moduleDir, runtimeDir, entryFile);
+    m_bridge = std::make_shared<MobileWebBridge>(moduleDir, runtimeDir, entryFile,
+                                                std::move(origin));
     m_bridge->setInjectsShimIntoHtml(shimInDocument);
     m_channel = std::make_shared<BridgeChannel>(m_bridge);
 

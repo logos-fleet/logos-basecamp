@@ -47,6 +47,8 @@ add_library(liblogos_smoke_host STATIC
     ${WEBVIEW}/LiveRuntimeBudget.h
     ${WEBVIEW}/MobileWebContainerBackend.cpp
     ${WEBVIEW}/MobileWebContainerBackend.h
+    ${WEBVIEW}/WebPageProbe.cpp
+    ${WEBVIEW}/WebPageProbe.h
     ${SRC}/SmokeRunner.cpp
     ${SRC}/SmokeRunner.h
     ${SRC}/BundledSetRunner.cpp
@@ -181,6 +183,7 @@ install(FILES
         ${WEBVIEW}/MobileWebModuleView.h
         ${WEBVIEW}/MobileWebContainerBackend.h
         ${WEBVIEW}/LiveRuntimeBudget.h
+        ${WEBVIEW}/WebPageProbe.h
         DESTINATION include/liblogos-smoke-host/webview)
 install(FILES ${BASECAMP_APP}/web/LogosWebPaths.h
         DESTINATION include/liblogos-smoke-host/web)

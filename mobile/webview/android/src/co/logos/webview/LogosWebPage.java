@@ -77,7 +77,8 @@ public final class LogosWebPage {
      * through it -- so a page that was never mounted would come up and freeze.
      * The shell brings it forward when the user is looking at this module.
      */
-    public static LogosWebPage create(Activity activity, long handle, String url) {
+    public static LogosWebPage create(Activity activity, long handle, String url,
+                                      final String host) {
         LogosWebPage page = new LogosWebPage(handle);
         WebView webView = new WebView(activity);
         page.mWebView = webView;
@@ -96,8 +97,13 @@ public final class LogosWebPage {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view,
                                                               WebResourceRequest request) {
-                final String scheme = request.getUrl().getScheme();
-                if (scheme == null || !scheme.equals("logos")) return null;
+                // BY HOST, not by scheme. A module's page is served over https
+                // here (Chromium's Fetch refuses a non-standard scheme inside a
+                // WebView, whatever the embedder registered -- see
+                // LogosWebPaths.h), so the reserved host is what says "this is
+                // ours". Anything else is not intercepted and, having no route,
+                // simply fails.
+                if (!host.equals(request.getUrl().getHost())) return null;
 
                 Reply reply = new Reply();
                 try {

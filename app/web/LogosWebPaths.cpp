@@ -6,6 +6,15 @@
 
 namespace basecamp::web {
 
+QUrl WebOrigin::url(const QString& path) const
+{
+    QUrl out;
+    out.setScheme(scheme);
+    out.setHost(host);
+    out.setPath(path);
+    return out;
+}
+
 QByteArray mimeTypeFor(const QString& path)
 {
     const QString suffix = QFileInfo(path).suffix().toLower();

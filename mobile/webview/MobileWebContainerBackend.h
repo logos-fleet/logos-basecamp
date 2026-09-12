@@ -74,13 +74,16 @@ public:
     //               serve the channel shim inside the entry document instead of
     //               injecting it. Android's answer; see
     //               MobileWebBridge::setInjectsShimIntoHtml.
+    //   origin      what the page is served on. Android needs
+    //               WebOrigin::android(); see LogosWebPaths.h.
     //
     // MUST BE CALLED ON THE QT MAIN THREAD, which it then remembers: a webview
     // may only be built on the platform's UI thread, while the core may load a
     // module from its own owner thread.
     void install(const QString& runtimeDir, PlatformPageFactory platform,
                  const LiveRuntimeBudget& budget = LiveRuntimeBudget(),
-                 bool shimInDocument = false);
+                 bool shimInDocument = false,
+                 WebOrigin origin = {});
 
     // The platform handle a loaded web module's page draws into, or nullptr.
     void* nativeHandleFor(const QString& moduleName) const;
@@ -118,6 +121,7 @@ private:
     MobileWebModuleView* createView(const LogosCore::WebModuleViewRequest& request,
                                     const QString& runtimeDir);
     bool m_shimInDocument = false;
+    WebOrigin m_origin;
     void forget(const QString& moduleName);
     void armPollTimer();
 

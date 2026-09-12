@@ -21,6 +21,7 @@
 
 #include "BundledSetCoreRuntime.h"
 #include "webview/MobileWebContainerBackend.h"
+#include "webview/WebPageProbe.h"
 #if defined(Q_OS_IOS)
 #include "webview/IosWebPage.h"
 #elif defined(Q_OS_ANDROID)
@@ -177,9 +178,13 @@ int main(int argc, char* argv[])
         // ...and on Android the shim travels INSIDE the entry document: there
         // is no user-script API, and evaluateJavascript runs after the page's
         // own first script.
+        // ...and on https, because Chromium's Fetch there refuses a
+        // non-standard scheme even when the embedder registered one -- measured
+        // on a Samsung, see LogosWebPaths.h.
         web->install(basecamp::web::androidQmlRuntimeDir(),
                      basecamp::web::androidPlatformPageFactory(),
-                     basecamp::web::LiveRuntimeBudget(), /*shimInDocument=*/true);
+                     basecamp::web::LiveRuntimeBudget(), /*shimInDocument=*/true,
+                     basecamp::web::WebOrigin::android());
 #endif
         QObject::connect(web, &MobileWebContainerBackend::uiEvictionRequired,
                          &app, [](const QString& name) {
@@ -188,6 +193,28 @@ int main(int argc, char* argv[])
                                                 "up its UI page").arg(name));
                          });
     }
+
+#if defined(Q_OS_IOS) || defined(Q_OS_ANDROID)
+    // THE ONE THING A DESKTOP CANNOT ANSWER: does this platform's webview
+    // deliver a request to its interceptor when the page is entered under Qt's
+    // separate-main-stack entry? That is where the mobile round-trip spike
+    // found WKScriptMessageHandler trapping, and the reason the channel is a
+    // URL scheme at all. A fixture page, a frame each way, on the console --
+    // before any module is loaded, so a failure here is not mistaken for one.
+    {
+        basecamp::web::WebPageProbe probe(
+#if defined(Q_OS_IOS)
+            basecamp::web::iosPlatformPageFactory(), /*shimInDocument=*/false
+#else
+            basecamp::web::androidPlatformPageFactory(), /*shimInDocument=*/true,
+            basecamp::web::WebOrigin::android()
+#endif
+        );
+        QObject::connect(&probe, &basecamp::web::WebPageProbe::log, &say);
+        say(probe.run() ? QStringLiteral("web container: PASS")
+                        : QStringLiteral("web container: FAIL"));
+    }
+#endif
 
     BundledSetCoreRuntime core(runner.prepare(argc, argv));
     QObject::connect(&core, &BundledSetCoreRuntime::log, &say);

@@ -160,15 +160,6 @@ QString mintToken()
         .arg(lo, 16, 16, QLatin1Char('0'));
 }
 
-QUrl originUrl(const QString& path)
-{
-    QUrl url;
-    url.setScheme(QLatin1String(kSchemeName));
-    url.setHost(QLatin1String(kModuleHost));
-    url.setPath(path);
-    return url;
-}
-
 BridgeReply refusal(int status, const char* why)
 {
     BridgeReply reply;
@@ -180,10 +171,12 @@ BridgeReply refusal(int status, const char* why)
 
 } // namespace
 
-MobileWebBridge::MobileWebBridge(QString moduleDir, QString runtimeDir, QString entryFile)
+MobileWebBridge::MobileWebBridge(QString moduleDir, QString runtimeDir, QString entryFile,
+                                 WebOrigin origin)
     : m_moduleDir(std::move(moduleDir))
     , m_runtimeDir(std::move(runtimeDir))
     , m_entryFile(std::move(entryFile))
+    , m_origin(std::move(origin))
     , m_token(mintToken())
 {
 }
@@ -198,16 +191,16 @@ QUrl MobileWebBridge::entryUrl() const
     QString file = m_entryFile;
     while (file.startsWith(QLatin1Char('/'))) file.remove(0, 1);
     if (file.isEmpty()) file = QStringLiteral("index.html");
-    return originUrl(QStringLiteral("/") + file);
+    return m_origin.url(QStringLiteral("/") + file);
 }
 
 QString MobileWebBridge::channelShim() const
 {
     QString shim = QString::fromUtf8(kShim);
     shim.replace(QStringLiteral("@RUNTIME_BASE@"),
-                 originUrl(QLatin1String(kRuntimePathPrefix)).toString());
+                 m_origin.url(QLatin1String(kRuntimePathPrefix)).toString());
     shim.replace(QStringLiteral("@CONTROL_BASE@"),
-                 originUrl(QLatin1String(kControlPathPrefix) + m_token).toString());
+                 m_origin.url(QLatin1String(kControlPathPrefix) + m_token).toString());
     shim.replace(QStringLiteral("@CHUNK_CHARS@"), QString::number(kChunkChars));
     return shim;
 }
@@ -245,7 +238,7 @@ void MobileWebBridge::handleRequest(const QByteArray& method, const QUrl& url,
 {
     if (!respond) return;
 
-    if (url.host() != QLatin1String(kModuleHost)) {
+    if (url.host() != m_origin.host || url.scheme() != m_origin.scheme) {
         respond(refusal(404, "not this origin"));
         return;
     }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "web/LogosWebPaths.h"
+
 #include <QByteArray>
 #include <QString>
 #include <QUrl>
@@ -92,8 +94,11 @@ public:
 
     // `entryFile` is the module's entry document relative to `moduleDir` — the
     // package manifest's `main`, which is an .html file for every web variant
-    // the builder emits.
-    MobileWebBridge(QString moduleDir, QString runtimeDir, QString entryFile);
+    // the builder emits. `origin` is what the page is served on and defaults to
+    // `logos://module`; Android needs WebOrigin::android() (see LogosWebPaths.h,
+    // where the measurement is).
+    MobileWebBridge(QString moduleDir, QString runtimeDir, QString entryFile,
+                    WebOrigin origin = {});
     ~MobileWebBridge();
 
     // The URL the webview is asked to load. Never a file: URL.
@@ -185,6 +190,7 @@ private:
     const QString m_moduleDir;
     const QString m_runtimeDir;
     const QString m_entryFile;
+    const WebOrigin m_origin;
     const QString m_token;
     bool m_injectShim = false;
 
