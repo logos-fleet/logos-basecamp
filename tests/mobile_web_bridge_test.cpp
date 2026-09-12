@@ -27,6 +27,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QUrlQuery>
+
+#include <algorithm>
 
 using basecamp::web::BridgeReply;
 using basecamp::web::MobileWebBridge;
@@ -80,6 +83,31 @@ private:
     QString control(const MobileWebBridge& bridge, const char* leaf) const
     {
         return QStringLiteral("/__logos/%1/%2").arg(bridge.launchToken(), QLatin1String(leaf));
+    }
+
+    // What the shipped shim does: percent-encode the frame, split it, and GET
+    // one request per chunk. Neither phone's interceptor is handed a request
+    // body, so this -- not the POST below it -- is the path a device uses.
+    void postChunked(MobileWebBridge& bridge, const QString& frame, int seq,
+                     int chunkChars = MobileWebBridge::kChunkChars)
+    {
+        const QString encoded = QString::fromUtf8(
+            QUrl::toPercentEncoding(frame, QByteArray(), QByteArray("/")));
+        const int size = int(encoded.size());
+        const int count = std::max(1, (size + chunkChars - 1) / chunkChars);
+        for (int i = 0; i < count; ++i) {
+            QUrl url;
+            url.setScheme(QStringLiteral("logos"));
+            url.setHost(QStringLiteral("module"));
+            url.setPath(control(bridge, "send"));
+            QUrlQuery query;
+            query.addQueryItem("s", QString::number(seq));
+            query.addQueryItem("i", QString::number(i));
+            query.addQueryItem("n", QString::number(count));
+            query.addQueryItem("d", encoded.mid(i * chunkChars, chunkChars));
+            url.setQuery(query);
+            bridge.handleRequest("GET", url, {}, [](const BridgeReply&) {});
+        }
     }
 
     MobileWebBridge* make() const
@@ -201,6 +229,73 @@ private slots:
         QCOMPARE(QString::fromStdString(got[0]), QString(R"({"type":"Call"})"));
     }
 
+    void aChunkedFrameIsReassembledAndDeliveredOnce()
+    {
+        // THE PATH A PHONE ACTUALLY TAKES. A frame that needed three requests
+        // must arrive once, whole, and in one piece -- a receiver that saw the
+        // chunks would be handed three malformed transport frames.
+        std::unique_ptr<MobileWebBridge> bridge(make());
+        std::vector<std::string> got;
+        bridge->setReceiver([&got](const std::string& text) { got.push_back(text); });
+
+        const QString frame = QStringLiteral("{\"type\":\"Call\",\"payload\":\"%1\"}")
+                                  .arg(QString(9000, QLatin1Char('x')));
+        postChunked(*bridge, frame, 0);
+        QCOMPARE(got.size(), size_t(1));
+        QCOMPARE(QString::fromStdString(got[0]), frame);
+    }
+
+    void aChunkThatArrivesTwiceDoesNotCompleteTheFrameEarly()
+    {
+        std::unique_ptr<MobileWebBridge> bridge(make());
+        std::vector<std::string> got;
+        bridge->setReceiver([&got](const std::string& text) { got.push_back(text); });
+
+        const auto chunk = [&](int index, int count, const char* data) {
+            QUrl url;
+            url.setScheme("logos");
+            url.setHost("module");
+            url.setPath(control(*bridge, "send"));
+            QUrlQuery query;
+            query.addQueryItem("s", "7");
+            query.addQueryItem("i", QString::number(index));
+            query.addQueryItem("n", QString::number(count));
+            query.addQueryItem("d", QLatin1String(data));
+            url.setQuery(query);
+            bridge->handleRequest("GET", url, {}, [](const BridgeReply&) {});
+        };
+
+        chunk(0, 2, "he");
+        chunk(0, 2, "he");      // the webview retried
+        QVERIFY(got.empty());
+        chunk(1, 2, "llo");
+        QCOMPARE(got.size(), size_t(1));
+        QCOMPARE(QString::fromStdString(got[0]), QString("hello"));
+    }
+
+    void twoFramesInFlightDoNotInterleave()
+    {
+        std::unique_ptr<MobileWebBridge> bridge(make());
+        std::vector<std::string> got;
+        bridge->setReceiver([&got](const std::string& text) { got.push_back(text); });
+        postChunked(*bridge, QStringLiteral("first frame, which is longer"), 1, 4);
+        postChunked(*bridge, QStringLiteral("second"), 2, 4);
+        QCOMPARE(got.size(), size_t(2));
+        QCOMPARE(QString::fromStdString(got[0]), QString("first frame, which is longer"));
+        QCOMPARE(QString::fromStdString(got[1]), QString("second"));
+    }
+
+    void aSendMissingItsChunkFieldsIsRefused()
+    {
+        std::unique_ptr<MobileWebBridge> bridge(make());
+        bool delivered = false;
+        bridge->setReceiver([&delivered](const std::string&) { delivered = true; });
+        auto call = request(*bridge, "GET", control(*bridge, "send"));
+        QVERIFY(call->answered);
+        QCOMPARE(call->reply.status, 400);
+        QVERIFY(!delivered);
+    }
+
     void aFrameWithTheWrongTokenIsRefusedAndNotDelivered()
     {
         std::unique_ptr<MobileWebBridge> bridge(make());
@@ -279,6 +374,34 @@ private slots:
     }
 
     // ── death ──────────────────────────────────────────────────────────────
+
+    void thePagesConsoleReachesTheHost()
+    {
+        // A page that died on line one is indistinguishable from one that has
+        // not come up yet -- unless it says so, and this is the only route it
+        // has on a phone.
+        std::unique_ptr<MobileWebBridge> bridge(make());
+        QStringList lines;
+        bridge->setOnPageLog([&lines](const QString& level, const QString& message) {
+            lines.append(level + ": " + message);
+        });
+
+        QUrl url;
+        url.setScheme("logos");
+        url.setHost("module");
+        url.setPath(control(*bridge, "log"));
+        QUrlQuery query;
+        query.addQueryItem("l", "error");
+        query.addQueryItem("m", QUrl::toPercentEncoding("could not load logos-view-loader.js"));
+        url.setQuery(query);
+        auto call = std::make_shared<Call>();
+        bridge->handleRequest("GET", url, {}, [call](const BridgeReply& r) {
+            call->answered = true;
+            call->reply = r;
+        });
+        QVERIFY(call->answered);
+        QCOMPARE(lines, QStringList{"error: could not load logos-view-loader.js"});
+    }
 
     void thePageClosingItsChannelIsReported()
     {

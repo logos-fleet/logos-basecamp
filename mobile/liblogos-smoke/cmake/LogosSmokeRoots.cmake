@@ -7,7 +7,11 @@
 # <roots> is a ;-list of prefixes, passed by nix.
 function(logos_smoke_add_include_roots target visibility roots)
     foreach(_root IN LISTS roots)
+        # include/implementations/web is where logos-protocol puts
+        # message_channel.h, which liblogos' web_module_view.h includes by bare
+        # name -- so the Web container's seam header does not compile without it.
         foreach(_inc include include/cpp include/core include/implementations/plain
+                     include/implementations/web
                      include/logos_container include/logos_module_loader include/process_stats)
             if(IS_DIRECTORY "${_root}/${_inc}")
                 target_include_directories(${target} ${visibility} "${_root}/${_inc}")

@@ -8,6 +8,15 @@
 cmake_minimum_required(VERSION 3.24)
 project(LiblogosSmokeHost LANGUAGES CXX)
 
+# The Web container's iOS half is Objective-C++ (WKWebView, WKURLSchemeHandler),
+# which is the one thing in this host that cannot be plain C++. Everything ELSE
+# about that container -- what a page may fetch, how its frames cross, how many
+# QML runtimes may live -- is plain C++ in mobile/webview/ and is tested on a
+# desktop with no webview in it (tests/mobile_web_*_test.cpp).
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -25,7 +34,19 @@ set(LOGOS_IOS_LIB_ROOTS "" CACHE STRING "Prefixes holding lib/*.a to link")
 set(LOGOS_IOS_INCLUDE_ROOTS "" CACHE STRING "Prefixes holding include/ to compile against")
 
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+set(WEBVIEW ${CMAKE_CURRENT_SOURCE_DIR}/../../webview)
+set(BASECAMP_APP ${CMAKE_CURRENT_SOURCE_DIR}/../../../app)
 add_library(liblogos_smoke_host STATIC
+    ${BASECAMP_APP}/web/LogosWebPaths.cpp
+    ${BASECAMP_APP}/web/LogosWebPaths.h
+    ${WEBVIEW}/MobileWebBridge.cpp
+    ${WEBVIEW}/MobileWebBridge.h
+    ${WEBVIEW}/MobileWebModuleView.cpp
+    ${WEBVIEW}/MobileWebModuleView.h
+    ${WEBVIEW}/LiveRuntimeBudget.cpp
+    ${WEBVIEW}/LiveRuntimeBudget.h
+    ${WEBVIEW}/MobileWebContainerBackend.cpp
+    ${WEBVIEW}/MobileWebContainerBackend.h
     ${SRC}/SmokeRunner.cpp
     ${SRC}/SmokeRunner.h
     ${SRC}/BundledSetRunner.cpp
@@ -67,7 +88,26 @@ target_compile_definitions(liblogos_smoke_host
     PRIVATE LOGOS_VIEW_MODULE_STEM="${LOGOS_VIEW_MODULE_STEM}")
 target_include_directories(liblogos_smoke_host PUBLIC
     $<BUILD_INTERFACE:${SRC}>
+    # mobile/, so the Web container's headers are reached as `webview/...` and
+    # app/, so its one shared header is reached as `web/LogosWebPaths.h` -- the
+    # same spellings the desktop container and the unit tests use.
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
+    $<BUILD_INTERFACE:${BASECAMP_APP}>
     $<INSTALL_INTERFACE:include/liblogos-smoke-host>)
+
+if(IOS)
+    target_sources(liblogos_smoke_host PRIVATE
+        ${WEBVIEW}/IosWebPage.mm
+        ${WEBVIEW}/IosWebPage.h)
+    # ARC is not the default for a .mm compiled by CMake, and this file is
+    # written for it: the holder that owns the webview, the handler and the
+    # delegate is a C++ struct with strong Objective-C members.
+    set_source_files_properties(${WEBVIEW}/IosWebPage.mm PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(liblogos_smoke_host PUBLIC
+        "-framework WebKit"
+        "-framework UIKit")
+endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(liblogos_smoke_host PUBLIC "${LOGOS_IOS_INCLUDE_ROOTS}")

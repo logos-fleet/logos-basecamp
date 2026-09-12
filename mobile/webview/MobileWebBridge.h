@@ -6,6 +6,7 @@
 
 #include <deque>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -39,13 +40,29 @@ struct BridgeReply {
 // stack. What is left is the custom URL scheme the loader already needs for its
 // documents, so the channel lives on it, under a reserved prefix:
 //
-//   POST logos://module/__logos/<token>/send    one frame, page -> host
-//   GET  logos://module/__logos/<token>/poll    frames, host -> page (long poll)
-//   POST logos://module/__logos/<token>/close   the page has stopped serving
+//   GET  logos://module/__logos/<token>/send?s&i&n&d   one frame, page -> host
+//   GET  logos://module/__logos/<token>/poll           frames, host -> page
+//   GET  logos://module/__logos/<token>/close          the page stopped serving
+//   GET  logos://module/__logos/<token>/log?l&m        one console line
 //
 // Android's `shouldInterceptRequest` is the same seam by nature, so one bridge
 // serves both phones and the platform halves are the twenty lines that turn a
 // WKURLSchemeTask or a WebResourceRequest into a handleRequest() call.
+//
+// THE OUTGOING FRAME IS IN THE URL, AND CHUNKED, which looks wrong until you
+// try the obvious thing. NEITHER phone hands a request body to its interceptor:
+// WKURLSchemeHandler receives a request whose HTTPBody and HTTPBodyStream are
+// both nil for a `fetch` POST, and Android's WebResourceRequest has no body
+// accessor at all -- it exposes the method, the URL and the headers and nothing
+// else. A frame is therefore percent-encoded into a query parameter, and split
+// because a transport frame can carry bytes: `d` is one chunk of the encoded
+// text, `s` is the frame's sequence number, `i` and `n` its index and count.
+// The bridge reassembles and delivers when the last chunk lands.
+//
+// The POST-with-a-body spelling is accepted too, and is not dead code: it is
+// what a container whose interceptor DOES see bodies would use (the desktop's
+// would, if it ever dropped QWebChannel), and it is the shortest way for a test
+// to hand the bridge one frame.
 //
 // NO PORT IS BOUND. The whole exchange is intra-webview; nothing here listens
 // on a socket, which is the fourth acceptance criterion of slice 28 discharged
@@ -103,6 +120,16 @@ public:
     void close();
     bool isOpen() const;
 
+    // EVERY CONSOLE LINE THE PAGE WRITES. A page whose script throws is the
+    // hardest failure to diagnose from outside: the container sees "the page
+    // never published a module" and nothing else, because a page that died on
+    // line one is indistinguishable from one that simply has no module in it.
+    // On the desktop QWebEnginePage hands the console over; here the shim
+    // forwards it down the same scheme, so both containers put it in the app's
+    // log.
+    void setOnPageLog(std::function<void(const QString& level,
+                                         const QString& message)> callback);
+
     // The page said it has stopped serving (its wasm image trapped, its loader
     // gave up). The container's verdict for this is the same as for a page that
     // died, because it is the same fact.
@@ -113,12 +140,25 @@ public:
     // waits on forever, and the page re-arms as soon as one settles.
     void expireWaits();
 
+    // How much percent-encoded frame text one request may carry. Comfortably
+    // inside every webview's URL limit, and large enough that an ordinary Call
+    // is one request.
+    static constexpr int kChunkChars = 4000;
+
     // How long a poll may be parked before expireWaits() should answer it.
     // Shorter than any webview's own request timeout, and long enough that an
     // idle module is not spinning through a fetch a second.
     static constexpr int kPollParkMs = 20000;
 
 private:
+    // One frame's chunks, until the last one lands. Keyed by the page's own
+    // sequence number, so two frames in flight cannot interleave.
+    struct Partial {
+        int count = 0;
+        std::vector<QString> chunks;
+        int have = 0;
+    };
+
     // The reply to a poll, built from `m_outbound` with the lock held.
     BridgeReply drainLocked();
     static BridgeReply closedReply();
@@ -137,6 +177,7 @@ private:
     // previous fetch settled would have two, and dropping either would strand a
     // request the webview is still waiting on.
     std::vector<Respond> m_waiting;
+    std::map<QString, Partial> m_partial;
 
     // Guarded by its own mutex rather than m_mutex: a receiver may detach
     // itself from inside a delivery, and IMessageChannel's contract says
@@ -145,6 +186,7 @@ private:
     Receiver m_receiver;
 
     std::function<void()> m_onPageClosed;
+    std::function<void(const QString&, const QString&)> m_onPageLog;
 };
 
 } // namespace basecamp::web
