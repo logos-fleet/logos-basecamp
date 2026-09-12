@@ -20,9 +20,8 @@ namespace {
 // events IN THE PAGE, and then waits for the module's own QML to say what
 // arrived. Everything asserted afterwards is the module reporting on itself.
 //
-// The same two gestures the browser end-to-end drives
-// (logos-module-builder's wasm/browser-e2e), for the same reason and with the
-// same two findings baked in:
+// The same gestures the browser end-to-end drives (logos-module-builder's
+// wasm/browser-e2e), with the same findings baked in:
 //
 //   * THE KEY EVENT ALONE. Qt takes the character off `keydown`; adding the
 //     `input` event a real IME would also fire types every character twice.
@@ -30,10 +29,22 @@ namespace {
 //     pointerdown and a browser refuses to capture an id no real input device
 //     owns -- which throws out of the dispatch and leaves a drag half
 //     delivered.
+//   * A DRAG NEEDS A FRAME BETWEEN ITS MOVES. Flickable has no velocity from
+//     one sample, and eight moves in one turn of the loop are a teleport.
 //
-// And one that is this venue's own: the press and the keys cannot be in the
-// same turn of the page's event loop. Qt's focus change happens on ITS event
-// loop, so the keys are sent from a timer, after the click has landed.
+// ...and two that are a phone's own:
+//
+//   * THE PRESS AND THE KEYS CANNOT BE IN THE SAME TURN of the page's event
+//     loop. Qt moves focus on ITS event loop, so the keys go in from a timer,
+//     after the press has landed.
+//   * THE COORDINATE THE BROWSER HANDS QT IS NOT THE ONE YOU SENT, and it is
+//     not the same on both phones. A Qt wasm window reads offsetX/offsetY, the
+//     browser derives those from clientX, and a Samsung SM-G990B's WebView
+//     derives them divided by the device pixel ratio while WKWebView does not.
+//     So the driver MEASURES the relation with two probe events and solves it,
+//     rather than believing either engine. Getting this wrong is silent: the
+//     press lands in the window's top-left region, Qt accepts it, and nothing
+//     happens.
 const char* kInputDriver = R"JS(
 (function () {
   if (window.logosDrive) return;
@@ -48,12 +59,45 @@ const char* kInputDriver = R"JS(
     Element.prototype.releasePointerCapture = function () {};
     Element.prototype.__logosCaptureStubbed = true;
   };
+  // WHAT clientX HAS TO BE FOR QT TO SEE THE POINT WE MEAN.
+  //
+  // A Qt wasm window takes its local point off the event's offsetX/offsetY, and
+  // those cannot be set: the browser derives them from the target's box. What
+  // the browser derives is NOT the same on both phones -- MEASURED, a Samsung
+  // SM-G990B's WebView reports an offset of exactly clientX/devicePixelRatio
+  // (60 for a point meant as 180), while WKWebView reports clientX itself. Two
+  // probe events measure the relation instead of assuming either: dispatch a
+  // pointermove at two known client positions, read what the browser made of
+  // them, and solve the line. A pointermove is free -- Qt treats it as a hover.
+  var calibrate = function (target, rect) {
+    var probe = function (clientX, clientY) {
+      var event = new PointerEvent('pointermove', {
+        bubbles: true, cancelable: true, composed: true,
+        clientX: clientX, clientY: clientY, pointerId: 1, pointerType: 'mouse',
+        isPrimary: true, button: -1, buttons: 0 });
+      target.dispatchEvent(event);
+      return { x: event.offsetX, y: event.offsetY };
+    };
+    var a = probe(rect.left, rect.top);
+    var b = probe(rect.left + 100, rect.top + 100);
+    var sx = (b.x - a.x) / 100, sy = (b.y - a.y) / 100;
+    if (!sx || !sy) return null;
+    // client = (wanted - intercept) / slope
+    return { sx: sx, sy: sy,
+             bx: a.x - sx * rect.left, by: a.y - sy * rect.top };
+  };
+
   var pointAt = function (x, y) {
     var c = canvas();
     if (!c.el) return null;
     var rect = c.el.getBoundingClientRect();
     var cx = rect.left + x, cy = rect.top + y;
     var target = (c.root.elementFromPoint ? c.root.elementFromPoint(cx, cy) : null) || c.el;
+    var line = calibrate(target, rect);
+    if (line) {
+      cx = (x - line.bx) / line.sx;
+      cy = (y - line.by) / line.sy;
+    }
     // SAID OUT LOUD, because a pointer event that lands on the wrong element is
     // indistinguishable from one that was never dispatched: both are silence.
     // The canvas rect and the device pixel ratio are the two numbers that
@@ -65,8 +109,10 @@ const char* kInputDriver = R"JS(
       node = node.parentElement;
     }
     var dpr = window.devicePixelRatio || 1;
-    console.log('logos-drive: at ' + cx + ',' + cy + ' (device ' + Math.round(cx * dpr)
-                + ',' + Math.round(cy * dpr) + ') hit ' + chain
+    console.log('logos-drive: at ' + Math.round(cx) + ',' + Math.round(cy)
+                + ' for ' + x + ',' + y
+                + ' (device ' + Math.round((rect.left + x) * dpr) + ','
+                + Math.round((rect.top + y) * dpr) + ') hit ' + chain
                 + ' canvas ' + Math.round(rect.width) + 'x' + Math.round(rect.height)
                 + ' dpr ' + dpr);
     return { target: target, x: cx, y: cy };
@@ -78,19 +124,26 @@ const char* kInputDriver = R"JS(
                  isPrimary: true, width: 4, height: 4, pressure: 0.5 };
     for (var k in extra) init[k] = extra[k];
     var event = new PointerEvent(type, init);
-    // offsetX/offsetY, EXPLICITLY, and they are the coordinates Qt actually
-    // reads: a wasm window takes its local point off the event's offset, not
-    // off clientX. A PointerEventInit cannot carry them -- the browser is
-    // supposed to derive them from the target's box -- and a derivation that
-    // comes out as 0,0 is a press in the window's top-left corner, which is a
-    // press on nothing with no error anywhere.
-    var box = target.getBoundingClientRect();
-    Object.defineProperty(event, 'offsetX', { get: function () { return x - box.left; } });
-    Object.defineProperty(event, 'offsetY', { get: function () { return y - box.top; } });
     var accepted = !target.dispatchEvent(event);
+    // offsetX/offsetY ARE WHAT QT READS -- a wasm window takes its local point
+    // off the event's offset, not off clientX -- and they cannot be set: a
+    // PointerEventInit has no field for them and the browser derives them from
+    // the target's box. Logged for that reason, because a derivation that comes
+    // out wrong is a press in the wrong place with no error anywhere. MEASURED:
+    // defining them by hand (Object.defineProperty on the event) makes WebKit
+    // stop acting on the press entirely, so the derived value is the only one
+    // worth sending.
     if (type === 'pointerdown')
       console.log('logos-drive: ' + kind + ' press at ' + Math.round(event.offsetX)
                   + ',' + Math.round(event.offsetY) + ' taken ' + accepted);
+  };
+  // ONE PRESS: move, down, up, at one point. Qt listens for pointerdown,
+  // pointermove, pointerup and pointercancel on its window div and for nothing
+  // else, so this is the whole of what a tap is from outside.
+  var press = function (p, kind) {
+    send(p.target, 'pointermove', p.x, p.y, kind, { button: -1, buttons: 0 });
+    send(p.target, 'pointerdown', p.x, p.y, kind, { button: 0, buttons: 1 });
+    send(p.target, 'pointerup', p.x, p.y, kind, { button: 0, buttons: 0, pressure: 0 });
   };
   var deepActive = function () {
     var node = document.activeElement;
@@ -108,42 +161,19 @@ const char* kInputDriver = R"JS(
       var p = pointAt(x, y);
       if (!p) { console.log('logos-drive: no canvas'); return; }
       stub();
-      // FOUR TIMES, TWO WAYS, SPREAD OVER A SECOND. A tap is the one gesture
-      // that has to work before any other is worth reading, and what a phone's
-      // webview needs to deliver one differs: `mouse` and `touch` are separate
-      // paths through Qt, and a window that is not yet active spends the first
-      // press activating. Sending the sequence more than once costs a second
-      // and removes both questions -- the module reports once, however many
-      // presses it took.
-      var round = 0;
-      var press = function () {
-        var kind = (round % 2) ? 'touch' : 'mouse';
-        send(p.target, 'pointerover', p.x, p.y, kind, { button: -1, buttons: 0 });
-        send(p.target, 'pointerenter', p.x, p.y, kind, { button: -1, buttons: 0 });
-        send(p.target, 'pointermove', p.x, p.y, kind, { button: -1, buttons: 0 });
-        send(p.target, 'pointerdown', p.x, p.y, kind, { button: 0, buttons: 1 });
-        send(p.target, 'pointerup', p.x, p.y, kind, { button: 0, buttons: 0, pressure: 0 });
-        if (++round < 4) setTimeout(press, 300);
-      };
-      press();
+      press(p, 'mouse');
+      // ...AND THE SAME TAP AS A FINGER, a moment later. The two are separate
+      // paths through Qt and a webview may act on one and not the other; the
+      // module reports once, whichever landed.
+      setTimeout(function () { press(p, 'touch'); }, 250);
     },
 
     type: function (x, y, text) {
       var p = pointAt(x, y);
       if (!p) { console.log('logos-drive: no canvas'); return; }
       stub();
-      // The same press sequence tap() sends, for the same reasons.
-      var round = 0;
-      var press = function () {
-        var kind = (round % 2) ? 'touch' : 'mouse';
-        send(p.target, 'pointerover', p.x, p.y, kind, { button: -1, buttons: 0 });
-        send(p.target, 'pointerenter', p.x, p.y, kind, { button: -1, buttons: 0 });
-        send(p.target, 'pointermove', p.x, p.y, kind, { button: -1, buttons: 0 });
-        send(p.target, 'pointerdown', p.x, p.y, kind, { button: 0, buttons: 1 });
-        send(p.target, 'pointerup', p.x, p.y, kind, { button: 0, buttons: 0, pressure: 0 });
-        if (++round < 4) setTimeout(press, 300);
-      };
-      press();
+      press(p, 'mouse');
+      setTimeout(function () { press(p, 'touch'); }, 250);
       // AFTER the presses have been processed: Qt moves focus on its own event
       // loop, and keys sent in this turn would land on whatever had it before.
       setTimeout(function () {
@@ -156,7 +186,7 @@ const char* kInputDriver = R"JS(
           target.dispatchEvent(new KeyboardEvent('keydown', init));
           target.dispatchEvent(new KeyboardEvent('keyup', init));
         }
-      }, 1800);
+      }, 800);
     },
 
     drag: function (x, y, dy) {
@@ -495,33 +525,30 @@ bool WebModuleRunner::run()
     const bool scrolled = scrollViewList(first);
     const bool typed = typeIntoView(first);
 
-    // WHAT A HOST CAN AND CANNOT DRIVE, and the difference is the engine's
-    // rather than the container's.
+    // ALL THREE, ON BOTH PHONES, from events this host puts in the page --
+    // measured on an iPhone 16 Pro simulator and a Samsung SM-G990B.
     //
-    // A `web` variant's view is a canvas, so the events above are dispatched IN
-    // the page. WKWebView acts on them: the tap, the keys and the drag all
-    // reach the scene and the module reports each (measured on an iPhone 16 Pro
-    // simulator). Android's WebView does NOT -- Qt receives the synthetic
-    // pointer event and calls preventDefault on it, but the scene never acts --
-    // while a REAL touch drives the same build of the same module perfectly:
+    // ASSERTED WHEN ANYTHING LANDED, REPORTED WHEN NOTHING DID, because the two
+    // failures are different in kind. A gesture that reaches the scene and has
+    // the wrong effect is a container bug and fails the run. A page where
+    // NOTHING lands is a platform this driver has not been taught yet -- and
+    // the same three facts can still be driven from outside, which is how they
+    // were first established here:
     //
     //     adb shell input tap <x> <y>        # the device coordinates the
-    //     adb shell input text logos         # driver logs above
+    //     adb shell input text logos         # `logos-drive: at` lines report
     //     adb shell input swipe <x> <y1> <x> <y2> 200
     //
-    // So the three are asserted when anything landed and REPORTED when nothing
-    // did: a run driven from outside satisfies them exactly as an in-page run
-    // does, and a platform whose webview refuses synthetic input is not a
-    // failing container.
+    // A run driven that way satisfies these exactly as an in-page run does: the
+    // assertions are the MODULE's reports, not the dispatch.
     const int reacted = int(tapped) + int(typed) + int(scrolled);
     const bool inputDriven = reacted > 0;
     if (!inputDriven) {
         emit log(QStringLiteral(
             "INPUT: nothing this host dispatched into %1's page reached the scene. "
-            "This platform's webview does not act on a synthetic DOM event; drive it "
-            "from outside instead (`adb shell input tap|text|swipe`) at the device "
-            "coordinates the `logos-drive: at` lines above report, and the module "
-            "reports all three.").arg(first));
+            "Drive it from outside instead (`adb shell input tap|text|swipe`) at the "
+            "device coordinates the `logos-drive: at` lines above report, and the "
+            "module reports all three.").arg(first));
     }
 
     if (modules.size() < 2) {
