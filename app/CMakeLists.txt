@@ -384,6 +384,7 @@ endif()
 
 if(LOGOS_WITH_WEBENGINE)
     list(APPEND PROJECT_SOURCES
+        web/LogosWebPaths.cpp
         web/LogosWebScheme.cpp
         web/WebModulePageView.cpp
         web/WebContainerBackend.cpp

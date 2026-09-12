@@ -1100,6 +1100,12 @@
           unit-tests = import ./nix/unit-tests.nix {
             inherit pkgs src logosPackageHeaders;
             logosViewModuleRuntimeSrc = logos-view-module-runtime;
+            # SOURCE TREES, not the built packages: the mobile Web container
+            # tests take two SEAM headers from them and link neither, so a
+            # source path keeps a check that runs in seconds from depending on
+            # a core and a transport build.
+            logosLiblogosSrc = logos-liblogos.outPath;
+            logosProtocolSrc = logos-protocol.outPath;
           };
 
           # QML component tests (Qt Quick Test)
@@ -1149,6 +1155,14 @@
 
           # Default package
           default = app;
+        } // pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isWindows) {
+          # The phone containers' bridge, driven by a real browser. Qt WebEngine
+          # is a Qt package this build already has, so the browser is an input
+          # rather than something the sandbox must find -- see the file. Absent
+          # on Windows for the reason the whole Web-container path is.
+          mobile-bridge-test = import ./nix/mobile-bridge-test.nix {
+            inherit pkgs src;
+          };
         } // pkgs.lib.optionalAttrs hasWebContainerTest {
           web-container-test = import ./nix/web-container-test.nix {
             inherit pkgs src;
@@ -1266,6 +1280,8 @@
         mock-tests = self.packages.${system}.mock-tests;
         bundled-set = self.packages.${system}.bundled-set-tests;
         ios-runner-lint = self.packages.${system}.ios-runner-lint;
+      } // pkgs.lib.optionalAttrs (self.packages.${system} ? mobile-bridge-test) {
+        mobile-bridge-test = self.packages.${system}.mobile-bridge-test;
       } // pkgs.lib.optionalAttrs (self.packages.${system} ? web-container-test) {
         # The Web container, end to end. Absent only while this repo's lock
         # predates the fixture it loads — see the binding in `packages`.

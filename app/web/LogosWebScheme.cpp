@@ -1,8 +1,6 @@
 #include "web/LogosWebScheme.h"
 
-#include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QUrl>
 #include <QWebEngineUrlRequestJob>
 #include <QWebEngineUrlScheme>
@@ -45,50 +43,6 @@ LogosWebSchemeHandler::LogosWebSchemeHandler(QString moduleDir, QString runtimeD
 {
 }
 
-QByteArray LogosWebSchemeHandler::mimeTypeFor(const QString& path)
-{
-    const QString suffix = QFileInfo(path).suffix().toLower();
-    if (suffix == QLatin1String("html") || suffix == QLatin1String("htm"))
-        return QByteArrayLiteral("text/html");
-    if (suffix == QLatin1String("js") || suffix == QLatin1String("mjs"))
-        return QByteArrayLiteral("text/javascript");
-    if (suffix == QLatin1String("wasm"))
-        return QByteArrayLiteral("application/wasm");
-    if (suffix == QLatin1String("json"))
-        return QByteArrayLiteral("application/json");
-    if (suffix == QLatin1String("css"))
-        return QByteArrayLiteral("text/css");
-    if (suffix == QLatin1String("svg"))
-        return QByteArrayLiteral("image/svg+xml");
-    if (suffix == QLatin1String("png"))
-        return QByteArrayLiteral("image/png");
-    // A module's QML document is FETCHED AS TEXT and compiled by the runtime
-    // (ADR 0004), so it is served as text rather than as an unknown type a
-    // browser would offer to download.
-    if (suffix == QLatin1String("qml"))
-        return QByteArrayLiteral("text/plain");
-    return QByteArrayLiteral("application/octet-stream");
-}
-
-QString LogosWebSchemeHandler::resolveUnder(const QString& root, const QString& relative)
-{
-    if (root.isEmpty()) return {};
-    const QString canonicalRoot = QFileInfo(root).canonicalFilePath();
-    if (canonicalRoot.isEmpty()) return {};
-
-    const QString candidate = QDir(canonicalRoot).filePath(relative);
-    const QString canonical = QFileInfo(candidate).canonicalFilePath();
-    if (canonical.isEmpty()) return {};
-
-    // Canonical on both sides, so `..`, a symlink out of the package and a
-    // percent-encoded separator are all the same question and get the same
-    // answer.
-    if (canonical != canonicalRoot
-        && !canonical.startsWith(canonicalRoot + QDir::separator()))
-        return {};
-    return canonical;
-}
-
 void LogosWebSchemeHandler::requestStarted(QWebEngineUrlRequestJob* job)
 {
     const QUrl url = job->requestUrl();
@@ -97,22 +51,8 @@ void LogosWebSchemeHandler::requestStarted(QWebEngineUrlRequestJob* job)
         return;
     }
 
-    QString path = url.path();
-    if (path.isEmpty() || path == QLatin1String("/"))
-        path = QStringLiteral("/index.html");
-
-    const QLatin1String runtimePrefix(kRuntimePathPrefix);
-    QString root = m_moduleDir;
-    QString relative;
-    if (path.startsWith(runtimePrefix)) {
-        root = m_runtimeDir;
-        relative = path.mid(runtimePrefix.size());
-    } else {
-        relative = path.mid(1);
-    }
-
-    const QString resolved = resolveUnder(root, relative);
-    if (resolved.isEmpty() || !QFileInfo(resolved).isFile()) {
+    const QString resolved = resolveDocument(m_moduleDir, m_runtimeDir, url.path());
+    if (resolved.isEmpty()) {
         job->fail(QWebEngineUrlRequestJob::UrlNotFound);
         return;
     }

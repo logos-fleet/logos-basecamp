@@ -37,6 +37,7 @@ find_library(LOGOS_CORE_LIB
 
 add_executable(web_container_test
     main.cpp
+    ${BASECAMP_APP_DIR}/web/LogosWebPaths.cpp
     ${BASECAMP_APP_DIR}/web/LogosWebScheme.cpp
     ${BASECAMP_APP_DIR}/web/WebModulePageView.cpp
     ${BASECAMP_APP_DIR}/web/WebContainerBackend.cpp
