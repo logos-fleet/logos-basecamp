@@ -89,54 +89,17 @@ endif()
 include(${SMOKE_CMAKE}/LogosBundledSetManifest.cmake)
 logos_bundled_set_manifest(BasecampShell ${LOGOS_BUNDLED_SET_MANIFEST})
 
-# Every .so under the roots travels in the APK; only the ones the host calls
-# directly are on the link line. Identical rule to the probe's, and it has to
-# be: a shared library that is merely dlopened by another one still has to be
-# packaged, which is what the two lists separate.
-set(_extra "")
-foreach(_root IN LISTS LOGOS_LIB_ROOTS)
-    file(GLOB _found "${_root}/lib/*.so" "${_root}/lib/*.so.*")
-    list(APPEND _extra ${_found})
-endforeach()
-list(REMOVE_DUPLICATES _extra)
-set(_link "")
-set(_spdlog "")
-foreach(_so IN LISTS _extra)
-    if(_so MATCHES "liblogos_core\\.so$|liblogos_qt_host\\.so$|liblogos_protocol\\.so$")
-        list(APPEND _link ${_so})
-    endif()
-    # The SAME libspdlog.so liblogos_core links: the host attaches a logcat
-    # sink to the core's channels (BundledSetRunner), and that only reaches
-    # them if there is one registry in the process.
-    if(_so MATCHES "libspdlog\\.so$")
-        set(_spdlog ${_so})
-    endif()
-endforeach()
-if(NOT _link MATCHES "liblogos_core")
-    message(FATAL_ERROR "liblogos_core.so not found under LOGOS_LIB_ROOTS: ${LOGOS_LIB_ROOTS}")
-endif()
-if(NOT _spdlog)
-    message(FATAL_ERROR "libspdlog.so not found under LOGOS_LIB_ROOTS: ${LOGOS_LIB_ROOTS}")
-endif()
-message(STATUS "Logos link: ${_link}")
-message(STATUS "APK extra libs: ${_extra}")
-target_compile_definitions(BasecampShell PRIVATE SPDLOG_COMPILED_LIB)
+# The Logos libraries, and the directory androiddeployqt packages -- both the
+# same as the probe's next door (see cmake/LogosAndroidHost.cmake).
+include(${SMOKE_CMAKE}/LogosAndroidHost.cmake)
+logos_android_link_logos(BasecampShell "${LOGOS_LIB_ROOTS}" LOGOS_APK_LIBS)
 
 target_link_libraries(BasecampShell PRIVATE
-    ${_link} ${_spdlog}
     Basecamp::MainUI Logos::DesignSystem
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::RemoteObjects
     Qt6::Qml Qt6::Quick Qt6::QuickWidgets Qt6::QuickControls2 Qt6::Svg)
 
-# THE ANDROID PACKAGE SOURCE DIR IS ASSEMBLED, not named: androiddeployqt takes
-# exactly one, and this app needs three things in it -- its own manifest, the
-# launcher icon every Android host here shares, and the Web container's Java.
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/platform/
-     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../android/res
-     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../webview/android/src
-     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package)
+logos_android_package_source_dir(BasecampShell)
 
 # ── the Qt QML modules, packaged at DEPLOY time ───────────────────────────
 # androiddeployqt runs qmlimportscanner over these roots to decide which Qt
@@ -178,8 +141,7 @@ set_property(TARGET BasecampShell APPEND PROPERTY QT_PLUGIN_TARGETS
 
 set_target_properties(BasecampShell PROPERTIES
     QT_ANDROID_PACKAGE_NAME "co.logos.basecamp.shell"
-    QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/android-package"
-    QT_ANDROID_EXTRA_LIBS "${_extra}"
+    QT_ANDROID_EXTRA_LIBS "${LOGOS_APK_LIBS}"
     QT_QML_ROOT_PATH "${BASECAMP_QML_SCAN_ROOTS}"
     QT_ANDROID_VERSION_CODE 1
     QT_ANDROID_VERSION_NAME "0.1")

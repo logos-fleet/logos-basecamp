@@ -114,12 +114,6 @@ in
     main-ui-plugin = mainUi;
   };
 
-  # What a host needs to LINK them, in the order a CMAKE_PREFIX_PATH wants.
-  prefixes = [
-    mainUi
-    designSystem
-  ];
-
   # androiddeployqt decides which Qt QML modules to PACKAGE by running
   # qmlimportscanner over the app's QML roots -- the same question
   # qmlimportscanner answers for the iOS link, and the same problem: the

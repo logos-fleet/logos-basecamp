@@ -1372,10 +1372,10 @@
       } // pkgs.lib.optionalAttrs (builtins.elem system logos-nix.lib.androidBuildSystems) {
         # The Android Shell's own two stages, CROSS BUILT. The APK above them
         # needs gradle and a 300 MB download-free sandbox and is built by `ws
-        # build --target android-arm64 --app shell`; these two are what break
-        # when main_ui gains a Qt module the Android set does not carry, or
-        # when the design system's QML stops compiling for another platform --
-        # and until now nothing built them at all.
+        # build logos-basecamp#basecamp-shell-android --target android-arm64`;
+        # these two are what break when main_ui gains a Qt module the Android
+        # set does not carry, or when the design system's QML stops compiling
+        # for another platform -- and until now nothing built them at all.
         #
         # Only on a build platform an Android cross set exists for; the value
         # is not evaluated elsewhere.
