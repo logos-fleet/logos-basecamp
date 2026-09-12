@@ -1,4 +1,4 @@
-{ pkgs, src, logosPackageHeaders, logosViewModuleRuntimeSrc }:
+{ pkgs, src, logosPackageHeaders, logosViewModuleRuntimeSrc, logosLiblogosSrc, logosProtocolSrc }:
 
 pkgs.stdenv.mkDerivation {
   pname = "logos-basecamp-unit-tests";
@@ -23,7 +23,9 @@ pkgs.stdenv.mkDerivation {
     runHook preBuild
     cmake -S tests -B build-unit-tests -GNinja -DCMAKE_BUILD_TYPE=Debug \
       -DLOGOS_PACKAGE_HEADERS="${logosPackageHeaders}/include" \
-      -DLOGOS_VIEW_MODULE_RUNTIME_ROOT="${logosViewModuleRuntimeSrc}"
+      -DLOGOS_VIEW_MODULE_RUNTIME_ROOT="${logosViewModuleRuntimeSrc}" \
+      -DLOGOS_LIBLOGOS_ROOT="${logosLiblogosSrc}" \
+      -DLOGOS_PROTOCOL_ROOT="${logosProtocolSrc}"
     cmake --build build-unit-tests
     runHook postBuild
   '';

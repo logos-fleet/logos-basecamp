@@ -9,10 +9,19 @@ find_package(Qt6 REQUIRED COMPONENTS Core Qml Test Widgets Quick QuickWidgets)
 
 enable_testing()
 
-# Two source roots: the host in ../app, the main_ui shell in ../src. The unit
-# tests cover both; ../app/interfaces holds the contract headers they share.
-set(BASECAMP_SRC   "${CMAKE_CURRENT_SOURCE_DIR}/../app")
-set(BASECAMP_SHELL "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+# Three source roots: the host in ../app, the main_ui shell in ../src, and the
+# phone hosts in ../mobile. The unit tests cover all three; ../app/interfaces
+# holds the contract headers they share.
+#
+# ../mobile is here because the mobile Web container's decisions -- what a page
+# may fetch, what a frame crossing the bridge looks like, how many QML runtimes
+# may be alive -- are plain C++ with no UIKit and no JNI in them, and a phone is
+# the worst possible place to find out one of them is wrong. The platform halves
+# (the WKWebView, the Android WebView) are what is left over once these are
+# tested here, and they are compiled by the iOS and Android stages.
+set(BASECAMP_SRC    "${CMAKE_CURRENT_SOURCE_DIR}/../app")
+set(BASECAMP_SHELL  "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+set(BASECAMP_MOBILE "${CMAKE_CURRENT_SOURCE_DIR}/../mobile")
 
 if(DEFINED LOGOS_PACKAGE_HEADERS)
     set(LOGOS_PACKAGE_HEADERS_INCLUDE "${LOGOS_PACKAGE_HEADERS}")
@@ -35,6 +44,32 @@ if(DEFINED LOGOS_VIEW_MODULE_RUNTIME_ROOT)
     set(LOGOS_INTENT_INCLUDE "${LOGOS_VIEW_MODULE_RUNTIME_ROOT}/include")
 endif()
 
+# The two SEAM headers the mobile Web container codes against: liblogos'
+# WebModuleView (what a container is handed when it needs somewhere to run a
+# page) and logos-protocol's IMessageChannel (what a page IS, to the transport).
+# Headers only -- the mobile container tests stub the two process-globals those
+# declare rather than linking a core, a loader and a transport into a check that
+# drives none of them. Probed in both layouts, like every other root here: a
+# source checkout has src/ and cpp/, a nix install has include/.
+foreach(_candidate
+        "${LOGOS_LIBLOGOS_ROOT}/src/logos_core"
+        "${LOGOS_LIBLOGOS_ROOT}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../logos-liblogos/src/logos_core")
+    if(EXISTS "${_candidate}/web_module_view.h")
+        set(LOGOS_WEB_SEAM_INCLUDE "${_candidate}")
+        break()
+    endif()
+endforeach()
+foreach(_candidate
+        "${LOGOS_PROTOCOL_ROOT}/cpp/implementations/web"
+        "${LOGOS_PROTOCOL_ROOT}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../logos-protocol/cpp/implementations/web")
+    if(EXISTS "${_candidate}/message_channel.h")
+        set(LOGOS_MESSAGE_CHANNEL_INCLUDE "${_candidate}")
+        break()
+    endif()
+endforeach()
+
 # -----------------------------------------------------------------------
 # Auto-discovery: any tests/*_test.cpp file is picked up automatically.
 # -----------------------------------------------------------------------
@@ -51,18 +86,21 @@ foreach(test_src IN LISTS TEST_SOURCES)
         string(STRIP "${CMAKE_MATCH_1}" _deps_line)
         string(REGEX REPLACE "[ \t]+" ";" _dep_list "${_deps_line}")
         # Resolve a bare srcdep path against the host root, then the shell
-        # root. Missing in BOTH is fatal: dropping it silently surfaces much
-        # later as an undefined reference from the test's own object file.
+        # root, then the mobile root. Missing in ALL THREE is fatal: dropping it
+        # silently surfaces much later as an undefined reference from the test's
+        # own object file.
         foreach(dep IN LISTS _dep_list)
             if(dep)
                 if(EXISTS "${BASECAMP_SRC}/${dep}")
                     list(APPEND _extra_srcs "${BASECAMP_SRC}/${dep}")
                 elseif(EXISTS "${BASECAMP_SHELL}/${dep}")
                     list(APPEND _extra_srcs "${BASECAMP_SHELL}/${dep}")
+                elseif(EXISTS "${BASECAMP_MOBILE}/${dep}")
+                    list(APPEND _extra_srcs "${BASECAMP_MOBILE}/${dep}")
                 else()
                     message(FATAL_ERROR
                         "srcdep '${dep}' for ${test_name} not found under "
-                        "${BASECAMP_SRC} or ${BASECAMP_SHELL}")
+                        "${BASECAMP_SRC}, ${BASECAMP_SHELL} or ${BASECAMP_MOBILE}")
                 endif()
             endif()
         endforeach()
@@ -78,8 +116,11 @@ foreach(test_src IN LISTS TEST_SOURCES)
         ${BASECAMP_SRC}
         ${BASECAMP_SRC}/interfaces
         ${BASECAMP_SHELL}
+        ${BASECAMP_MOBILE}
         ${LOGOS_PACKAGE_HEADERS_INCLUDE}
         ${LOGOS_INTENT_INCLUDE}
+        ${LOGOS_WEB_SEAM_INCLUDE}
+        ${LOGOS_MESSAGE_CHANNEL_INCLUDE}
     )
     target_link_libraries(${test_name} PRIVATE
         Qt6::Core

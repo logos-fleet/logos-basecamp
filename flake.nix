@@ -1100,6 +1100,12 @@
           unit-tests = import ./nix/unit-tests.nix {
             inherit pkgs src logosPackageHeaders;
             logosViewModuleRuntimeSrc = logos-view-module-runtime;
+            # SOURCE TREES, not the built packages: the mobile Web container
+            # tests take two SEAM headers from them and link neither, so a
+            # source path keeps a check that runs in seconds from depending on
+            # a core and a transport build.
+            logosLiblogosSrc = logos-liblogos.outPath;
+            logosProtocolSrc = logos-protocol.outPath;
           };
 
           # QML component tests (Qt Quick Test)
