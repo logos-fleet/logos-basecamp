@@ -34,6 +34,50 @@ Item {
     signal loadRequested(string name)
     signal unloadRequested(string name)
 
+    // ─── Compact (handset / tablet) layout ───
+    // Same rule, and the same reason, as ModuleInspectorView: narrower than
+    // what the desktop set asks for (230 + 100 + 130 + 200 + 220, pinned to
+    // that sum by a test) the row's action is pushed off the right edge, where
+    // a touch cannot reach it (logos-workspace#84). Status and version fold
+    // into the app cell and the description is dropped, so the toggle keeps
+    // its place.
+    readonly property int desktopColumnsWidth: 880
+    readonly property bool compact: root.width > 0 && root.width < desktopColumnsWidth
+
+    // The app's icon, or the first two letters of its module name when the
+    // plugin ships none. Both the desktop and the compact app cell open with
+    // one.
+    component AppIconTile: Rectangle {
+        id: tile
+
+        required property var row
+
+        readonly property bool hasIcon: row && String(row.iconPath || "").length > 0
+
+        Layout.preferredWidth: 32
+        Layout.preferredHeight: 32
+        Layout.alignment: Qt.AlignVCenter
+        radius: Theme.spacing.radiusMedium
+        color: Theme.palette.backgroundButton
+
+        Image {
+            anchors.centerIn: parent
+            visible: tile.hasIcon
+            source: tile.hasIcon ? tile.row.iconPath : ""
+            sourceSize.width: 22
+            sourceSize.height: 22
+        }
+
+        LogosText {
+            anchors.centerIn: parent
+            visible: !tile.hasIcon
+            text: tile.row ? tile.row.name.substring(0, 2).toUpperCase() : ""
+            font.pixelSize: Theme.typography.secondaryText
+            font.weight: Theme.typography.weightBold
+            color: Theme.palette.textTertiary
+        }
+    }
+
     ModulesFilterProxy {
         id: tableModel
 
@@ -74,7 +118,7 @@ Item {
             Layout.fillHeight: true
 
             model: tableModel
-            rowHeight: 56
+            rowHeight: root.compact ? 72 : 56
             sortRole: "label"
             sortOrder: Qt.AscendingOrder
             emptyText: tableModel.totalCount === 0
@@ -92,7 +136,31 @@ Item {
             // only finds delegates the ListView has actually created.
             Component.onCompleted: if (view) view.cacheBuffer = 20000
 
-            columns: [
+            columns: root.compact ? compactColumns : desktopColumns
+
+            // ─── Compact: what the app is, and the control ───
+            property list<QtObject> compactColumns: [
+                LogosTableColumn {
+                    title: qsTr("App")
+                    role: "label"
+                    minWidth: 140
+                    preferredWidth: 200
+                    fillWidth: true
+                    sortable: true
+                    cellDelegate: compactAppCellComponent
+                },
+                LogosTableColumn {
+                    title: ""
+                    // The toggle (100) plus this table's cell padding on both
+                    // sides. Below it the button would be clipped.
+                    minWidth: 100 + 2 * appsTable.defaultCellPadding
+                    preferredWidth: minWidth
+                    alignment: Qt.AlignRight | Qt.AlignVCenter
+                    cellDelegate: actionsCellComponent
+                }
+            ]
+
+            property list<QtObject> desktopColumns: [
                 LogosTableColumn {
                     title: qsTr("App")
                     role: "label"
@@ -139,35 +207,7 @@ Item {
                 RowLayout {
                     spacing: Theme.spacing.small
 
-                    // Icon tile — falls back to the first two letters of the
-                    // module name when the plugin ships no icon.
-                    Rectangle {
-                        Layout.preferredWidth: 32
-                        Layout.preferredHeight: 32
-                        Layout.alignment: Qt.AlignVCenter
-                        radius: Theme.spacing.radiusMedium
-                        color: Theme.palette.backgroundButton
-
-                        readonly property bool hasIcon:
-                            rowItem && String(rowItem.iconPath || "").length > 0
-
-                        Image {
-                            anchors.centerIn: parent
-                            visible: parent.hasIcon
-                            source: parent.hasIcon ? rowItem.iconPath : ""
-                            sourceSize.width: 22
-                            sourceSize.height: 22
-                        }
-
-                        LogosText {
-                            anchors.centerIn: parent
-                            visible: !parent.hasIcon
-                            text: rowItem ? rowItem.name.substring(0, 2).toUpperCase() : ""
-                            font.pixelSize: Theme.typography.secondaryText
-                            font.weight: Theme.typography.weightBold
-                            color: Theme.palette.textTertiary
-                        }
-                    }
+                    AppIconTile { row: rowItem }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -192,6 +232,52 @@ Item {
                             font.pixelSize: Theme.typography.secondaryText
                             color: Theme.palette.textTertiary
                             elide: Text.ElideRight
+                        }
+                    }
+                }
+            }
+
+            // The compact row's whole left side: the icon tile, the app, and
+            // its status badge underneath — the three desktop columns that
+            // fold in, in the order they read.
+            Component {
+                id: compactAppCellComponent
+
+                RowLayout {
+                    spacing: Theme.spacing.small
+
+                    AppIconTile { row: rowItem }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+                        spacing: Theme.spacing.tiny
+
+                        LogosText {
+                            Layout.fillWidth: true
+                            text: rowItem ? rowItem.label : ""
+                            font.pixelSize: Theme.typography.primaryText
+                            font.weight: Theme.typography.weightMedium
+                            color: Theme.palette.text
+                            elide: Text.ElideRight
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.small
+
+                            ModuleStatusBadge { row: rowItem }
+
+                            LogosText {
+                                Layout.fillWidth: true
+                                readonly property string value:
+                                    rowItem ? String(rowItem.version || "") : ""
+                                visible: value.length > 0
+                                text: "v" + value
+                                font.pixelSize: Theme.typography.secondaryText
+                                color: Theme.palette.textTertiary
+                                elide: Text.ElideRight
+                            }
                         }
                     }
                 }

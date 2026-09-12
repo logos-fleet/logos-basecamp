@@ -48,22 +48,61 @@ The rows are counted off the **scene**, not off the model: each row's status
 badge carries its module's name, so a filter proxy that dropped a row or a
 table showing a module the manifest does not account for fails there.
 
-## Known: the Shell's tables are desktop-width
+## The Settings page at a phone's width
 
-The Module Inspector's table is about a thousand logical pixels of columns and
-the Load/Unload column is the last of them, so on a handset it is off the right
-edge. The driver measures this and says so:
+The Shell's Settings page used to be the desktop's at any size: a 200-px
+section rail inside 40-px insets, beside a table whose columns want ~700 px
+more. A Qt layout handed less than its minimum does not shrink, it overflows —
+so on a phone, and on a 13-inch iPad in portrait, the pane ran off the right
+edge and took each row's Load/Unload control with it. Qt delivers a press by
+coordinate, so that control was not awkward, it was unreachable
+(logos-workspace#84).
+
+It adapts now, in two steps that are independent of each other:
+
+| below | what changes | where |
+|---|---|---|
+| 900 px of page | the section rail becomes a scrolling strip above the pane, and the insets shrink to a phone's | `SettingsView.qml` |
+| what the desktop columns ask for — the sum of their `preferredWidth`, 830 for modules and 880 for apps | the table keeps the module and its action; status folds into the module cell (with CPU and memory for a module, the version for an app), the description is dropped, and Interface moves to the row | `ModuleInspectorView.qml`, `AppsInspectorView.qml` |
+
+The second threshold is the PREFERRED total and not the minimum one, which a
+physical iPad Air (4th gen) is what settled: its pane is 700 px, the desktop
+columns' minimum total to the pixel, and the row overflowed anyway — a RowLayout
+squeezed between the two does not shrink every column proportionally. A test
+adds the column set up and pins the number to it.
+
+Wider than both, the desktop layout is untouched.
+
+So `tap()` no longer works around an off-screen control — a control the
+viewport does not contain is a layout regression and the run says so:
 
 ```
-drive: 'moduleRow.loadToggle.bare_counter' is at (1000, 327), outside the
-704x763 viewport -- the Shell's desktop table is wider than this screen;
-activating the control instead of pressing it
+WRONG: 'moduleRow.loadToggle.bare_counter' is at (1000, 327), outside the
+704x763 viewport -- no touch can reach it on this screen
 ```
 
-When that happens it activates the row's own control instead of pressing it —
-still the Shell's signal chain, with only UIKit's delivery of the touch to an
-off-screen pixel skipped. Making the Shell's layouts narrow enough for a
-handset is a slice of its own.
+The one thing it does scroll is the section strip, which is a horizontal
+scroller by design and which a finger would swipe (`scrollIntoView`).
+
+Two things about the press itself, both found by running this on the iPad:
+`settledCentre` waits until the control has not moved for a quarter of a
+second of wall clock before aiming — a panel's width lands over several polish
+passes, and a press aimed at where the toggle was two passes ago hit the row's
+left edge (x=190 instead of x=826) and did nothing. And the press and the
+release are a real interval apart: the table rides in a Flickable, which holds
+a press until the gesture declares itself and then replays the pair, and back
+to back in one event-loop turn that replay was a coin flip. The run prints
+where each press went, so a future miss is diagnosable from the log:
+
+```
+[shell] drive: press 'moduleRow.loadToggle.bare_counter' at (826, 272) in 928x1326
+```
+
+`tests/qml/tst_SettingsMobileLayout.qml` (in `nix build .#qml-tests`, seconds,
+no Mac) is the same assertion without a device: it builds the real
+`SettingsView` at 402×874, 928×1326 and 1440×900, checks each row's toggle is
+inside the window, and then presses it — an off-screen control gets no click
+and the signal spy stays at zero.
 
 ## Layout
 

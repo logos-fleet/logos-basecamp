@@ -7,9 +7,9 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QGuiApplication>
-#include <QMetaObject>
 #include <QMouseEvent>
 #include <QRectF>
+#include <QVariant>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QUrl>
@@ -18,6 +18,16 @@
 #include <functional>
 
 namespace {
+
+// A press that has to travel through a Flickable and a layout that is still
+// settling, in the milliseconds each of those takes. All of them were measured
+// on a physical iPad Air (4th gen) -- see settledCentre() and tap().
+constexpr int kPollSliceMs      = 20;   // one turn of the loop while waiting
+constexpr int kStillForMs       = 250;  // geometry unchanged this long = settled
+constexpr int kSettleBudgetMs   = 3000; // give up waiting for it and aim anyway
+constexpr int kPressHoldMs      = 80;   // press to release, as a finger would
+constexpr int kAfterReleaseMs   = 120;  // let the click's handlers run
+constexpr int kAfterScrollMs    = 50;   // let the flickable repaint
 
 void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
 {
@@ -104,7 +114,60 @@ QQuickItem* ShellModulesDriver::waitFor(const QString& objectName, int timeoutMs
             return item;
         if (t.elapsed() >= timeoutMs)
             return nullptr;
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
+    }
+}
+
+QPointF ShellModulesDriver::settledCentre(QQuickItem* item)
+{
+    // Unchanged for kStillForMs of WALL CLOCK, not for N turns of the loop:
+    // processEvents returns the moment the queue is empty, so a "stable for
+    // eight reads" rule can be satisfied in microseconds while the next polish
+    // pass is still pending. Observed on the iPad: a first press at x=190 --
+    // the row's left edge, where the toggle sat before the table's columns took
+    // their widths -- then a second, a second later, at the real x=826.
+    const auto centreOf = [](QQuickItem* i) {
+        return i->mapToScene(QPointF(i->width() / 2.0, i->height() / 2.0));
+    };
+    QElapsedTimer budget;
+    budget.start();
+    QElapsedTimer still;
+    still.start();
+    QPointF previous = centreOf(item);
+    while (budget.elapsed() < kSettleBudgetMs) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
+        const QPointF centre = centreOf(item);
+        if (centre != previous) {
+            previous = centre;
+            still.restart();
+            continue;
+        }
+        if (still.elapsed() >= kStillForMs)
+            return centre;
+    }
+    return previous;
+}
+
+void ShellModulesDriver::scrollIntoView(QQuickItem* item)
+{
+    if (!item) return;
+    // The nearest ancestor that has a contentX is the flickable this item
+    // rides in -- QQuickItem has no such property, Flickable and every view
+    // built on it does. Asking by property rather than by type keeps this off
+    // Qt's private headers.
+    for (QQuickItem* p = item->parentItem(); p; p = p->parentItem()) {
+        const QVariant contentX = p->property("contentX");
+        if (!contentX.isValid()) continue;
+        const qreal left = item->mapToItem(p, QPointF(0, 0)).x();
+        const qreal overflow = left + item->width() - p->width();
+        if (overflow > 0)
+            p->setProperty("contentX", contentX.toReal() + overflow);
+        else if (left < 0)
+            p->setProperty("contentX", contentX.toReal() + left);
+        else
+            return;
+        QCoreApplication::processEvents(QEventLoop::AllEvents, kAfterScrollMs);
+        return;
     }
 }
 
@@ -117,40 +180,33 @@ bool ShellModulesDriver::tap(QQuickItem* item)
         return false;
     }
     // Scene coordinates ARE widget coordinates for a QQuickWidget, so the
-    // centre of the item in the scene is where the press goes.
-    const QPointF centre = item->mapToScene(
-        QPointF(item->width() / 2.0, item->height() / 2.0));
+    // centre of the item in the scene is where the press goes -- once the
+    // layout has stopped moving it there.
+    const QPointF centre = settledCentre(item);
 
     // ...but only if the scene actually shows that point. Qt delivers a press
     // by COORDINATE, so a point outside the viewport is not "a press on a
     // scrolled-away button", it is a press on whatever is at that coordinate
     // -- which is silence, and looks exactly like a button that does nothing.
     //
-    // This is not hypothetical on a phone: the Module Inspector's table is the
-    // desktop's, about a thousand logical pixels of columns, and the action
-    // column is the last of them. Making the Shell's tables narrow enough for
-    // a handset is a slice of its own; until then, say which of the two
-    // happened.
+    // Reported, not worked around: the Settings views collapse to the row and
+    // its action on a narrow screen (logos-workspace#84), so a control that
+    // the viewport does not contain is a layout regression, and a driver that
+    // activated it by hand instead would keep this verdict green while nobody
+    // could load a module at all. That is what it used to do.
     if (!QRectF(QPointF(0, 0), QSizeF(surface->size())).contains(centre)) {
-        emit log(QStringLiteral("drive: '%1' is at (%2, %3), outside the %4x%5 viewport "
-                                "-- the Shell's desktop table is wider than this screen; "
-                                "activating the control instead of pressing it")
+        emit log(QStringLiteral("WRONG: '%1' is at (%2, %3), outside the %4x%5 viewport "
+                                "-- no touch can reach it on this screen")
                      .arg(item->objectName())
                      .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
                      .arg(surface->width()).arg(surface->height()));
-        // Still the Shell's own control and the Shell's own signal chain --
-        // LogosButton.onClicked -> loadToggleRequested -> ModuleInspectorView
-        // -> SettingsView -> ContentViews -> the backend. The only thing
-        // skipped is UIKit's delivery of the touch to a pixel that is not on
-        // this screen.
-        if (!QMetaObject::invokeMethod(item, "clicked")) {
-            emit log(QStringLiteral("drive: '%1' has no clicked() to activate")
-                         .arg(item->objectName()));
-            return false;
-        }
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        return true;
+        return false;
     }
+
+    emit log(QStringLiteral("drive: press '%1' at (%2, %3) in %4x%5")
+                 .arg(item->objectName())
+                 .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
+                 .arg(surface->width()).arg(surface->height()));
 
     const QPointF global = surface->mapToGlobal(centre);
     QMouseEvent press(QEvent::MouseButtonPress, centre, global,
@@ -158,8 +214,15 @@ bool ShellModulesDriver::tap(QQuickItem* item)
     QMouseEvent release(QEvent::MouseButtonRelease, centre, global,
                         Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
     QGuiApplication::sendEvent(surface, &press);
+    // A gap between the two, and an event loop turn to spend it in. The table
+    // rides in a Flickable, and a Flickable does not hand a press straight to
+    // the child under it -- it holds it until the gesture has declared itself,
+    // then replays press and release together. Sent back to back in one turn
+    // that replay is a coin flip: the row's control got the pair on some runs
+    // and nothing at all on others. A finger takes about this long.
+    QCoreApplication::processEvents(QEventLoop::AllEvents, kPressHoldMs);
     QGuiApplication::sendEvent(surface, &release);
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, kAfterReleaseMs);
     return true;
 }
 
@@ -179,6 +242,8 @@ void ShellModulesDriver::run()
         dumpNames(QStringLiteral("no Module Inspector section in the Settings view"));
         return;
     }
+    // The strip a phone draws the sections in scrolls; swipe it first.
+    scrollIntoView(section);
     if (!tap(section)) return;
 
     QQuickItem* view = waitFor(QStringLiteral("moduleInspectorView"), 5000);

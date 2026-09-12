@@ -45,6 +45,37 @@ Item {
     // any of them from the inspector would take the app's own plumbing down.
     readonly property var protectedModules: ["package_manager", "package_downloader", "capability_module"]
 
+    // ─── Compact (handset / tablet) layout ───
+    // `desktopColumnsWidth` is what the desktop set asks for: the sum of its
+    // columns' preferredWidth (240 + 130 + 90 + 110 + 260), pinned to that sum
+    // by a test. Narrower than that the row's action — the LAST column — is
+    // pushed off the right edge, and Qt delivers a press by coordinate, so it
+    // is then not merely awkward but unreachable: on a phone, and on a 13-inch
+    // iPad in portrait, nothing can be loaded or unloaded by hand
+    // (logos-workspace#84).
+    //
+    // The PREFERRED total, not the minimum one: a RowLayout squeezed between
+    // the two does not shrink every column proportionally, so the row already
+    // overflows well before the minimums bite. Measured on a physical iPad Air
+    // (4th gen), whose 700-px pane is the minimum total to the pixel and still
+    // put the toggle at x=710 in a 724-wide viewport.
+    //
+    // Below it the row keeps only what it cannot do without: which module it
+    // is, and the control. Status, CPU and memory fold into the module cell,
+    // and the Interface drill-down moves to the row itself.
+    readonly property int desktopColumnsWidth: 830
+    readonly property bool compact: root.width > 0 && root.width < desktopColumnsWidth
+
+    // Automation-only: a per-row handle on the status badge, so a test (and the
+    // Shell's iOS driver, which counts the rows on screen by it) can address
+    // one row — the badge wording ("Loaded"/"Not loaded") repeats across rows
+    // and tables, so text matching is ambiguous. The compact layout folds the
+    // badge into the module cell and keeps the handle: a row is a row
+    // whichever layout drew it.
+    function statusObjectName(name) {
+        return "moduleInspector.status." + (name || "")
+    }
+
     // Open a specific module's Interface screen (methods + events) by name.
     // Equivalent to clicking that module's "Interface" button — exposed for UI
     // automation/tests, which can't disambiguate the per-row buttons by their
@@ -101,7 +132,9 @@ Item {
                 Layout.bottomMargin: Theme.spacing.large
 
                 model: tableModel
-                rowHeight: 56
+                // Two lines of module cell when the stats columns are folded
+                // into it.
+                rowHeight: root.compact ? 72 : 56
                 sortRole: "label"
                 sortOrder: Qt.AscendingOrder
                 emptyText: tableModel.totalCount === 0
@@ -114,10 +147,41 @@ Item {
                     tableModel.applySortOrder(order)
                 }
 
+                // Compact rows carry no Interface button, so the row itself is
+                // the way in — same destination, one tap.
+                onRowClicked: function(index, row) {
+                    if (root.compact && row && row.isLoaded) root.openInterface(row.name)
+                }
+
                 // Keep every row instantiated — see AppsInspectorView for why.
                 Component.onCompleted: if (view) view.cacheBuffer = 20000
 
-                columns: [
+                columns: root.compact ? compactColumns : desktopColumns
+
+                // ─── Compact: what the module is, and the control ───
+                property list<QtObject> compactColumns: [
+                    LogosTableColumn {
+                        title: qsTr("Module")
+                        role: "label"
+                        minWidth: 140
+                        preferredWidth: 200
+                        fillWidth: true
+                        sortable: true
+                        cellDelegate: compactModuleCellComponent
+                    },
+                    LogosTableColumn {
+                        title: ""
+                        // The toggle (100) plus this table's cell padding on
+                        // both sides. Below it the button would be clipped,
+                        // which is the whole bug.
+                        minWidth: 100 + 2 * modulesTable.defaultCellPadding
+                        preferredWidth: minWidth
+                        alignment: Qt.AlignRight | Qt.AlignVCenter
+                        cellDelegate: actionsCellComponent
+                    }
+                ]
+
+                property list<QtObject> desktopColumns: [
                     LogosTableColumn {
                         title: qsTr("Module")
                         role: "label"
@@ -189,17 +253,56 @@ Item {
                     }
                 }
 
+                // The compact row's whole left side: the module, then the
+                // status badge with the stats beside it — the three desktop
+                // columns that fold in, in the order they read.
+                Component {
+                    id: compactModuleCellComponent
+
+                    ColumnLayout {
+                        spacing: Theme.spacing.tiny
+
+                        LogosText {
+                            Layout.fillWidth: true
+                            text: rowItem ? rowItem.label : ""
+                            font.pixelSize: Theme.typography.primaryText
+                            font.weight: Theme.typography.weightMedium
+                            color: Theme.palette.text
+                            elide: Text.ElideRight
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.small
+
+                            ModuleStatusBadge {
+                                objectName: root.statusObjectName(
+                                                rowItem ? rowItem.name : "")
+                                row: rowItem
+                            }
+
+                            LogosText {
+                                Layout.fillWidth: true
+                                visible: rowItem && rowItem.isLoaded
+                                text: rowItem
+                                      ? Number(rowItem.cpu).toFixed(1) + "%  ·  "
+                                        + Number(rowItem.memory).toFixed(1) + " MB"
+                                      : ""
+                                font.pixelSize: Theme.typography.secondaryText
+                                color: Theme.palette.textTertiary
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+                }
+
                 Component {
                     id: statusCellComponent
 
                     Item {
                         ModuleStatusBadge {
-                            // Automation-only: per-module handle so UI tests
-                            // can assert one row's load state — the badge
-                            // wording ("Loaded"/"Not loaded") also appears in
-                            // other tables, so text matching is ambiguous.
-                            objectName: "moduleInspector.status."
-                                        + (rowItem && rowItem.name ? rowItem.name : "")
+                            objectName: root.statusObjectName(
+                                            rowItem ? rowItem.name : "")
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             row: rowItem
@@ -248,7 +351,10 @@ Item {
                             row: rowItem
                             busy: root.loading
                             locked: !!rowItem && root.protectedModules.indexOf(rowItem.name) !== -1
-                            interfaceEnabled: true
+                            // Compact rows have room for one control, and the
+                            // toggle is the one that cannot be reached another
+                            // way; Interface moves to the row (onRowClicked).
+                            interfaceEnabled: !root.compact
 
                             onLoadToggleRequested: {
                                 if (rowItem.isLoaded) root.unloadRequested(rowItem.name)

@@ -30,6 +30,7 @@ add_executable(qml_tests
     ${BASECAMP_SRC}/AppsModel.cpp
     ${BASECAMP_SRC}/InstallRegistry.cpp   # AppsModel depends on InstallRegistry
     ${BASECAMP_SHELL}/AppsFilterProxy.cpp
+    ${BASECAMP_SHELL}/ModulesFilterProxy.cpp
     ${BASECAMP_SHELL}/InstallEnums.cpp
     # AUTOMOC pairs a header with a .cpp of the same basename in the SAME
     # directory; InstallEnums.cpp is in src/ and its header in app/interfaces/,
@@ -43,6 +44,35 @@ target_include_directories(qml_tests PRIVATE
     ${BASECAMP_SHELL}
     ${LOGOS_PACKAGE_HEADERS_INCLUDE}
 )
+# ── The shell's own QML modules, as a filesystem import path ────────────────
+# Basecamp.Settings and Basecamp.Common are qt_add_qml_module targets compiled
+# into main_ui, so a test can neither `import` them nor reach them by relative
+# path: a Settings view's own `import Basecamp.Common` has to resolve too.
+# Mirroring each module's .qml into the build tree beside a generated qmldir
+# gives the engine exactly that import path, and the views are then instantiated
+# the way the shell instantiates them, imports and all.
+#
+# configure_file (not file(COPY)): it records a dependency on the source, so
+# editing a shell .qml re-runs cmake instead of leaving a stale copy behind.
+set(BASECAMP_QML_IMPORT_PATH "${CMAKE_CURRENT_BINARY_DIR}/qml-imports")
+
+function(basecamp_mirror_qml_module uri source_dir)
+    string(REPLACE "." "/" rel "${uri}")
+    set(out "${BASECAMP_QML_IMPORT_PATH}/${rel}")
+    file(GLOB sources "${source_dir}/*.qml")
+    set(qmldir "module ${uri}\n")
+    foreach(qml ${sources})
+        get_filename_component(base "${qml}" NAME_WE)
+        get_filename_component(file "${qml}" NAME)
+        configure_file("${qml}" "${out}/${file}" COPYONLY)
+        string(APPEND qmldir "${base} 1.0 ${file}\n")
+    endforeach()
+    file(WRITE "${out}/qmldir" "${qmldir}")
+endfunction()
+
+basecamp_mirror_qml_module(Basecamp.Common   "${BASECAMP_SHELL}/Basecamp/Common")
+basecamp_mirror_qml_module(Basecamp.Settings "${BASECAMP_SHELL}/Basecamp/Settings")
+
 if(LogosDesignSystem_FOUND)
     target_link_libraries(qml_tests PRIVATE Logos::DesignSystem)
     target_compile_definitions(qml_tests PRIVATE HAVE_LOGOS_DESIGN_SYSTEM=1)
@@ -61,6 +91,7 @@ target_link_libraries(qml_tests PRIVATE
 )
 target_compile_definitions(qml_tests PRIVATE
     QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    BASECAMP_QML_IMPORT_PATH="${BASECAMP_QML_IMPORT_PATH}"
 )
 
 add_test(NAME qml_tests COMMAND qml_tests)
