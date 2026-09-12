@@ -170,8 +170,23 @@ set_target_properties(liblogos_smoke_host PROPERTIES EXPORT_NAME LiblogosSmokeHo
 install(TARGETS liblogos_smoke_host EXPORT LiblogosSmokeHostTargets ARCHIVE DESTINATION lib)
 install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledSetRunner.h ${SRC}/NetworkSmokeRunner.h
         ${SRC}/BundledSetCoreRuntime.h ${SRC}/ViewModuleRunner.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../app/interfaces/ICoreRuntime.h
+        ${BASECAMP_APP}/interfaces/ICoreRuntime.h
         DESTINATION include/liblogos-smoke-host)
+# The Web container's headers keep their DIRECTORY, so `webview/...` and
+# `web/...` mean the same thing to the app above this stage as they do to the
+# desktop container and the unit tests. A flat install would make the iOS app
+# spell two includes differently from everything else that compiles them.
+install(FILES
+        ${WEBVIEW}/MobileWebBridge.h
+        ${WEBVIEW}/MobileWebModuleView.h
+        ${WEBVIEW}/MobileWebContainerBackend.h
+        ${WEBVIEW}/LiveRuntimeBudget.h
+        DESTINATION include/liblogos-smoke-host/webview)
+install(FILES ${BASECAMP_APP}/web/LogosWebPaths.h
+        DESTINATION include/liblogos-smoke-host/web)
+if(IOS)
+    install(FILES ${WEBVIEW}/IosWebPage.h DESTINATION include/liblogos-smoke-host/webview)
+endif()
 install(EXPORT LiblogosSmokeHostTargets
     FILE LiblogosSmokeHostTargets.cmake NAMESPACE Logos::
     DESTINATION lib/cmake/LiblogosSmokeHost)

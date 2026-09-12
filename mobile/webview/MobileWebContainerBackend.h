@@ -70,12 +70,17 @@ public:
     //   platform    how this platform makes a webview (iOS: WKWebView; Android:
     //               android.webkit.WebView).
     //   budget      how many QML runtimes may be alive at once.
+    //   shimInDocument
+    //               serve the channel shim inside the entry document instead of
+    //               injecting it. Android's answer; see
+    //               MobileWebBridge::setInjectsShimIntoHtml.
     //
     // MUST BE CALLED ON THE QT MAIN THREAD, which it then remembers: a webview
     // may only be built on the platform's UI thread, while the core may load a
     // module from its own owner thread.
     void install(const QString& runtimeDir, PlatformPageFactory platform,
-                 const LiveRuntimeBudget& budget = LiveRuntimeBudget());
+                 const LiveRuntimeBudget& budget = LiveRuntimeBudget(),
+                 bool shimInDocument = false);
 
     // The platform handle a loaded web module's page draws into, or nullptr.
     void* nativeHandleFor(const QString& moduleName) const;
@@ -112,6 +117,7 @@ private:
     // Called by the factory, always on the Qt main thread.
     MobileWebModuleView* createView(const LogosCore::WebModuleViewRequest& request,
                                     const QString& runtimeDir);
+    bool m_shimInDocument = false;
     void forget(const QString& moduleName);
     void armPollTimer();
 

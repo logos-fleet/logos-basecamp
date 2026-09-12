@@ -20,6 +20,12 @@
 #endif
 
 #include "BundledSetCoreRuntime.h"
+#include "webview/MobileWebContainerBackend.h"
+#if defined(Q_OS_IOS)
+#include "webview/IosWebPage.h"
+#elif defined(Q_OS_ANDROID)
+#include "webview/AndroidWebPage.h"
+#endif
 #include "BundledSetRunner.h"
 #include "NetworkSmokeRunner.h"
 #include "SmokeRunner.h"
@@ -152,6 +158,37 @@ int main(int argc, char* argv[])
     // Basecamp does on the desktop. What is different on a phone is where the
     // installed set comes from: a manifest compiled in at build time rather
     // than a directory scanned at runtime.
+    // THE WEB CONTAINER'S BACKEND, BEFORE THE CORE. liblogos registers the Web
+    // container in every process and leaves the webview unset, so a `web`
+    // module loaded before this ran would report the missing bridge rather than
+    // opening a page. Installing it here -- not at the first load -- is also
+    // what pins the Qt main thread as the one a webview is built on.
+    //
+    // The budget is the phone's: ONE live QML runtime, which the spike measured
+    // at 185-240 MB. A tablet could afford more and this is where that decision
+    // would be made.
+    {
+        using basecamp::web::MobileWebContainerBackend;
+        auto* web = MobileWebContainerBackend::instance();
+#if defined(Q_OS_IOS)
+        web->install(basecamp::web::iosQmlRuntimeDir(),
+                     basecamp::web::iosPlatformPageFactory());
+#elif defined(Q_OS_ANDROID)
+        // ...and on Android the shim travels INSIDE the entry document: there
+        // is no user-script API, and evaluateJavascript runs after the page's
+        // own first script.
+        web->install(basecamp::web::androidQmlRuntimeDir(),
+                     basecamp::web::androidPlatformPageFactory(),
+                     basecamp::web::LiveRuntimeBudget(), /*shimInDocument=*/true);
+#endif
+        QObject::connect(web, &MobileWebContainerBackend::uiEvictionRequired,
+                         &app, [](const QString& name) {
+                             say(QStringLiteral("web container: %1 is over the "
+                                                "live-runtime budget and must give "
+                                                "up its UI page").arg(name));
+                         });
+    }
+
     BundledSetCoreRuntime core(runner.prepare(argc, argv));
     QObject::connect(&core, &BundledSetCoreRuntime::log, &say);
     core.start();

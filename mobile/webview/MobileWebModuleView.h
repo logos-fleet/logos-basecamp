@@ -72,7 +72,8 @@ class MobileWebModuleView : public LogosCore::WebModuleView {
 public:
     MobileWebModuleView(const LogosCore::WebModuleViewRequest& request,
                         const QString& runtimeDir,
-                        const PlatformPageFactory& platform);
+                        const PlatformPageFactory& platform,
+                        bool shimInDocument = false);
     ~MobileWebModuleView() override;
 
     logos::web::MessageChannelPtr channel() const override;

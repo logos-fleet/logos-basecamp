@@ -48,7 +48,8 @@ private:
 
 MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& request,
                                          const QString& runtimeDir,
-                                         const PlatformPageFactory& platform)
+                                         const PlatformPageFactory& platform,
+                                         bool shimInDocument)
     : m_moduleName(QString::fromStdString(request.moduleName))
 {
     const QString moduleDir = QString::fromStdString(request.moduleDir);
@@ -66,6 +67,7 @@ MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& 
     }
 
     m_bridge = std::make_shared<MobileWebBridge>(moduleDir, runtimeDir, entryFile);
+    m_bridge->setInjectsShimIntoHtml(shimInDocument);
     m_channel = std::make_shared<BridgeChannel>(m_bridge);
 
     // A page closing its channel is a module reporting that it has stopped
@@ -80,7 +82,10 @@ MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& 
     PlatformPageRequest pageRequest;
     pageRequest.moduleName = m_moduleName;
     pageRequest.entryUrl = m_bridge->entryUrl();
-    pageRequest.channelShim = m_bridge->channelShim();
+    // EMPTY when the document carries it: a platform that injects AND a
+    // container that serves it inside the HTML would run the shim twice, and
+    // the second one would take over the channel the first had already opened.
+    pageRequest.channelShim = shimInDocument ? QString() : m_bridge->channelShim();
     auto bridge = m_bridge;
     pageRequest.serve = [bridge](const QByteArray& method, const QUrl& url,
                                  const QByteArray& body, MobileWebBridge::Respond respond) {
