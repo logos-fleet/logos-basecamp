@@ -32,6 +32,16 @@
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
+    <!-- The same key the bring-up probe carries, and for the same reason: a
+         libp2p node dials peers on the LAN, and since iOS 14 an app that does
+         so without this key is DENIED OUTRIGHT rather than asked -- no prompt,
+         no diagnostic, just a connection that fails. Measured on an iPad Air:
+         the Shell reported "Unable to establish outgoing link" on every dial
+         while the smoke probe, one Info.plist key richer, dialled the same
+         desktop peer from the same device. The simulator does not enforce it,
+         so a simulator run cannot find this. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Basecamp dials Logos peers on this network so that modules in its Bundled set can reach them.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Logos. All rights reserved.</string>
 </dict>

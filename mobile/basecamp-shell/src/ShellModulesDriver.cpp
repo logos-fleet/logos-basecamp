@@ -286,6 +286,58 @@ void ShellModulesDriver::run()
     }
     emit log(QStringLiteral("SHELL MODULES TAB LISTS THE BUNDLED SET"));
 
+    // ── 2b. every row came in with the app image ──
+    // A Store shell may not gain a native module at runtime (ADR 0003), so
+    // "the app contains no Downloaded module" is not a thing to hope for --
+    // it is a thing the tab must be able to SAY. `installType` is the column
+    // Basecamp answers that with everywhere else, and "embedded" is its
+    // answer for something the build put there. Anything else in this table
+    // would be a module that arrived some other way.
+    QStringList notEmbedded;
+    for (const QString& name : rows) {
+        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
+        QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
+        const QString installType = row ? row->property("installType").toString()
+                                        : QStringLiteral("<no row>");
+        if (installType != QLatin1String("embedded"))
+            notEmbedded << QStringLiteral("%1 (%2)").arg(name, installType);
+    }
+    if (!notEmbedded.isEmpty()) {
+        emit log(QStringLiteral("WRONG: not every row is embedded: %1")
+                     .arg(notEmbedded.join(QStringLiteral(", "))));
+        return;
+    }
+    emit log(QStringLiteral("all %1 rows are installType 'embedded' -- no Downloaded module")
+                 .arg(rows.size()));
+
+    // ── 2c. and the tab shows their stats ──
+    // Off the rendered CELLS, for the same reason the row list is counted off
+    // the scene: the model carries cpu and memory whether or not the table
+    // ever drew them, and an unloaded row deliberately renders an em dash. So
+    // a loaded row must show a figure, and it is the figure on screen that
+    // has to be one.
+    QStringList stats;
+    bool sawFigure = false;
+    for (const QString& name : rows) {
+        QQuickItem* cpu = find(QStringLiteral("moduleInspector.cpu.%1").arg(name));
+        QQuickItem* memory = find(QStringLiteral("moduleInspector.memory.%1").arg(name));
+        if (!cpu || !memory) {
+            emit log(QStringLiteral("WRONG: %1 has no stats cells in the table").arg(name));
+            return;
+        }
+        const QString cpuText = cpu->property("text").toString();
+        const QString memoryText = memory->property("text").toString();
+        stats << QStringLiteral("%1 %2/%3").arg(name, cpuText, memoryText);
+        if (memoryText.endsWith(QLatin1String(" MB")))
+            sawFigure = true;
+    }
+    emit log(QStringLiteral("modules tab stats: %1").arg(stats.join(QStringLiteral(", "))));
+    if (!sawFigure) {
+        emit log(QStringLiteral("WRONG: no row in the Modules tab shows a memory figure"));
+        return;
+    }
+    emit log(QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS"));
+
     // ── 3. one row's own Load/Unload button, twice ──
     // The first row that the core is actually in charge of: a view module's
     // toggle is a no-op by design (ADR 0006) and driving it would prove

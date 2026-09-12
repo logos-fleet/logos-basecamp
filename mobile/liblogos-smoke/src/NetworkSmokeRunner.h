@@ -42,7 +42,19 @@ public:
 signals:
     void log(const QString& line);
 
+    // The chat core is up: initialised, its delivery node online, and the
+    // first conversation openable. A host times its own "cold start to Chat
+    // usable" off this -- the clock's origin is main()'s, which is the
+    // caller's to know, so what is emitted is the fact and not a number.
+    void chatUsable();
+
 private:
+    // Whether the app SHIPS `name`, which is a different question from
+    // whether it is running.
+    bool inSet(const QString& name) const;
+    // `name` is in the set and the core has it loaded, loading it if it did
+    // not. False when the set does not carry it, or it would not load.
+    bool ensureLoaded(const QString& name);
     // One libp2p node, created and started in the module inside this process.
     bool runLibp2p();
     // The dial + gossipsub exchange against the desktop peer. Only reached when
@@ -50,9 +62,26 @@ private:
     bool exchangeWithPeer(LogosAPIClient* client);
     // chat_module over the delivery_module beneath it.
     bool runChat();
+    // The criterion this host exists to answer: a GROUP conversation with the
+    // desktop installation in it, one message out of this device and one
+    // message in from that peer. Only reached when a --chat-peer was supplied.
+    bool exchangeInGroup(LogosAPIClient* client);
+    // Block until `convo`'s roster holds two committed members and no pending
+    // invite, or the bound expires.
+    bool awaitGroupCommit(LogosAPIClient* client, const QString& convo, int timeoutMs);
+    // Block until a message this installation did NOT send appears in `convo`.
+    // Answers its content, or an empty string when the bound expires.
+    QString awaitInboundMessage(LogosAPIClient* client, const QString& convo,
+                                int timeoutMs);
     // Block until the chat core reports its delivery node online, or the bound
     // expires. Answers the state it last saw.
     QString awaitDeliveryOnline(LogosAPIClient* client, int timeoutMs);
+
+    // Turn the host's event loop for `ms` without returning to it. A nested
+    // loop rather than processEvents(): the IPC replies these polls are
+    // waiting for arrive on the host's loop, and processEvents returns the
+    // instant the queue is empty -- which turns an interval into a busy poll.
+    void idle(int ms);
 
     // A `result`-returning universal method: unwrap the LogosResult the Native
     // container re-materialises from the module's JSON, log its error if it

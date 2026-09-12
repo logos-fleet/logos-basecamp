@@ -317,6 +317,12 @@ Item {
                     id: cpuCellComponent
 
                     LogosText {
+                        // Automation-only, like the status badge above: the
+                        // rendered figure is what "the tab shows its stats"
+                        // means, and a test that read the model instead would
+                        // pass on a table whose stats columns never drew.
+                        objectName: "moduleInspector.cpu."
+                                    + (rowItem && rowItem.name ? rowItem.name : "")
                         text: (rowItem && rowItem.isLoaded)
                               ? Number(rowItem.cpu).toFixed(1) + "%" : "—"
                         color: (rowItem && rowItem.isLoaded) ? Theme.palette.text
@@ -331,6 +337,8 @@ Item {
                     id: memoryCellComponent
 
                     LogosText {
+                        objectName: "moduleInspector.memory."
+                                    + (rowItem && rowItem.name ? rowItem.name : "")
                         text: (rowItem && rowItem.isLoaded)
                               ? Number(rowItem.memory).toFixed(1) + " MB" : "—"
                         color: (rowItem && rowItem.isLoaded) ? Theme.palette.text

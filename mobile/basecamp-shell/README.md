@@ -6,6 +6,12 @@ lists the set, and its Load/Unload buttons go through the Native container.
 
 ```bash
 ws run logos-basecamp --target ios-sim-arm64 --bundle view_counter --app shell
+
+# ...and with chat in it, against a desktop peer (see the section below)
+LOGOS_IOS_TEAM_ID=<team> LOGOS_IOS_DEVICE=<udid> \
+  ws run logos-basecamp --target ios-arm64 --app shell \
+  --bundle capability_module,chat_module,delivery_module,libp2p_module \
+  -- --chat-peer <the desktop installation's get_address>
 ```
 
 ## What is and is not different from the desktop
@@ -33,10 +39,14 @@ run reads the verdicts off the console:
 
 ```
 [shell] shell: IShellHost ABI 3 (host 3)
+[shell] COLD START: Shell shown at 812 ms
 [shell] shell: Settings -> Module Inspector is on screen
 [shell] modules tab rows: bare_counter, capability_module, view_counter
 [shell] bundled set:      bare_counter, capability_module, view_counter
 [shell] SHELL MODULES TAB LISTS THE BUNDLED SET
+[shell] all 3 rows are installType 'embedded' -- no Downloaded module
+[shell] modules tab stats: bare_counter 0.0%/1.4 MB, capability_module 0.0%/0.9 MB, ...
+[shell] SHELL MODULES TAB SHOWS THE SET'S STATS
 [shell] load bare_counter
 [shell]   bare_counter loaded in 6 ms (Native container)
 [shell] unload bare_counter
@@ -46,7 +56,41 @@ run reads the verdicts off the console:
 
 The rows are counted off the **scene**, not off the model: each row's status
 badge carries its module's name, so a filter proxy that dropped a row or a
-table showing a module the manifest does not account for fails there.
+table showing a module the manifest does not account for fails there. So do
+the two lines under it — `installType` is what Basecamp answers "where did
+this come from" with everywhere else and `embedded` is its answer for
+something the build put there, and the stats are read off the rendered cells
+rather than the model, because a model carries cpu and memory whether or not
+the table ever drew them.
+
+## Chat, and the two cold-start numbers
+
+With the networking modules in the set the Shell also brings chat up — the
+same `NetworkSmokeRunner` the [smoke probe](../liblogos-smoke/README.md) uses,
+over the same host — and reports the two numbers slice 22 asks for:
+
+```
+[shell] COLD START: Shell shown at 812 ms
+[shell] chat_module: health() ok (the Rust core answers)
+[shell] chat_module: init ok
+[shell]   delivery node online in 1043 ms
+[shell] COLD START: Chat usable at 2104 ms
+[shell]   two-party group: b3088251e1
+[shell]   invited the desktop peer: 2a53f28cdba6...
+[shell]   the group committed the desktop peer in 3820 ms (roster: [...])
+[shell]   sent 'phone-6631fefa' to the group
+[shell]   message from the desktop peer: 'desktop-4471'
+[shell] CHAT GROUP MESSAGE ROUND TRIP OK (9633 ms)
+```
+
+Chat runs BEFORE the Modules tab is driven, and that ordering is the
+measurement: "cold start to Chat usable" is how long a user waits before they
+can type, and the tab's own 2.5-second settle in front of it would be reported
+as part of the chat bring-up. Both run off the event loop, so the Shell is on
+screen and painting throughout.
+
+Standing the desktop peer up is
+[`../liblogos-smoke/desktop-peers/`](../liblogos-smoke/desktop-peers/README.md).
 
 ## The Settings page at a phone's width
 
@@ -110,7 +154,8 @@ and the signal spy stays at zero.
 src/ShellModulesBackend.*   the QML-facing `backend`
 src/BundledSetShellHost.*   IShellHost over it
 src/ShellModulesDriver.*    the acceptance pass: open the tab, check the rows,
-                            press the toggle twice
+                            their install type and their stats, press the
+                            toggle twice
 src/main.cpp                core up, shell up, drive, shut down cleanly
 stage/CMakeLists.txt        the pure half — one static archive, built by nix
 app/CMakeLists.txt          the impure half — the Xcode link, embed and sign

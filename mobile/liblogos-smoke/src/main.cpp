@@ -98,6 +98,13 @@ void qtMessages(QtMsgType type, const QMessageLogContext&, const QString& msg)
 
 int main(int argc, char* argv[])
 {
+    // FIRST STATEMENT, so "since main()" is the truth. Everything below it --
+    // QApplication, the window, the core -- is time the user spends looking at
+    // a launch image, and a clock started after the window was built would
+    // report the cold start as shorter than it is.
+    QElapsedTimer sinceMain;
+    sinceMain.start();
+
     QApplication app(argc, argv);
     app.setOrganizationName("Logos");
     app.setApplicationName("LiblogosSmoke");
@@ -130,15 +137,15 @@ int main(int argc, char* argv[])
     g_log = logView;
     window.setCentralWidget(central);
     window.showFullScreen();
+    // The probe's own surface, which is what stands in for the Shell on a
+    // platform that has no Shell build yet (Android: Qt there is a set of
+    // shared objects, so main_ui is a different artifact). Named differently
+    // from the Shell's own marker for exactly that reason -- the two are not
+    // the same screen and a report should not be able to pretend they are.
+    say(QStringLiteral("COLD START: host UI shown at %1 ms").arg(sinceMain.elapsed()));
 
     SmokeRunner runner;
     QObject::connect(&runner, &SmokeRunner::log, &say);
-
-    // Measured from main(), not from the runtime: on a phone the interesting
-    // number is how long the user waits, and that includes QApplication and
-    // the window. logos_core_start()'s own time is reported separately.
-    QElapsedTimer sinceMain;
-    sinceMain.start();
 
     // The runtime seam. Everything below asks THIS about modules -- what is
     // known, what is loaded, load, unload -- and never the C API, exactly as
@@ -174,6 +181,9 @@ int main(int argc, char* argv[])
     // own.
     NetworkSmokeRunner network(&core);
     QObject::connect(&network, &NetworkSmokeRunner::log, &say);
+    QObject::connect(&network, &NetworkSmokeRunner::chatUsable, &app, [&sinceMain]() {
+        say(QStringLiteral("COLD START: Chat usable at %1 ms").arg(sinceMain.elapsed()));
+    });
     if (network.hasWork()) {
         const bool networkOk = network.run();
         say(networkOk ? QStringLiteral("networking modules: PASS")
