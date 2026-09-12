@@ -106,6 +106,29 @@ intersection to **Qt**: it is nothing but Qt calls and carries none of them, whi
 resolves a dlopen'd library against its own DT_NEEDED closure and the linker
 namespace's global group, and an app's libraries are never in the latter.
 
+## The Web container's bring-up probe
+
+The host installs the **Web container** before the core starts -- a webview per
+Downloaded module, with a live-runtime budget of one QML runtime -- and then
+answers the one question no desktop can:
+
+```
+[qt] Web container: live-runtime budget 240 MB (1 runtime x 240 MB)
+[smoke] web probe: page log: probe page is listening
+[smoke] web probe: the page loaded off logos://module/index.html and published a channel (509 ms)
+[smoke] web probe: round trip OK -- probe-pong:logos://module/logos-runtime/ (519 ms)
+[smoke] web container: PASS
+```
+
+Does THIS platform's webview deliver a request to its interceptor when the page
+is entered under Qt's separate-main-stack entry? That is where the mobile
+round-trip spike found `WKScriptMessageHandler` trapping, and it is the whole
+reason the channel is a URL scheme. A fixture page, a frame each way, before any
+module loads -- so a failure here is not mistaken for a module's.
+
+The container itself, and what running it on a Samsung changed about it, is
+[`../webview/README.md`](../webview/README.md).
+
 ## Run it
 
 ```bash
