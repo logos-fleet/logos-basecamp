@@ -1,6 +1,5 @@
 #include "web/LogosWebScheme.h"
 
-#include <QBuffer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -102,11 +101,12 @@ void LogosWebSchemeHandler::requestStarted(QWebEngineUrlRequestJob* job)
     if (path.isEmpty() || path == QLatin1String("/"))
         path = QStringLiteral("/index.html");
 
+    const QLatin1String runtimePrefix(kRuntimePathPrefix);
     QString root = m_moduleDir;
     QString relative;
-    if (path.startsWith(QLatin1String(kRuntimePathPrefix))) {
+    if (path.startsWith(runtimePrefix)) {
         root = m_runtimeDir;
-        relative = path.mid(static_cast<int>(qstrlen(kRuntimePathPrefix)));
+        relative = path.mid(runtimePrefix.size());
     } else {
         relative = path.mid(1);
     }

@@ -46,6 +46,23 @@ namespace {
 // indefinitely.
 constexpr int kUnloadGraceMs = 3000;
 
+// Is this resolved `main` a PAGE — i.e. is the artifact behind it a `ui_qml`
+// module's `web` variant rather than a QML document plus a Qt plugin?
+//
+// The entry point is the only thing that says so without opening the package,
+// which is exactly how liblogos' own discovery decides it
+// (module_registry.cpp::looksLikeWebModule). The manifest's
+// `logos_web_runtime` says which runtime the page wants, not whether it is one.
+//
+// One definition for the two places that ask: the manifest filter in
+// onUiPluginsFetched, which has to keep a `web` variant that carries no `view`,
+// and isWebVariant, which routes its load and unload.
+bool mainIsWebPage(const QString& mainFilePath)
+{
+    return mainFilePath.endsWith(QStringLiteral(".html"), Qt::CaseInsensitive)
+        || mainFilePath.endsWith(QStringLiteral(".htm"), Qt::CaseInsensitive);
+}
+
 } // namespace
 
 UIPluginManager::UIPluginManager(LogosAPI* logosAPI,
@@ -97,6 +114,13 @@ UIPluginManager::UIPluginManager(LogosAPI* logosAPI,
 #endif
 }
 
+UIPluginManager::~UIPluginManager()
+{
+    // Safety net for the path that does not call shutdown() first. Idempotent:
+    // shutdown() returns immediately if it has already run.
+    shutdown();
+}
+
 #ifdef LOGOS_WITH_WEBENGINE
 void UIPluginManager::onWebViewOpened(const QString& name, QWidget* widget)
 {
@@ -130,26 +154,12 @@ void UIPluginManager::onWebViewClosed(const QString& name)
 
 bool UIPluginManager::isWebVariant(const QString& name) const
 {
-    // BY THE RESOLVED `main`, exactly as liblogos' own discovery decides it
-    // (module_registry.cpp::looksLikeWebModule): a web variant's entry point is
-    // a page, and that is the only thing visible without opening it. The
-    // manifest's `logos_web_runtime` says which runtime the page wants, not
-    // whether it is one.
     if (!isQmlPlugin(name)) return false;
-    const QString main = m_uiPluginMetadata.value(name).value("mainFilePath").toString();
-    return main.endsWith(QStringLiteral(".html"), Qt::CaseInsensitive)
-        || main.endsWith(QStringLiteral(".htm"), Qt::CaseInsensitive);
+    return mainIsWebPage(m_uiPluginMetadata.value(name).value("mainFilePath").toString());
 }
 #else
 bool UIPluginManager::isWebVariant(const QString&) const { return false; }
 #endif
-
-UIPluginManager::~UIPluginManager()
-{
-    // Safety net for the path that does not call shutdown() first. Idempotent:
-    // shutdown() returns immediately if it has already run.
-    shutdown();
-}
 
 void UIPluginManager::shutdown()
 {
@@ -226,10 +236,8 @@ void UIPluginManager::onUiPluginsFetched(const QVariantList& uiPlugins)
             // the page, because the document is compiled inside the bundled
             // Qt-wasm runtime rather than by an engine in this process (ADR
             // 0004). What it has instead is a page for `main`.
-            const QString mainPath = pluginInfo.value("mainFilePath").toString();
-            const bool isPage = mainPath.endsWith(QStringLiteral(".html"), Qt::CaseInsensitive)
-                             || mainPath.endsWith(QStringLiteral(".htm"), Qt::CaseInsensitive);
-            if (!isPage && pluginInfo.value("view").toString().isEmpty()) continue;
+            if (!mainIsWebPage(pluginInfo.value("mainFilePath").toString())
+                && pluginInfo.value("view").toString().isEmpty()) continue;
         } else {
             if (pluginInfo.value("mainFilePath").toString().isEmpty()) continue;
         }

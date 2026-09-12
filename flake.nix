@@ -962,8 +962,11 @@
           # says the same, about the same thing).
           webContainerFixture =
             (logos-module-builder.packages.${system} or {}).web-view-counter or null;
-          webContainerRuntime =
-            (logos-view-module-runtime.packages.${system} or {}).qml-runtime-wasm or null;
+          # The runtime the APP bundles, not a second resolution of it: the
+          # check has to serve the page the same image `nix/app.nix` stages
+          # under share/logos-runtime, or it would be measuring a runtime this
+          # build does not ship.
+          webContainerRuntime = qmlRuntimeWasm;
           # The other two modules in that check's directory: the native module
           # the view calls by name, and the broker that makes the call legal.
           # Both are Bare images, so the check stays one process.

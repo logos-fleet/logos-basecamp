@@ -44,8 +44,6 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
-#include <QDateTime>
-#include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QMutex>
@@ -80,6 +78,21 @@ QStringList logSnapshot()
 {
     QMutexLocker lock(&gLogMutex);
     return gLogLines;
+}
+
+int logCount()
+{
+    QMutexLocker lock(&gLogMutex);
+    return gLogLines.size();
+}
+
+// Everything the page said, for a run that is about to report a failure: a
+// canvas leaves nothing else to look at afterwards.
+void dumpConsole()
+{
+    printf("\n--- the page's console ---\n");
+    for (const QString& line : logSnapshot()) printf("      %s\n", line.toUtf8().constData());
+    fflush(stdout);
 }
 
 struct Check {
@@ -131,12 +144,6 @@ QRegularExpressionMatch waitForLog(const QString& pattern, int since, int timeou
         if (timer.elapsed() >= timeoutMs) return QRegularExpressionMatch();
         pump(100);
     }
-}
-
-int logCount()
-{
-    QMutexLocker lock(&gLogMutex);
-    return gLogLines.size();
 }
 
 // A `char**` module list from the C API, as a QStringList, freed correctly.
@@ -268,7 +275,7 @@ int main(int argc, char** argv)
 
     if (!loaded || !mounted) {
         printf("\nFAIL: the page never came up; nothing below could be asserted\n");
-        for (const QString& line : logSnapshot()) printf("      %s\n", line.toUtf8().constData());
+        dumpConsole();
         return 1;
     }
 
@@ -335,10 +342,7 @@ int main(int argc, char** argv)
 
     int failed = 0;
     for (const Check& c : gChecks) if (!c.ok) ++failed;
-    if (failed) {
-        printf("\n--- the page's console ---\n");
-        for (const QString& line : logSnapshot()) printf("      %s\n", line.toUtf8().constData());
-    }
+    if (failed) dumpConsole();
     printf("\n%s: the Web container renders a ui_qml `web` variant (%d checks)\n",
            failed ? "FAIL" : "PASS", int(gChecks.size()));
     logos_core_cleanup();

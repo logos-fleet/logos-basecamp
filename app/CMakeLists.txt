@@ -178,7 +178,8 @@ endif() # LOGOS_USE_MOCK_BACKEND
 
 # Where the Web container's seam header lives in each of the two liblogos
 # layouts. Read by the LOGOS_WITH_WEBENGINE default below and by the include
-# path the backend compiles with; one definition so they cannot disagree.
+# path the backend compiles with (_logos_web_module_view_dir, derived from this
+# one value) so the probe and the include can never disagree.
 if(LOGOS_USE_MOCK_BACKEND)
     set(_logos_web_module_view_h "")
 elseif(_liblogos_is_source)
@@ -186,6 +187,7 @@ elseif(_liblogos_is_source)
 else()
     set(_logos_web_module_view_h "${LOGOS_LIBLOGOS_ROOT}/include/web_module_view.h")
 endif()
+get_filename_component(_logos_web_module_view_dir "${_logos_web_module_view_h}" DIRECTORY)
 
 # ── the Web container's view backend ─────────────────────────────────────────
 #
@@ -226,7 +228,6 @@ else()
     message(STATUS "Web container: no webview backend in this build "
                    "(-DLOGOS_WITH_WEBENGINE=ON to add one)")
 endif()
-
 
 # ── logos-view-module-runtime (provides ViewModuleHost.h + the ui-host lib) ───
 # Load-bearing: UIPluginManager/PluginLoader compile into the exe.
@@ -415,13 +416,12 @@ if(LOGOS_WITH_WEBENGINE)
     # includes <message_channel.h>, which logos-protocol installs one directory
     # deeper. Both are re-exported by the liblogos prefix; only the second needs
     # naming. The source checkout keeps them where they are written.
+    target_include_directories(LogosBasecamp PRIVATE ${_logos_web_module_view_dir})
     if(_liblogos_is_source)
         target_include_directories(LogosBasecamp PRIVATE
-            ${LOGOS_LIBLOGOS_ROOT}/src/logos_core
             ${LOGOS_PROTOCOL_ROOT}/include/implementations/web)
     else()
         target_include_directories(LogosBasecamp PRIVATE
-            ${LOGOS_LIBLOGOS_ROOT}/include
             ${LOGOS_LIBLOGOS_ROOT}/include/implementations/web)
     endif()
 endif()

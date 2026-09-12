@@ -4,9 +4,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QMetaObject>
-#include <QThread>
 #include <QUrl>
 #include <QWebChannel>
 #include <QWebEngineProfile>

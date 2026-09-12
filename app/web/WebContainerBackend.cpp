@@ -69,7 +69,6 @@ WebModulePageView* WebContainerBackend::createView(const LogosCore::WebModuleVie
 
 void WebContainerBackend::install(const QString& runtimeDir)
 {
-    QThread* uiThread = QThread::currentThread();
     if (runtimeDir.isEmpty()) {
         qWarning() << "Web container: this build ships no bundled QML runtime. A `web` "
                       "variant whose manifest asks for one will load its page and fail "
@@ -78,6 +77,9 @@ void WebContainerBackend::install(const QString& runtimeDir)
         qInfo() << "Web container: bundled QML runtime at" << runtimeDir;
     }
 
+    // The thread install() was called on — see the header: a view is a widget,
+    // so it may only be built here, whatever thread the core loads from.
+    QThread* const uiThread = QThread::currentThread();
     LogosCore::setWebModuleViewFactory(
         [this, runtimeDir, uiThread](const LogosCore::WebModuleViewRequest& request)
             -> std::unique_ptr<LogosCore::WebModuleView> {
