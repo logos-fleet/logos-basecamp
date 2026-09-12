@@ -5061,6 +5061,34 @@
         "type": "github"
       }
     },
+    "logos-chat-ui": {
+      "inputs": {
+        "chat_module": [
+          "logos-chat-module"
+        ],
+        "logos-delivery-module": [
+          "logos-delivery-module"
+        ],
+        "logos-module-builder": [
+          "logos-chat-ui",
+          "chat_module",
+          "logos-module-builder"
+        ]
+      },
+      "locked": {
+        "lastModified": 1789093273,
+        "narHash": "sha256-jb9dVBaijFLzYhi1UMHBKNUeUg1XiVKkBmoQTjCxdXU=",
+        "owner": "logos-fleet",
+        "repo": "logos-chat-ui",
+        "rev": "a6990e263679ed2fe0b4e9c11c75b80ccd7cb0a4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-chat-ui",
+        "type": "github"
+      }
+    },
     "logos-container": {
       "inputs": {
         "logos-nix": [
@@ -249982,6 +250010,7 @@
       "inputs": {
         "logos-capability-module": "logos-capability-module",
         "logos-chat-module": "logos-chat-module",
+        "logos-chat-ui": "logos-chat-ui",
         "logos-cpp-sdk": "logos-cpp-sdk",
         "logos-delivery-module": "logos-delivery-module",
         "logos-design-system": "logos-design-system",

@@ -7,12 +7,21 @@ lists the set, and its Load/Unload buttons go through the Native container.
 ```bash
 ws run logos-basecamp --target ios-sim-arm64 --bundle view_counter --app shell
 
-# ...and with chat in it, against a desktop peer (see the section below)
+# ...the milestone's own set: the real Chat app over the networking modules,
+# against a desktop peer (see the section below)
 LOGOS_IOS_TEAM_ID=<team> LOGOS_IOS_DEVICE=<udid> \
   ws run logos-basecamp --target ios-arm64 --app shell \
-  --bundle capability_module,chat_module,delivery_module,libp2p_module \
+  --bundle capability_module,libp2p_module,chat_ui \
   -- --chat-peer <the desktop installation's get_address>
 ```
+
+`chat_ui` is one name and three modules: its closure is `chat_ui ->
+chat_module -> delivery_module`, read off logos-chat-ui's own metadata.
+`capability_module` and `libp2p_module` are named beside it and are not in that
+closure on purpose -- neither is a chat_ui dependency (the first is how ANY
+module-to-module call mints its token, the second is the transport delivery
+dials), and writing ambient infrastructure into a signed manifest would be a
+claim the core would later act on.
 
 ## What is and is not different from the desktop
 
@@ -24,7 +33,8 @@ nothing else. Three things below it are:
 |---|---|---|
 | how the Shell is loaded | `QPluginLoader` opens `main_ui.dylib` | linked in and reached through `QPluginLoader::staticInstances()` — Qt for iOS is static archives, there is no plugin to open (ADR 0001) |
 | where the module set comes from | a modules **directory**, scanned | the Bundled-set **manifest** the build compiled in; a phone may not download native code (ADR 0003) |
-| what answers the QML `backend` | `MainUIBackend` over three managers | `ShellModulesBackend`: the Modules tab is live, over the desktop app's own `ModuleInstanceModel` + `CoreModuleManager` + `ICoreRuntime`; apps, packages and repositories say they are not here yet |
+| what answers the QML `backend` | `MainUIBackend` over three managers | `ShellModulesBackend`: the Modules tab and the app launcher are live, over the desktop app's own `ModuleInstanceModel` + `CoreModuleManager` + `ICoreRuntime`; packages and repositories say they are not here yet |
+| where an app's backend runs | a `ui-host` **subprocess**, over a local socket | in THIS process, with the same typed replica carried over a socketpair — no subprocess a store will accept (ADR 0003) |
 
 The runtime underneath is `BundledSetCoreRuntime`, shared with
 [`../liblogos-smoke`](../liblogos-smoke/README.md) — the two apps are the same
@@ -92,6 +102,55 @@ screen and painting throughout.
 Standing the desktop peer up is
 [`../liblogos-smoke/desktop-peers/`](../liblogos-smoke/desktop-peers/README.md).
 
+## The app, opened from the sidebar
+
+A `ui_qml` member of the Bundled set is an APP, and the Shell opens one the way
+it opens a desktop one: a tile in the sidebar, `launchUIModule`,
+`IShellHost::loadUiModule`, and the widget handed back through
+`onPluginWindowRequested` into the workspace. What is different is only what
+happens inside `loadUiModule` — there is no `ui-host` subprocess to start, so
+`BundledSetShellHost` brings the module up in this process (`ViewModuleRunner`,
+shared with the smoke probe: dlopen the framework, instantiate the backend,
+publish it on a socketpair node, acquire the typed replica, load the module's
+QML out of the image's own qrc) and hands the Shell a `QQuickWidget`.
+
+```
+[shell] shell: the sidebar carries a tile for chat_ui
+[shell] drive: press 'sidebar.app.chat_ui' at (44, 268) in 88x1326
+[shell] view image opened in 41 ms
+[shell] view model remoted: chat_ui/conversationModel (9 roles)
+[shell] replica valid: chat_ui
+[shell] QML loaded from the framework's resources in 96 ms
+[shell] app chat_ui is mounted in the Shell
+[shell] shell app: chat_ui's conversationList holds 1 row(s) after 50 ms
+[shell] shell app: chat_ui rendered conversationList, newMenuButton in the Shell
+[shell] SHELL SHOWS THE BUNDLED APP
+[shell] APP SHOWN: chat_ui on screen 468 ms after the sidebar tile was pressed
+```
+
+That one row is the group the Shell's own chat bring-up created and exchanged
+in a minute earlier, read back through the app's UI — which is the difference
+between "the QML rendered" and "the QML is bound to the running core". A view
+renders its empty state perfectly well with a null model, and the models reach
+QML by a different route from the backend replica, so nothing else here would
+catch one that never arrived.
+
+`conversationList` and `newMenuButton` are **chat_ui's own** handles, out of
+logos-chat-ui's `ConversationsPane.qml` — nothing this repo draws. That is what
+makes the verdict about the app rather than about the host having created a
+widget, and it is checked twice more: the widget has to be inside the Shell's
+own tree (only `onPluginWindowRequested` could have put it there) and the
+launcher row has to have moved to loaded.
+
+One thing had to be added under the replica for a real app to work.
+`enableRemoting()` on a `.rep` source carries the backend's properties, signals
+and slots and does NOT carry a `QAbstractItemModel` one of those properties
+points at — a model is its own child source, named `<module>/<property>` and
+acquired with `acquireModel()`. `ui-host` does that scan on the desktop;
+`ViewModuleRunner` does it here, and `logos.model(...)` on the bridge is the
+other half. Without it chat_ui renders with three empty lists and nothing says
+why. view_counter never needed it: it has no models.
+
 ## The Settings page at a phone's width
 
 The Shell's Settings page used to be the desktop's at any size: a 200-px
@@ -153,9 +212,13 @@ and the signal spy stays at zero.
 ```
 src/ShellModulesBackend.*   the QML-facing `backend`
 src/BundledSetShellHost.*   IShellHost over it
+src/ShellSceneDriver.*      finding, settling and pressing in the Shell's
+                            rendered scenes -- shared by the two drivers below
 src/ShellModulesDriver.*    the acceptance pass: open the tab, check the rows,
                             their install type and their stats, press the
                             toggle twice
+src/ShellAppDriver.*        the other half: press the sidebar tile and check
+                            the app's OWN handles are on screen
 src/main.cpp                core up, shell up, drive, shut down cleanly
 stage/CMakeLists.txt        the pure half — one static archive, built by nix
 app/CMakeLists.txt          the impure half — the Xcode link, embed and sign

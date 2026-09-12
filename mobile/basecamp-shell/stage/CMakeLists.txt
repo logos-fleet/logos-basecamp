@@ -33,8 +33,12 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/ShellModulesBackend.h
     ${SRC}/BundledSetShellHost.cpp
     ${SRC}/BundledSetShellHost.h
+    ${SRC}/ShellSceneDriver.cpp
+    ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.cpp
     ${SRC}/ShellModulesDriver.h
+    ${SRC}/ShellAppDriver.cpp
+    ${SRC}/ShellAppDriver.h
     ${BASECAMP_APP}/ModuleInstanceModel.cpp
     ${BASECAMP_APP}/ModuleInstanceModel.h
     ${BASECAMP_APP}/CoreModuleManager.cpp
@@ -59,7 +63,9 @@ install(TARGETS basecamp_shell_host EXPORT BasecampShellHostTargets ARCHIVE DEST
 install(FILES
     ${SRC}/ShellModulesBackend.h
     ${SRC}/BundledSetShellHost.h
+    ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.h
+    ${SRC}/ShellAppDriver.h
     ${BASECAMP_APP}/ModuleInstanceModel.h
     ${BASECAMP_APP}/CoreModuleManager.h
     ${BASECAMP_APP}/interfaces/IShellHost.h

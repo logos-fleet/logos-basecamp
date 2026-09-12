@@ -20,6 +20,7 @@
 //                 the module's bytes and never touches the filesystem.
 #pragma once
 
+#include <QHash>
 #include <QObject>
 #include <QString>
 
@@ -28,13 +29,17 @@ class QRemoteObjectHost;
 class QRemoteObjectNode;
 class LogosAPI;
 
-// What the QML calls `logos`. One member, `module(name)`, which is the only
-// part of the desktop bridge a view module's own QML uses to reach its
-// backend — so the module's Main.qml is byte-identical on both hosts.
+// What the QML calls `logos`. Two members, `module(name)` and
+// `model(module, name)`: the parts of the desktop bridge a view module's own
+// QML uses to reach its backend and its list models, so the module's QML is
+// byte-identical on both hosts.
 //
-// It is NOT logos-view-module-runtime's LogosQmlBridge: callModule, the
-// intent broker and the model plumbing are the shell's, and this host is a
-// bring-up probe with one module in it.
+// It is NOT logos-view-module-runtime's LogosQmlBridge: callModule, the intent
+// broker and the cross-module plumbing are the shell's. What IS the same is
+// the model protocol, because it has to be -- a remoted QAbstractItemModel is
+// acquired by the name `<module>/<property>` on the node, and QML asking
+// `logos.model("chat_ui", "conversationModel")` is asking both hosts the same
+// question.
 class InProcViewBridge : public QObject
 {
     Q_OBJECT
@@ -43,18 +48,32 @@ public:
 
     Q_INVOKABLE QObject* module(const QString& name) const;
 
-    void publish(const QString& name, QObject* replica);
+    // The module's remoted list model, acquired on first ask and kept. Same
+    // signature and same default as LogosQmlBridge::model, so a view module's
+    // QML never learns which host it is in.
+    Q_INVOKABLE QObject* model(const QString& moduleName, const QString& modelName,
+                               bool prefetch = true);
+
+    void publish(const QString& name, QObject* replica, QRemoteObjectNode* node);
 
 private:
     QString m_name;
     QObject* m_replica = nullptr;
+    QRemoteObjectNode* m_node = nullptr;  // not owned
+    QHash<QString, QObject*> m_models;
 };
 
 class ViewModuleRunner : public QObject
 {
     Q_OBJECT
 public:
+    // The framework this runner opens, as the stem its bundle is named after
+    // ("<module>_view"). The default is the ONE view module the build resolved
+    // out of the Bundled set (LOGOS_VIEW_MODULE_STEM) -- what the smoke probe
+    // renders. The Shell passes a stem instead, because there the set may
+    // carry several and which one is mounted is a user's choice, not a build's.
     explicit ViewModuleRunner(QObject* parent = nullptr);
+    explicit ViewModuleRunner(QString stem, QObject* parent = nullptr);
     ~ViewModuleRunner() override;
 
     // dlopen the framework, construct the plugin, publish its typed source on
@@ -69,6 +88,8 @@ public:
     // guessed — see BundledModuleRunner::bundledImagePath() for why dladdr
     // and not applicationDirPath().
     static QString viewImagePath();
+    // The same, for any stem.
+    static QString viewImagePathFor(const QString& stem);
 
     // The replica the QML is bound to, for a driver that wants to read the
     // backend's state without going through the view.
@@ -93,6 +114,16 @@ signals:
     void log(const QString& line);
 
 private:
+    // Remote every Q_PROPERTY on the plugin whose value is a
+    // QAbstractItemModel* as a child source named `<module>/<property>`, which
+    // is what the bridge's model() acquires. The same scan ui-host does on the
+    // desktop, and it has to be here too: enableRemoting() on the .rep source
+    // carries properties, signals and slots, and NOT the models hanging off it.
+    // `target` is the plugin's viewObject() -- the backend QML binds to, which
+    // is where a ui_qml module's models live.
+    void remoteModelProperties(const QString& name, QObject* target);
+
+    QString m_stem;
     void* m_handle = nullptr;
     LogosAPI* m_api = nullptr;
     QObject* m_plugin = nullptr;

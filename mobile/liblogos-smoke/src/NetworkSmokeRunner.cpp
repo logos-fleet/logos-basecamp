@@ -426,6 +426,7 @@ bool NetworkSmokeRunner::exchangeInGroup(LogosAPIClient* client)
         return false;
     }
     emit log(QStringLiteral("  two-party group: %1").arg(convo));
+    m_madeConversation = true;
 
     if (!call(client, mod, QStringLiteral("add_group_member"),
               QVariantList{ convo, m_chatPeer }, &out, 60000)) {

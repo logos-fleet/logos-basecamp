@@ -39,6 +39,13 @@ public:
     // a step that was skipped by name is not a failure.
     bool run();
 
+    // Whether this run left a conversation in chat_module. Not the same
+    // question as run()'s verdict: the group can be created and exchanged in
+    // while the libp2p half fails for its own reasons (an unanswered
+    // local-network prompt, say), and a UI that has to show what the core
+    // holds cares about the first only.
+    bool madeConversation() const { return m_madeConversation; }
+
 signals:
     void log(const QString& line);
 
@@ -103,4 +110,5 @@ private:
     QString m_peerAddr;
     QString m_topic;
     QString m_chatPeer;    // the desktop installation's chat address
+    bool    m_madeConversation = false;
 };

@@ -282,6 +282,14 @@ Item {
                             }
 
                             LogosText {
+                                // Automation-only, and the compact half of the
+                                // pair the desktop row carries as
+                                // moduleInspector.cpu/memory: the two figures
+                                // fold into one line here, so a driver that
+                                // only knew the desktop handles would read a
+                                // phone-width table as having no stats at all.
+                                objectName: "moduleInspector.stats."
+                                            + (rowItem && rowItem.name ? rowItem.name : "")
                                 Layout.fillWidth: true
                                 visible: rowItem && rowItem.isLoaded
                                 text: rowItem

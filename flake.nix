@@ -168,6 +168,26 @@
     # contract it generates against has to be the one the delivery image in the
     # same Bundled set actually implements.
     logos-chat-module.inputs.logos-delivery-module.follows = "logos-delivery-module";
+    # chat_ui: the REAL Chat app, and the mobile catalog's second `ui_qml`
+    # member. view_counter is a fixture that proves the shape; this is the
+    # module a user means by "Chat" -- `src/qml/ChatView.qml` over a
+    # `ChatBackend.rep`, the same tree the desktop plugin is built from.
+    #
+    # Its iOS `view` framework is built by THIS flake's logos-module-builder,
+    # which is why every shared input is cut to this flake's copy: the
+    # framework is stamped with the logos-protocol version it compiled against
+    # and the host gates that stamp at load, exactly as it does for a Bare
+    # module. chat_ui's own flake follows its builder THROUGH chat_module, so
+    # pointing chat_module here is what moves the builder too.
+    #
+    # LOCKED TO THE logos-fleet FORK, like the rest of the mobile chain:
+    # `packages.aarch64-ios.view` only exists on a builder new enough to
+    # publish the mobile keys, and upstream's pin is not. Re-pin with
+    #   nix flake lock --override-input logos-chat-ui \
+    #     github:logos-fleet/logos-chat-ui/<rev>
+    logos-chat-ui.url = "github:logos-co/logos-chat-ui";
+    logos-chat-ui.inputs.chat_module.follows = "logos-chat-module";
+    logos-chat-ui.inputs.logos-delivery-module.follows = "logos-delivery-module";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
     # LOCKED TO THE logos-fleet FORK, not to this URL: the test framework's
     # per-app inspector port (launchAppWithInspector) is not upstream yet, and
@@ -190,7 +210,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -476,6 +496,17 @@
             extraFiles."qml/Main.qml" = ./mobile/view-counter/src/qml/Main.qml;
           };
 
+          # The same shape for the REAL chat app. Its QML tree is a directory
+          # (ChatView.qml plus the ChatUi/ module beside it) and all of it
+          # travels inside the framework's qrc; the entry document is shipped
+          # beside the image for the same reason view_counter's is.
+          chatUiPayload = catalogLib.mkVariantPayload {
+            drv = logos-chat-ui.packages.${system}.view;
+            stem = "chat_ui_view";
+            inherit target;
+            extraFiles."qml/ChatView.qml" = "${logos-chat-ui}/src/qml/ChatView.qml";
+          };
+
           specs = {
             bare_counter = mkBareSpec {
               name = "bare_counter";
@@ -546,6 +577,36 @@
               # all three.
               dependencies = viewCounter.config.dependencies;
               variants.${target} = viewPayload;
+              inherit signingKey;
+            };
+
+            # ── the milestone's own app (slice 22) ────────────────────────
+            # `--bundle chat_ui` is what the slice names, and this is the
+            # entry that makes it resolve. Same shape as view_counter and a
+            # different KIND of member: view_counter is a fixture built out of
+            # this repo, chat_ui is an external `type: ui_qml` repo whose
+            # desktop plugin already ships -- so the catalog is now carrying a
+            # real app rather than only the demo that proved the shape.
+            #
+            # ITS CLOSURE IS ITS OWN, read off logos-chat-ui/metadata.json:
+            # chat_ui -> chat_module -> delivery_module. capability_module and
+            # libp2p_module are NOT in it and are not added here -- neither is
+            # a chat_ui dependency (the first is how any module-to-module call
+            # mints its token, the second is the transport delivery dials),
+            # and writing ambient infrastructure into a signed manifest would
+            # be a claim the core would later act on. They are named on
+            # --bundle beside chat_ui, which is what the two `ws build`
+            # commands in the README do.
+            chat_ui = {
+              name = "chat_ui";
+              version = logos-chat-ui.config.version;
+              type = "ui_qml";
+              category = "chat";
+              description = "Chat App for Logos - Private messaging interface";
+              view = "qml/ChatView.qml";
+              icon = ./mobile/catalog/icon.png;
+              dependencies = logos-chat-ui.config.dependencies;
+              variants.${target} = chatUiPayload;
               inherit signingKey;
             };
           };
