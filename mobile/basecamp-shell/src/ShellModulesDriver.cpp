@@ -19,6 +19,16 @@
 
 namespace {
 
+// A press that has to travel through a Flickable and a layout that is still
+// settling, in the milliseconds each of those takes. All of them were measured
+// on a physical iPad Air (4th gen) -- see settledCentre() and tap().
+constexpr int kPollSliceMs      = 20;   // one turn of the loop while waiting
+constexpr int kStillForMs       = 250;  // geometry unchanged this long = settled
+constexpr int kSettleBudgetMs   = 3000; // give up waiting for it and aim anyway
+constexpr int kPressHoldMs      = 80;   // press to release, as a finger would
+constexpr int kAfterReleaseMs   = 120;  // let the click's handlers run
+constexpr int kAfterScrollMs    = 50;   // let the flickable repaint
+
 void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
 {
     if (!item) return;
@@ -104,36 +114,35 @@ QQuickItem* ShellModulesDriver::waitFor(const QString& objectName, int timeoutMs
             return item;
         if (t.elapsed() >= timeoutMs)
             return nullptr;
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
     }
 }
 
 QPointF ShellModulesDriver::settledCentre(QQuickItem* item)
 {
-    // Unchanged for a quarter of a second of WALL CLOCK, not for N turns of
-    // the loop: processEvents returns the moment the queue is empty, so a
-    // "stable for eight reads" rule can be satisfied in microseconds while the
-    // next polish pass is still pending. Observed on the iPad: a first press
-    // at x=190 -- the row's left edge, where the toggle sat before the table's
-    // columns took their widths -- then a second, a second later, at the real
-    // x=826.
+    // Unchanged for kStillForMs of WALL CLOCK, not for N turns of the loop:
+    // processEvents returns the moment the queue is empty, so a "stable for
+    // eight reads" rule can be satisfied in microseconds while the next polish
+    // pass is still pending. Observed on the iPad: a first press at x=190 --
+    // the row's left edge, where the toggle sat before the table's columns took
+    // their widths -- then a second, a second later, at the real x=826.
     const auto centreOf = [](QQuickItem* i) {
         return i->mapToScene(QPointF(i->width() / 2.0, i->height() / 2.0));
     };
-    QElapsedTimer total;
-    total.start();
+    QElapsedTimer budget;
+    budget.start();
     QElapsedTimer still;
     still.start();
     QPointF previous = centreOf(item);
-    while (total.elapsed() < 3000) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    while (budget.elapsed() < kSettleBudgetMs) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
         const QPointF centre = centreOf(item);
         if (centre != previous) {
             previous = centre;
             still.restart();
             continue;
         }
-        if (still.elapsed() >= 250)
+        if (still.elapsed() >= kStillForMs)
             return centre;
     }
     return previous;
@@ -157,7 +166,7 @@ void ShellModulesDriver::scrollIntoView(QQuickItem* item)
             p->setProperty("contentX", contentX.toReal() + left);
         else
             return;
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, kAfterScrollMs);
         return;
     }
 }
@@ -180,14 +189,11 @@ bool ShellModulesDriver::tap(QQuickItem* item)
     // scrolled-away button", it is a press on whatever is at that coordinate
     // -- which is silence, and looks exactly like a button that does nothing.
     //
-    // This used to be a workaround: the Module Inspector's table was the
-    // desktop's, about a thousand logical pixels of columns with the action
-    // column last, so on a phone the toggle sat off the right edge and the
-    // driver activated the row's own control instead of pressing it. That kept
-    // these verdicts green while nobody could load a module by hand
-    // (logos-workspace#84). The Settings views collapse to the row and its
-    // action below ~700 px now, so a control off the viewport is a layout
-    // regression and this says so instead of working around it.
+    // Reported, not worked around: the Settings views collapse to the row and
+    // its action on a narrow screen (logos-workspace#84), so a control that
+    // the viewport does not contain is a layout regression, and a driver that
+    // activated it by hand instead would keep this verdict green while nobody
+    // could load a module at all. That is what it used to do.
     if (!QRectF(QPointF(0, 0), QSizeF(surface->size())).contains(centre)) {
         emit log(QStringLiteral("WRONG: '%1' is at (%2, %3), outside the %4x%5 viewport "
                                 "-- no touch can reach it on this screen")
@@ -214,9 +220,9 @@ bool ShellModulesDriver::tap(QQuickItem* item)
     // then replays press and release together. Sent back to back in one turn
     // that replay is a coin flip: the row's control got the pair on some runs
     // and nothing at all on others. A finger takes about this long.
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 80);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, kPressHoldMs);
     QGuiApplication::sendEvent(surface, &release);
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 120);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, kAfterReleaseMs);
     return true;
 }
 

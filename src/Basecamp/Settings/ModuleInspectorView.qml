@@ -66,6 +66,16 @@ Item {
     readonly property int desktopColumnsWidth: 830
     readonly property bool compact: root.width > 0 && root.width < desktopColumnsWidth
 
+    // Automation-only: a per-row handle on the status badge, so a test (and the
+    // Shell's iOS driver, which counts the rows on screen by it) can address
+    // one row — the badge wording ("Loaded"/"Not loaded") repeats across rows
+    // and tables, so text matching is ambiguous. The compact layout folds the
+    // badge into the module cell and keeps the handle: a row is a row
+    // whichever layout drew it.
+    function statusObjectName(name) {
+        return "moduleInspector.status." + (name || "")
+    }
+
     // Open a specific module's Interface screen (methods + events) by name.
     // Equivalent to clicking that module's "Interface" button — exposed for UI
     // automation/tests, which can't disambiguate the per-row buttons by their
@@ -244,10 +254,8 @@ Item {
                 }
 
                 // The compact row's whole left side: the module, then the
-                // status badge with the stats beside it. The badge keeps the
-                // same automation handle it has in the Status column — the
-                // Shell's iOS driver counts the rows on screen by it, and a
-                // row is a row whichever layout drew it.
+                // status badge with the stats beside it — the three desktop
+                // columns that fold in, in the order they read.
                 Component {
                     id: compactModuleCellComponent
 
@@ -268,8 +276,8 @@ Item {
                             spacing: Theme.spacing.small
 
                             ModuleStatusBadge {
-                                objectName: "moduleInspector.status."
-                                            + (rowItem && rowItem.name ? rowItem.name : "")
+                                objectName: root.statusObjectName(
+                                                rowItem ? rowItem.name : "")
                                 row: rowItem
                             }
 
@@ -293,12 +301,8 @@ Item {
 
                     Item {
                         ModuleStatusBadge {
-                            // Automation-only: per-module handle so UI tests
-                            // can assert one row's load state — the badge
-                            // wording ("Loaded"/"Not loaded") also appears in
-                            // other tables, so text matching is ambiguous.
-                            objectName: "moduleInspector.status."
-                                        + (rowItem && rowItem.name ? rowItem.name : "")
+                            objectName: root.statusObjectName(
+                                            rowItem ? rowItem.name : "")
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             row: rowItem
