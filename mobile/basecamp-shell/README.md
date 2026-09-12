@@ -63,7 +63,13 @@ It adapts now, in two steps that are independent of each other:
 | below | what changes | where |
 |---|---|---|
 | 900 px of page | the section rail becomes a scrolling strip above the pane, and the insets shrink to a phone's | `SettingsView.qml` |
-| 700 px of pane (720 for apps) | the table keeps the module and its action; status, CPU and memory fold into the module cell, and Interface moves to the row | `ModuleInspectorView.qml`, `AppsInspectorView.qml` |
+| what the desktop columns ask for — the sum of their `preferredWidth`, 830 for modules and 880 for apps | the table keeps the module and its action; status, CPU, memory, version and description fold into the module cell, and Interface moves to the row | `ModuleInspectorView.qml`, `AppsInspectorView.qml` |
+
+The second threshold is the PREFERRED total and not the minimum one, which a
+physical iPad Air (4th gen) is what settled: its pane is 700 px, the desktop
+columns' minimum total to the pixel, and the row overflowed anyway — a RowLayout
+squeezed between the two does not shrink every column proportionally. A test
+adds the column set up and pins the number to it.
 
 Wider than both, the desktop layout is untouched.
 

@@ -46,19 +46,25 @@ Item {
     readonly property var protectedModules: ["package_manager", "package_downloader", "capability_module"]
 
     // ─── Compact (handset / tablet) layout ───
-    // The desktop column set's minimums add up to `desktopMinimumWidth`.
-    // Narrower than that, LogosTable pins every column to its minimum and
-    // scrolls horizontally instead — which puts the row's action, the LAST
-    // column, off the right edge. Qt delivers a press by coordinate, so that
-    // control is then not merely awkward but unreachable: on a phone, and on a
-    // 13-inch iPad in portrait, nothing can be loaded or unloaded by hand
+    // `desktopColumnsWidth` is what the desktop set asks for: the sum of its
+    // columns' preferredWidth (240 + 130 + 90 + 110 + 260), pinned to that sum
+    // by a test. Narrower than that the row's action — the LAST column — is
+    // pushed off the right edge, and Qt delivers a press by coordinate, so it
+    // is then not merely awkward but unreachable: on a phone, and on a 13-inch
+    // iPad in portrait, nothing can be loaded or unloaded by hand
     // (logos-workspace#84).
     //
-    // So below it the row keeps only what it cannot do without: which module
-    // it is, and the control. Status, CPU and memory fold into the module cell,
+    // The PREFERRED total, not the minimum one: a RowLayout squeezed between
+    // the two does not shrink every column proportionally, so the row already
+    // overflows well before the minimums bite. Measured on a physical iPad Air
+    // (4th gen), whose 700-px pane is the minimum total to the pixel and still
+    // put the toggle at x=710 in a 724-wide viewport.
+    //
+    // Below it the row keeps only what it cannot do without: which module it
+    // is, and the control. Status, CPU and memory fold into the module cell,
     // and the Interface drill-down moves to the row itself.
-    readonly property int desktopMinimumWidth: 700
-    readonly property bool compact: root.width > 0 && root.width < desktopMinimumWidth
+    readonly property int desktopColumnsWidth: 830
+    readonly property bool compact: root.width > 0 && root.width < desktopColumnsWidth
 
     // Open a specific module's Interface screen (methods + events) by name.
     // Equivalent to clicking that module's "Interface" button — exposed for UI

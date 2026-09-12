@@ -35,13 +35,13 @@ Item {
     signal unloadRequested(string name)
 
     // ─── Compact (handset / tablet) layout ───
-    // Same rule, and the same reason, as ModuleInspectorView: below the sum of
-    // the desktop columns' minimums LogosTable pins them and scrolls sideways,
-    // which puts the row's action off the right edge where a touch cannot
-    // reach it (logos-workspace#84). Version, status and description fold into
-    // the app cell so the toggle keeps its place on screen.
-    readonly property int desktopMinimumWidth: 720
-    readonly property bool compact: root.width > 0 && root.width < desktopMinimumWidth
+    // Same rule, and the same reason, as ModuleInspectorView: narrower than
+    // what the desktop set asks for (230 + 100 + 130 + 200 + 220, pinned to
+    // that sum by a test) the row's action is pushed off the right edge, where
+    // a touch cannot reach it (logos-workspace#84). Version, status and
+    // description fold into the app cell so the toggle keeps its place.
+    readonly property int desktopColumnsWidth: 880
+    readonly property bool compact: root.width > 0 && root.width < desktopColumnsWidth
 
     ModulesFilterProxy {
         id: tableModel

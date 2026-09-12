@@ -70,13 +70,16 @@ TestCase {
         }
     }
 
-    // The two screens logos-workspace#84 names, in the logical pixels the
-    // Shell's content surface reported on each, plus a desktop width so a fix
-    // that only ever collapses is caught too.
+    // The screens this has been measured on, in the logical pixels the Shell's
+    // content surface reported on each, plus a desktop width so a fix that only
+    // ever collapses is caught too. The 724 is a physical iPad Air (4th gen):
+    // it is the one that found the first threshold wrong, because its pane is
+    // exactly the desktop columns' minimum total and the row overflowed anyway.
     function viewport_data() {
         return [
             { tag: "iphone-16-pro",        width: 402,  height: 874  },
             { tag: "ipad-air-13-portrait", width: 928,  height: 1326 },
+            { tag: "ipad-air-4-portrait",  width: 724,  height: 1140 },
             { tag: "desktop",              width: 1440, height: 900  },
         ];
     }
@@ -221,6 +224,41 @@ TestCase {
                                "appsInspector.table");
         compare(apps.columns.length, 2, "Apps Inspector keeps app + action");
 
+        host.destroy();
+    }
+
+    // What the compact layout switches on. The threshold is a number in the
+    // view, and the number it has to be is the width the desktop column set
+    // asks for -- so read that set and add it up. A column added to either
+    // table, or a preferredWidth changed, moves the answer and fails here
+    // rather than three screens later.
+    //
+    // The PREFERRED total, not the minimum one: a RowLayout squeezed between
+    // the two does not shrink every column proportionally, so the row overflows
+    // well before the minimums bite. That is exactly what the iPad Air (4th
+    // gen) showed -- a 700-px pane, the minimum total to the pixel, with the
+    // toggle at x=710 in a 724-wide viewport.
+    function test_the_compact_threshold_is_what_the_desktop_columns_ask_for_data() {
+        return [
+            { tag: "modules", view: "moduleInspectorView", table: "moduleInspector.table",
+              key: "module_inspector" },
+            { tag: "apps",    view: "appsInspectorView",   table: "appsInspector.table",
+              key: "apps_inspector" },
+        ];
+    }
+
+    function test_the_compact_threshold_is_what_the_desktop_columns_ask_for(data) {
+        var host = hostComp.createObject(null, { width: 1440, height: 900 });
+        waitForRendering(host.contentItem);
+        var table = openSection(host, data.key, data.view, data.table);
+        var view = findChild(host.settings, data.view);
+
+        var wanted = 0;
+        for (var i = 0; i < table.desktopColumns.length; ++i)
+            wanted += table.desktopColumns[i].preferredWidth;
+
+        compare(view.desktopColumnsWidth, wanted,
+                data.tag + ": the threshold is the desktop columns' preferred total");
         host.destroy();
     }
 
