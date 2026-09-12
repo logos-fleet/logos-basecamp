@@ -964,10 +964,19 @@
             (logos-module-builder.packages.${system} or {}).web-view-counter or null;
           webContainerRuntime =
             (logos-view-module-runtime.packages.${system} or {}).qml-runtime-wasm or null;
+          # The other two modules in that check's directory: the native module
+          # the view calls by name, and the broker that makes the call legal.
+          # Both are Bare images, so the check stays one process.
+          webContainerNativeModule =
+            (logos-module-builder.packages.${system} or {}).bare-greeter or null;
+          webContainerCapabilityModule =
+            (logos-capability-module.packages.${system} or {}).bare or null;
           hasWebContainerTest =
             !pkgs.stdenv.hostPlatform.isWindows
             && webContainerFixture != null
-            && webContainerRuntime != null;
+            && webContainerRuntime != null
+            && webContainerNativeModule != null
+            && webContainerCapabilityModule != null;
         in
         {
           # Individual outputs.
@@ -1144,6 +1153,8 @@
             logosCppSdk = logosSdk;
             webVariant = webContainerFixture;
             qmlRuntime = webContainerRuntime;
+            nativeModule = webContainerNativeModule;
+            capabilityModule = webContainerCapabilityModule;
           };
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           bin-appimage = nix-bundle-appimage.lib.${system}.mkAppImage {

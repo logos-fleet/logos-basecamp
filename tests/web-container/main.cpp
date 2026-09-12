@@ -139,6 +139,18 @@ int logCount()
     return gLogLines.size();
 }
 
+// A `char**` module list from the C API, as a QStringList, freed correctly.
+// liblogos allocates these with `new char[]` / `new char*[]`, so `delete[]` is
+// the right deallocator and free() would be undefined.
+QStringList takeModuleNames(char** raw)
+{
+    QStringList names;
+    if (!raw) return names;
+    for (char** p = raw; *p; ++p) { names << QString::fromUtf8(*p); delete[] *p; }
+    delete[] raw;
+    return names;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -215,18 +227,35 @@ int main(int argc, char** argv)
     logos_core_add_modules_dir(modulesDir.toUtf8().constData());
     logos_core_start();
 
-    const QStringList known = [] {
-        QStringList names;
-        // liblogos allocates these with `new char[]` / `new char*[]`, so
-        // `delete[]` is the correct deallocator and free() is undefined.
-        char** raw = logos_core_get_known_modules();
-        if (!raw) return names;
-        for (char** p = raw; *p; ++p) { names << QString::fromUtf8(*p); delete[] *p; }
-        delete[] raw;
-        return names;
-    }();
+    const QStringList known = takeModuleNames(logos_core_get_known_modules());
     check(QStringLiteral("the core discovered the web variant as a module"),
           known.contains(moduleName), known.join(QStringLiteral(", ")));
+
+    // ── what the page will call, brought up before the page ────────────────
+    //
+    // ORDER IS PART OF THE ASSERTION. The view calls `greeter` 400 ms after its
+    // QML arrives, so a native module loaded after the page would make this
+    // check's verdict depend on how fast a browser started.
+    //
+    // capability_module is not loaded here because the CORE loads its own broker
+    // at start (initializeCapabilityModule), and it has to: the page's calls go
+    // out as the module's own identity on a store that is born empty, so its
+    // first call to any target runs `capability_module.requestModule`. With no
+    // broker that call is refused at the target's empty-token check — which
+    // looks exactly like a container that never routed anything. So it is
+    // asserted rather than assumed.
+    if (!nativeModule.isEmpty()) {
+        const QStringList loaded = takeModuleNames(logos_core_get_loaded_modules());
+        check(QStringLiteral("the core brought up the capability broker"),
+              loaded.contains(QStringLiteral("capability_module")),
+              loaded.join(QStringLiteral(", ")));
+
+        const bool nativeLoaded =
+            logos_core_load_module(nativeModule.toUtf8().constData(),
+                                   LOGOS_LOAD_REQUIRED_DEPS) != 0;
+        check(QStringLiteral("the native module the view calls is loaded"),
+              nativeLoaded, nativeModule);
+    }
 
     // THE CONTAINER'S OWN VERDICT. loadModule returns only once
     // WebContainer::awaitLoad has asked the page for its interface and the view
