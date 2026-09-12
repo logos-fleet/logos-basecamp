@@ -24,6 +24,10 @@ const QLatin1String kLibp2p("libp2p_module");
 const QLatin1String kDelivery("delivery_module");
 const QLatin1String kChat("chat_module");
 const QLatin1String kPeerIdSeparator("/p2p/");
+// The group both ends open messages in. Spelled once here and printed on the
+// phone's log, so the desktop half can find the conversation by name rather
+// than by being told the id out of band.
+const QLatin1String kGroupName("slice 22 group");
 
 // One value from the app's own command line or its environment, in that order.
 // argv is how a simulator and a device runner both pass it (simctl launch /
@@ -317,26 +321,26 @@ bool NetworkSmokeRunner::runChat()
     if (call(client, mod, QStringLiteral("get_address"), QVariantList{}, &out))
         emit log(QStringLiteral("  chat address: %1").arg(out.toString()));
 
-    // A conversation that needs no second party, so "chat_module can create a
-    // conversation" is answerable on a phone with nothing else running.
-    bool ok = call(client, mod, QStringLiteral("create_group_conversation"),
-                   QVariantList{ QStringLiteral("smoke group"), QStringLiteral("") },
-                   &out, 60000);
-    if (ok)
-        emit log(QStringLiteral("  group conversation: %1").arg(asJson(out)));
+    // EVERYTHING ABOVE IS WHAT "CHAT USABLE" MEANS on this device: the core
+    // answers, its state is installed, and its delivery node has joined the
+    // network, which is the last of the three a user waits for. A host times
+    // its cold start off this signal.
+    emit chatUsable();
 
-    // ...and the one the criterion actually names: a 1:1 conversation with the
-    // desktop installation, opened from the phone with the address that
-    // installation printed.
+    // The criterion: a GROUP the desktop installation is a member of, with a
+    // message crossing in each direction. Without a peer to invite, the group
+    // is still created -- "chat_module can open a conversation" is answerable
+    // on a phone with nothing else running -- and the exchange is skipped by
+    // name rather than failed.
+    bool ok;
     if (!m_chatPeer.isEmpty()) {
-        const bool direct = call(client, mod, QStringLiteral("create_conversation"),
-                                 QVariantList{ m_chatPeer }, &out, 60000);
-        emit log(direct
-                     ? QStringLiteral("  conversation with the desktop peer: %1").arg(asJson(out))
-                     : QStringLiteral("  conversation with the desktop peer FAILED"));
-        ok = ok && direct;
+        ok = exchangeInGroup(client);
     } else {
-        emit log(QStringLiteral("no --chat-peer given; the desktop-backed conversation is skipped"));
+        ok = call(client, mod, QStringLiteral("create_group_conversation"),
+                  QVariantList{ kGroupName, QStringLiteral("") }, &out, 60000);
+        if (ok)
+            emit log(QStringLiteral("  group conversation: %1").arg(asJson(out)));
+        emit log(QStringLiteral("no --chat-peer given; the two-party group exchange is skipped"));
     }
 
     if (call(client, mod, QStringLiteral("list_conversations"), QVariantList{}, &out))
@@ -347,6 +351,158 @@ bool NetworkSmokeRunner::runChat()
     emit log(ok ? QStringLiteral("CHAT CONVERSATION OK")
                 : QStringLiteral("WRONG: chat_module created no conversation"));
     return ok;
+}
+
+// The slice-22 criterion, and it is deliberately ONE group rather than the
+// 1:1 conversation slice 21 opened: a group is the shape the criterion names,
+// and it is also the harder of the two -- a member has to be invited, the
+// group has to COMMIT that invite, and only then can either side read what the
+// other writes. A 1:1 invite needs no commit and would pass while the group
+// path was broken.
+//
+// The group is created HERE rather than on the desktop because
+// create_group_conversation makes the caller its only member and
+// add_group_member is how it grows: the phone is the side under test, so the
+// phone is the side that owns the conversation.
+bool NetworkSmokeRunner::exchangeInGroup(LogosAPIClient* client)
+{
+    const QString mod = kChat;
+    QVariant out;
+    QElapsedTimer clock;
+    clock.start();
+
+    if (!call(client, mod, QStringLiteral("create_group_conversation"),
+              QVariantList{ kGroupName, QStringLiteral("slice 22") }, &out, 60000)) {
+        emit log(QStringLiteral("  the two-party group could not be created"));
+        return false;
+    }
+    const QString convo = out.toString();
+    if (convo.isEmpty()) {
+        emit log(QStringLiteral("  create_group_conversation answered no convo_id"));
+        return false;
+    }
+    emit log(QStringLiteral("  two-party group: %1").arg(convo));
+
+    if (!call(client, mod, QStringLiteral("add_group_member"),
+              QVariantList{ convo, m_chatPeer }, &out, 60000)) {
+        emit log(QStringLiteral("  the desktop peer could not be invited"));
+        return false;
+    }
+    emit log(QStringLiteral("  invited the desktop peer: %1").arg(m_chatPeer));
+
+    // WAIT FOR THE COMMIT, and this is the step that cannot be skipped. The
+    // invite is delivered and committed asynchronously; a message sent while
+    // the member is still `pending` is encrypted to an epoch that member is
+    // not in, so the desktop never sees it -- and the phone reports a
+    // successful send either way.
+    // Four minutes, and it is not padding: two logoscore installations on one
+    // laptop, on the same delivery preset, took 58 seconds to commit an invite
+    // -- the commit is a round trip through the delivery network, not a local
+    // operation, and a phone on wifi is the slower end of one.
+    if (!awaitGroupCommit(client, convo, 240000)) {
+        emit log(QStringLiteral("  the group never committed the desktop peer"));
+        return false;
+    }
+
+    // OUT. The nonce is what the desktop end matches on, so that "the phone
+    // sent a message" is confirmed from the far side rather than from the
+    // phone's account of its own call.
+    const QString mine = QStringLiteral("phone-%1")
+                             .arg(QRandomGenerator::global()->generate(), 8, 16, QLatin1Char('0'));
+    if (!call(client, mod, QStringLiteral("send_message"),
+              QVariantList{ convo, mine }, &out, 60000)) {
+        emit log(QStringLiteral("  send_message failed"));
+        return false;
+    }
+    emit log(QStringLiteral("  sent '%1' to the group").arg(mine));
+
+    // IN. get_messages rather than the message_received event: this host does
+    // not subscribe to the module's IPC event channel, and the stored
+    // conversation is the same thing the event announces.
+    const QString theirs = awaitInboundMessage(client, convo, 180000);
+    if (theirs.isEmpty()) {
+        emit log(QStringLiteral("  no message arrived from the desktop peer"));
+        return false;
+    }
+    emit log(QStringLiteral("  message from the desktop peer: '%1'").arg(theirs));
+    emit log(QStringLiteral("CHAT GROUP MESSAGE ROUND TRIP OK (%1 ms)").arg(clock.elapsed()));
+    return true;
+}
+
+// BY COUNT, not by matching the invited address. A GroupMember's `address` is
+// the member's DIRECTORY-VERIFIED account address and the contract says it is
+// empty when the member claims no confirmed account -- so a roster that has
+// committed the desktop peer can report it under a name this side never saw,
+// and waiting for the address to appear would time out on a group that is
+// working. Two committed members and none pending is the same fact without
+// that assumption: this installation is one, and the only invite sent is the
+// other.
+bool NetworkSmokeRunner::awaitGroupCommit(LogosAPIClient* client, const QString& convo,
+                                          int timeoutMs)
+{
+    QElapsedTimer clock;
+    clock.start();
+    bool announced = false;
+    for (;;) {
+        QVariant out;
+        if (call(client, kChat, QStringLiteral("list_group_members"),
+                 QVariantList{ convo }, &out, 15000, /*quiet=*/true)) {
+            int committed = 0;
+            int pending = 0;
+            for (const QVariant& entry : out.toList()) {
+                if (entry.toMap().value(QStringLiteral("pending")).toBool())
+                    ++pending;
+                else
+                    ++committed;
+            }
+            if (committed >= 2 && pending == 0) {
+                emit log(QStringLiteral("  the group committed the desktop peer in %1 ms "
+                                        "(roster: %2)")
+                             .arg(clock.elapsed()).arg(asJson(out)));
+                return true;
+            }
+        }
+        if (clock.elapsed() >= timeoutMs) {
+            emit log(QStringLiteral("  roster after %1 ms: %2").arg(clock.elapsed()).arg(asJson(out)));
+            return false;
+        }
+        if (!announced) {
+            emit log(QStringLiteral("  waiting for the group to commit the invite..."));
+            announced = true;
+        }
+        idle(500);
+    }
+}
+
+QString NetworkSmokeRunner::awaitInboundMessage(LogosAPIClient* client, const QString& convo,
+                                                int timeoutMs)
+{
+    QElapsedTimer clock;
+    clock.start();
+    bool announced = false;
+    for (;;) {
+        QVariant out;
+        if (call(client, kChat, QStringLiteral("get_messages"),
+                 QVariantList{ convo }, &out, 15000, /*quiet=*/true)) {
+            for (const QVariant& entry : out.toList()) {
+                const QVariantMap message = entry.toMap();
+                // from_self is the module's own answer to "did I write this",
+                // and it is the only reliable one: this installation's sends
+                // are in the same list, and matching on content would accept
+                // an echo of the phone's own message as an exchange.
+                if (message.value(QStringLiteral("from_self")).toBool())
+                    continue;
+                return message.value(QStringLiteral("content")).toString();
+            }
+        }
+        if (clock.elapsed() >= timeoutMs)
+            return { };
+        if (!announced) {
+            emit log(QStringLiteral("  waiting for the desktop peer to write into the group..."));
+            announced = true;
+        }
+        idle(500);
+    }
 }
 
 // status() is the only window onto the bootstrap, and it is a poll because the
@@ -384,12 +540,13 @@ QString NetworkSmokeRunner::awaitDeliveryOnline(LogosAPIClient* client, int time
             emit log(QStringLiteral("  waiting for the delivery node to come online..."));
             announced = true;
         }
-        // A nested event loop rather than processEvents(): the host's loop has
-        // to keep turning for the IPC replies, and processEvents returns the
-        // instant the queue is empty -- which would turn the interval into a
-        // busy poll of a 15-second call.
-        QEventLoop idle;
-        QTimer::singleShot(500, &idle, &QEventLoop::quit);
-        idle.exec();
+        idle(500);
     }
+}
+
+void NetworkSmokeRunner::idle(int ms)
+{
+    QEventLoop loop;
+    QTimer::singleShot(ms, &loop, &QEventLoop::quit);
+    loop.exec();
 }

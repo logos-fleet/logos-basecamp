@@ -192,39 +192,30 @@ extra:
 |---|---|
 | `--peer <multiaddr>/p2p/<peerId>` | the desktop **libp2p** peer to dial. Without it the node is still created, started and reported; the dial and the gossipsub exchange are skipped by name. |
 | `--topic <name>` | the gossipsub topic, `logos-smoke` by default. |
-| `--chat-peer <address>` | the desktop **chat** installation's `get_address()`. Without it the desktop-backed conversation is skipped. |
+| `--chat-peer <address>` | the desktop **chat** installation's `get_address()`. Without it the group is still created and the two-party exchange is skipped. |
 
 Each also has an environment fallback (`LOGOS_SMOKE_PEER`, `LOGOS_SMOKE_TOPIC`,
 `LOGOS_SMOKE_CHAT_PEER`) for a human at a terminal.
 
 ### Standing the two desktop peers up
 
-Both are `logoscore` daemons over this workspace's own module builds. Give each
-its own `LOGOSCORE_CONFIG_DIR`, or the second one drives the first.
+Both are `logoscore` daemons over this workspace's own module builds, and both
+are scripts in [`desktop-peers/`](desktop-peers/README.md) rather than a list
+of commands here — the chat one has to keep ANSWERING for as long as the phone
+runs, which is not something a paragraph can do:
 
 ```bash
-# the libp2p peer: listening on 9500, subscribed to the topic, publishing
-export LOGOSCORE_CONFIG_DIR=/tmp/libp2p-peer
-logoscore -D -m ./modules &
-logoscore load-module libp2p_module
-logoscore call libp2p_module createNode \
-  'str:{"addrs":["/ip4/0.0.0.0/tcp/9500"],"transport":"tcp","mountGossipsub":true}'
-logoscore call libp2p_module start
-logoscore call libp2p_module getNodeInfo PeerId      # goes into --peer
-logoscore call libp2p_module gossipsubSubscribe logos-smoke
-while :; do logoscore call libp2p_module gossipsubPublish logos-smoke hello; sleep 1; done &
-
-# the chat peer: same delivery preset as the phone's
-export LOGOSCORE_CONFIG_DIR=/tmp/chat-peer
-logoscore -D -m ./modules &
-logoscore load-module chat_module                    # brings delivery_module
-logoscore call chat_module init 'json:{"delivery_preset":"logos.test"}'
-logoscore call chat_module get_address               # goes into --chat-peer
+export LOGOSCORE=$(nix build --no-link --print-out-paths '.#logos-logoscore-cli')/bin/logoscore
+./desktop-peers/libp2p-peer.sh /tmp/peers/modules /tmp/peers/libp2p   # prints --peer
+./desktop-peers/chat-peer.sh   /tmp/peers/modules /tmp/peers/chat     # prints --chat-peer
 ```
 
-`json:` on `init` and `str:` on `createNode` are not interchangeable:
-`init(config: ChatConfig)` takes a RECORD and `createNode` takes a `tstr` the
-module parses itself.
+Each gets its own config directory; two daemons sharing one drive each other.
+`json:` on chat's `init` and `str:` on libp2p's `createNode` are not
+interchangeable — `init(config: ChatConfig)` takes a RECORD and `createNode`
+takes a `tstr` the module parses itself — and a `result`-returning method
+nests its answer one level further than a plain one, which is what the
+scripts' `result` helper is for.
 
 ### What it proves, and from which end
 
@@ -237,9 +228,14 @@ module parses itself.
 [smoke] chat_module: health() ok (the Rust core answers)
 [smoke] chat_module: init ok
 [smoke]   delivery node online in 1043 ms
+[smoke] COLD START: Chat usable at 2104 ms
 [smoke]   chat address: 7f7c41380f5d...
-[smoke]   group conversation: b3088251e1
-[smoke]   conversation with the desktop peer: 303fcf985ed0340a5d20043fb1541c6b
+[smoke]   two-party group: b3088251e1
+[smoke]   invited the desktop peer: 36e168739e93...
+[smoke]   the group committed the desktop peer in 41820 ms (roster: [...])
+[smoke]   sent 'phone-6631fefa' to the group
+[smoke]   message from the desktop peer: 'desktop-2099022334'
+[smoke] CHAT GROUP MESSAGE ROUND TRIP OK (48633 ms)
 [smoke] CHAT CONVERSATION OK
 ```
 
@@ -250,10 +246,20 @@ reader refuses its own nonce, so a self-echo cannot be mistaken for an exchange.
 
 **Two of these lines are only half the evidence, and the other half is on the
 desktop.** `phone-<nonce>` has to appear in the libp2p peer's own
-`gossipsubNextMessage`, and the conversation id has to appear in the chat peer's
-`list_conversations` — the phone reports a convo_id either way, because
-`create_conversation` writes it locally and publishes the invite
-asynchronously.
+`gossipsubNextMessage`, and the phone's chat nonce has to appear in the chat
+peer's `get_messages` — the phone reports a convo_id and a successful send
+either way, because both are written locally first and published
+asynchronously. `desktop-peers/README.md` has the table of which line to read
+at which end.
+
+**Why a GROUP and not the 1:1 conversation slice 21 opened.** A group is the
+shape the criterion names, and it is also the harder of the two: a member has
+to be invited, the group has to COMMIT that invite, and only then can either
+side read what the other writes. A message sent before the commit is encrypted
+to an epoch the invitee is not in, so it never arrives — and `send_message`
+succeeds locally regardless. That is what `the group committed the desktop
+peer in N ms` is guarding; measured desktop-to-desktop on one laptop it took
+58 seconds, so the bound is four minutes.
 
 `delivery node online in N ms` is why that second one can be believed. `init`
 returns as soon as the state is installed and the delivery node joins the
@@ -269,6 +275,7 @@ against a node that is still `initialising` and the invite goes nowhere.
 | `../bare-counter/` | the Bare module the catalog publishes |
 | `../view-counter/` | the view module the catalog publishes |
 | `../catalog/` | the local catalog's test signing key and icon |
+| `desktop-peers/` | the two `logoscore` peers the networking half is run against |
 | `stage/` | iOS **pure** half: everything but `main.cpp`, built by nix as one static archive with the whole Logos closure attached (`nix/ios-apps.nix`) |
 | `app/` | iOS **impure** half: the Xcode-generator link, run outside the nix sandbox because that is where an `.app` is signed |
 | `android/` | the whole Android app -- androiddeployqt and gradle run inside the sandbox, so there is no split (`nix/liblogos-smoke-android.nix`) |
