@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLatin1String>
+#include <QFile>
 #include <QRandomGenerator>
 #include <QUrlQuery>
 
@@ -267,7 +268,16 @@ void MobileWebBridge::handleRequest(const QByteArray& method, const QUrl& url,
         }
         BridgeReply reply;
         reply.mimeType = mimeTypeFor(resolved);
-        reply.filePath = resolved;
+        if (m_injectShim && reply.mimeType == QByteArrayLiteral("text/html")) {
+            QFile file(resolved);
+            if (!file.open(QIODevice::ReadOnly)) {
+                respond(refusal(500, "the entry document could not be read"));
+                return;
+            }
+            reply.body = withShim(file.readAll());
+        } else {
+            reply.filePath = resolved;
+        }
         respond(reply);
         return;
     }
@@ -406,6 +416,28 @@ void MobileWebBridge::handleRequest(const QByteArray& method, const QUrl& url,
     }
 
     respond(refusal(404, "no such control path"));
+}
+
+void MobileWebBridge::setInjectsShimIntoHtml(bool injects)
+{
+    m_injectShim = injects;
+}
+
+QByteArray MobileWebBridge::withShim(const QByteArray& html) const
+{
+    const QByteArray tag = QByteArrayLiteral("<script>") + channelShim().toUtf8()
+                           + QByteArrayLiteral("</script>");
+    // AS EARLY AS THE DOCUMENT ALLOWS. After <head> when there is one, before
+    // everything when there is not -- a shim that landed after the page's own
+    // first script would be exactly as late as evaluateJavascript, which is why
+    // this exists at all.
+    const int head = html.indexOf("<head>");
+    if (head >= 0) {
+        QByteArray out = html;
+        out.insert(head + int(sizeof("<head>")) - 1, tag);
+        return out;
+    }
+    return tag + html;
 }
 
 void MobileWebBridge::setReceiver(Receiver receiver)

@@ -110,6 +110,21 @@ public:
     // is in.
     QString channelShim() const;
 
+    // SERVE THE SHIM INSIDE THE HTML instead of expecting the platform to
+    // inject it.
+    //
+    // iOS has WKUserScript and an injection time of "document start", which is
+    // the right seam: the script runs before the page's own and the document on
+    // disk is untouched. ANDROID HAS NEITHER. `WebView.evaluateJavascript` runs
+    // after the document has already started executing, which is too late for a
+    // loader whose first module script reads `window.logosQmlRuntimeBase`, and
+    // there is no user-script API to run one earlier. The one seam Android does
+    // have is the interceptor this class already is -- so on Android the
+    // container serves an entry document with the shim in its <head>.
+    //
+    // Off by default, because the platform that can do it properly should.
+    void setInjectsShimIntoHtml(bool injects);
+
     // One request from the page. `method` is "GET" or "POST".
     void handleRequest(const QByteArray& method, const QUrl& url,
                        const QByteArray& body, Respond respond);
@@ -159,6 +174,9 @@ private:
         int have = 0;
     };
 
+    // `html` with the shim inserted as early as the document allows.
+    QByteArray withShim(const QByteArray& html) const;
+
     // The reply to a poll, built from `m_outbound` with the lock held.
     BridgeReply drainLocked();
     static BridgeReply closedReply();
@@ -168,6 +186,7 @@ private:
     const QString m_runtimeDir;
     const QString m_entryFile;
     const QString m_token;
+    bool m_injectShim = false;
 
     mutable std::mutex m_mutex;
     bool m_open = true;

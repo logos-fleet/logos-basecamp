@@ -185,6 +185,35 @@ private slots:
         QCOMPARE(runtime->reply.filePath, QDir(m_runtimeDir).filePath("logos_qml_runtime.wasm"));
     }
 
+    void androidGetsTheShimInsideTheDocument()
+    {
+        // Android has no user-script API and evaluateJavascript runs after the
+        // page's own first script -- too late for a loader that reads
+        // window.logosQmlRuntimeBase at the top of it. So the container serves
+        // the entry document with the shim already in its head.
+        std::unique_ptr<MobileWebBridge> bridge(make());
+        bridge->setInjectsShimIntoHtml(true);
+
+        auto call = request(*bridge, "GET", "/index.html");
+        QVERIFY(call->answered);
+        QCOMPARE(call->reply.status, 200);
+        // A BODY, not a file: the bytes on disk are the module's and are not
+        // rewritten.
+        QVERIFY(call->reply.filePath.isEmpty());
+        const QString served = QString::fromUtf8(call->reply.body);
+        QVERIFY(served.contains(QStringLiteral("logosChannelReady")));
+        QVERIFY(served.contains(bridge->launchToken()));
+        QVERIFY(served.indexOf(QStringLiteral("<script>"))
+                < served.indexOf(QStringLiteral("<body>")));
+
+        // ...and only the HTML. A 26 MB wasm image rewritten on the way past
+        // would be the whole app's memory budget spent on nothing.
+        auto wasm = request(*bridge, "GET", "/counter_view_backend.wasm");
+        QCOMPARE(wasm->reply.status, 200);
+        QVERIFY(!wasm->reply.filePath.isEmpty());
+        QVERIFY(wasm->reply.body.isEmpty());
+    }
+
     void aRequestOutsideBothRootsIsRefused()
     {
         std::unique_ptr<MobileWebBridge> bridge(make());
