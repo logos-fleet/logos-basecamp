@@ -24,36 +24,6 @@ endif()
 
 find_package(Qt6 COMPONENTS Widgets RemoteObjects Quick Qml QuickWidgets QuickControls2 Network REQUIRED)
 
-# ── the Web container's view backend ─────────────────────────────────────────
-#
-# liblogos registers the Web container in every process and leaves the WEBVIEW
-# unset, because it is linked into a headless CLI, a desktop shell and a static
-# iOS core and exactly one of those can host a Chromium. app/web/ is this
-# shell's answer: the `logos:` scheme a module's package is served on, the
-# QWebChannel channel its page speaks the web transport over, and the widget
-# the workspace mounts. Without it a `web` module here reports the missing
-# bridge, which is the honest answer for a build with no browser in it.
-#
-# AN OPTION because Qt WebEngine is a large dependency and not every consumer of
-# this tree wants Chromium linked into the shell: the mobile Shell host, the
-# Windows cross and the mock build all build this same directory. Default ON on
-# the desktop platforms that have it; the app compiles and runs either way.
-if(NOT DEFINED LOGOS_WITH_WEBENGINE)
-    if(WIN32 OR IOS OR ANDROID OR LOGOS_USE_MOCK_BACKEND)
-        set(LOGOS_WITH_WEBENGINE OFF)
-    else()
-        set(LOGOS_WITH_WEBENGINE ON)
-    endif()
-endif()
-
-if(LOGOS_WITH_WEBENGINE)
-    find_package(Qt6 COMPONENTS WebChannel WebEngineQuick WebEngineWidgets REQUIRED)
-    message(STATUS "Web container: building the Qt WebEngine view backend")
-else()
-    message(STATUS "Web container: no webview backend in this build "
-                   "(-DLOGOS_WITH_WEBENGINE=ON to add one)")
-endif()
-
 # QML Inspector (Qt DevTools-like inspection over TCP)
 # Enabled by default in Debug builds, disabled in Release.
 # Override with -DENABLE_QML_INSPECTOR=ON/OFF
@@ -205,6 +175,58 @@ else()
 endif()
 
 endif() # LOGOS_USE_MOCK_BACKEND
+
+# Where the Web container's seam header lives in each of the two liblogos
+# layouts. Read by the LOGOS_WITH_WEBENGINE default below and by the include
+# path the backend compiles with; one definition so they cannot disagree.
+if(LOGOS_USE_MOCK_BACKEND)
+    set(_logos_web_module_view_h "")
+elseif(_liblogos_is_source)
+    set(_logos_web_module_view_h "${LOGOS_LIBLOGOS_ROOT}/src/logos_core/web_module_view.h")
+else()
+    set(_logos_web_module_view_h "${LOGOS_LIBLOGOS_ROOT}/include/web_module_view.h")
+endif()
+
+# ── the Web container's view backend ─────────────────────────────────────────
+#
+# liblogos registers the Web container in every process and leaves the WEBVIEW
+# unset, because it is linked into a headless CLI, a desktop shell and a static
+# iOS core and exactly one of those can host a Chromium. app/web/ is this
+# shell's answer: the `logos:` scheme a module's package is served on, the
+# QWebChannel channel its page speaks the web transport over, and the widget the
+# workspace mounts. Without it a `web` module here reports the missing bridge,
+# which is the honest answer for a build with no browser in it.
+#
+# AN OPTION because Qt WebEngine is a large dependency and not every consumer of
+# this tree wants Chromium linked into the shell: the mobile Shell host, the
+# Windows cross and the mock build all build this same directory.
+#
+# AND IT NEEDS `web_module_view.h`, which is the SEAM — one of the two headers
+# liblogos installs, because the backend is filled in from outside. A liblogos
+# pin that predates it cannot be built against, and the failure would otherwise
+# be a `file not found` on a header nobody named, so the probe is explicit and
+# the build says which pin it is short of.
+if(NOT DEFINED LOGOS_WITH_WEBENGINE)
+    if(WIN32 OR IOS OR ANDROID OR LOGOS_USE_MOCK_BACKEND)
+        set(LOGOS_WITH_WEBENGINE OFF)
+    elseif(NOT EXISTS "${_logos_web_module_view_h}")
+        message(STATUS "Web container: this logos-liblogos pin does not install "
+                       "web_module_view.h (looked for ${_logos_web_module_view_h}); "
+                       "building without a webview backend")
+        set(LOGOS_WITH_WEBENGINE OFF)
+    else()
+        set(LOGOS_WITH_WEBENGINE ON)
+    endif()
+endif()
+
+if(LOGOS_WITH_WEBENGINE)
+    find_package(Qt6 COMPONENTS WebChannel WebEngineQuick WebEngineWidgets REQUIRED)
+    message(STATUS "Web container: building the Qt WebEngine view backend")
+else()
+    message(STATUS "Web container: no webview backend in this build "
+                   "(-DLOGOS_WITH_WEBENGINE=ON to add one)")
+endif()
+
 
 # ── logos-view-module-runtime (provides ViewModuleHost.h + the ui-host lib) ───
 # Load-bearing: UIPluginManager/PluginLoader compile into the exe.

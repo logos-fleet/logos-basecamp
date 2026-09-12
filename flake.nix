@@ -253,11 +253,18 @@
         logosDesignSystem = logos-design-system.packages.${system}.default;
         logosViewModuleRuntime = logos-view-module-runtime.packages.${system}.default;
         # The app's bundled Qt-wasm QML runtime, served to every `web` variant's
-        # page (ADR 0004). Absent on Windows, where the whole Web-container path
-        # is — see nix/app.nix.
+        # page (ADR 0004).
+        #
+        # null on Windows, where the whole Web-container path is — and null
+        # while this repo's lock predates the runtime, which is the same
+        # condition `webContainerFixture` reads for the check. The app still
+        # builds and still opens a page; a `web` variant whose manifest asks for
+        # the qml runtime then fails IN THE PAGE with a message naming what is
+        # missing, which is the honest answer for a build that shipped without
+        # one (see WebContainerBackend::install).
         qmlRuntimeWasm =
           if pkgs.stdenv.hostPlatform.isWindows then null
-          else logos-view-module-runtime.packages.${system}.qml-runtime-wasm;
+          else (logos-view-module-runtime.packages.${system} or {}).qml-runtime-wasm or null;
         # logos-qt-mcp is the QML inspector used by the UI test harness. It has
         # no Windows target and is not needed to RUN the app -- nix/app.nix
         # already takes `logosQtMcp ? null` and gates the inspector on it -- so
