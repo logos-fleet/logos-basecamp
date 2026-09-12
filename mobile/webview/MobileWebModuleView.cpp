@@ -71,6 +71,18 @@ MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& 
     m_bridge->setInjectsShimIntoHtml(shimInDocument);
     m_channel = std::make_shared<BridgeChannel>(m_bridge);
 
+    // THE PAGE'S OWN CONSOLE, out where a device run can read it. A `web`
+    // variant draws into a canvas: from outside there is no DOM to query and no
+    // label to read, so what the module says about itself is the only window
+    // into whether its view came up. The desktop container routes it into Qt's
+    // message handler for the same reason; this is the phones' half of that.
+    m_bridge->setOnPageLog([this](const QString& level, const QString& message) {
+        const QString line = QStringLiteral("[web %1] %2").arg(m_moduleName, message);
+        if (level == QLatin1String("error")) qWarning().noquote() << line;
+        else qInfo().noquote() << line;
+        if (m_onPageLog) m_onPageLog(level, message);
+    });
+
     // A page closing its channel is a module reporting that it has stopped
     // serving — a trapped wasm image does exactly this. Same verdict as a dead
     // webview, because it is the same fact.
@@ -140,6 +152,11 @@ bool MobileWebModuleView::isAlive() const
 void* MobileWebModuleView::nativeHandle() const
 {
     return m_page.nativeHandle ? m_page.nativeHandle() : nullptr;
+}
+
+void MobileWebModuleView::setFrontmost(bool front)
+{
+    if (m_page.setFrontmost) m_page.setFrontmost(front);
 }
 
 void MobileWebModuleView::setOnDestroyed(std::function<void()> callback)

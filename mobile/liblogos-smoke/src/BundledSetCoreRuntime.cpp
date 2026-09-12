@@ -117,6 +117,35 @@ void BundledSetCoreRuntime::start()
     emit log(QStringLiteral("logos_core_start: %1 ms").arg(m_startMs));
 
     registerBundledSet();
+    refuseSubprocessArtifacts();
+}
+
+void BundledSetCoreRuntime::refuseSubprocessArtifacts()
+{
+    // WHAT THE CONTAINER POLICY USED TO SAY, said where it can be said
+    // truthfully -- see the note at logos_core_set_container_policy in
+    // registerBundledSet(). A phone has a Native container and a Web container
+    // and no subprocess module host, so the artifact that must not appear is a
+    // Qt PLUGIN: every module the core discovered has to be `bare` or `web`.
+    //
+    // AFTER discovery rather than as a policy, because the core is the one that
+    // stamps the format: a package's format is read off what is on disk, and
+    // this is the first moment anything can be asked about it.
+    char* info = logos_core_get_modules_info();
+    if (!info) return;
+    const QJsonDocument doc = QJsonDocument::fromJson(QByteArray(info));
+    delete[] info;
+
+    QStringList wrong;
+    for (const QJsonValue& value : doc.array()) {
+        const QJsonObject entry = value.toObject();
+        const QString format = entry["format"].toString();
+        if (format != QLatin1String("bare") && format != QLatin1String("web"))
+            wrong.append(QStringLiteral("%1 (%2)").arg(entry["name"].toString(), format));
+    }
+    if (wrong.isEmpty()) return;
+    emit log(QStringLiteral("WRONG: %1 would need a subprocess module host, and a phone "
+                            "has none").arg(wrong.join(QStringLiteral(", "))));
 }
 
 void BundledSetCoreRuntime::registerBundledSet()
@@ -136,11 +165,22 @@ void BundledSetCoreRuntime::registerBundledSet()
         return;
     }
 
-    // An ASSERTION, not a switch: it says every module in this process must be
-    // a Bare module, so a Qt plugin quietly finding its way in is a load error
-    // rather than a second container starting a subprocess on a phone -- which
-    // is a thing neither platform allows at all.
-    logos_core_set_container_policy("inproc");
+    // WHY NOT `inproc`, WHICH THIS USED TO ASSERT. A phone runs modules in TWO
+    // containers -- Native for the Bundled set's Bare images, Web for a
+    // Downloaded module's `web` variant -- and liblogos' policies name one
+    // container each: `inproc` refuses a `web` variant by name ("the container
+    // policy is 'inproc' but this module is a web variant"), and `web` refuses
+    // every Bare image the same way. There is no policy for "the two containers
+    // this process has", so asserting either one is asserting something false.
+    //
+    // THE ASSERTION IS KEPT, HERE, where it can be stated exactly: what a phone
+    // must never load is a Qt PLUGIN, because that is the artifact that needs a
+    // subprocess module host and neither platform allows one (ADR 0003, 0006).
+    // Bare and web are both in-process as far as Logos is concerned. So the core
+    // is left on `auto` -- the artifact decides its container -- and
+    // refuseSubprocessArtifacts() reads the formats the core discovered and
+    // says so if one of them is neither.
+    logos_core_set_container_policy("auto");
 
     for (const QJsonValue& value : modules) {
         const QJsonObject entry = value.toObject();

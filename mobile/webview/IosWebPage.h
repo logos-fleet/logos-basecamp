@@ -29,4 +29,9 @@ PlatformPageFactory iosPlatformPageFactory();
 //   <Bundle>/logos-runtime      what the app build embeds
 QString iosQmlRuntimeDir();
 
+// The directory the app ships its Downloaded `web` modules in --
+// <App>.app/web-modules, one subdirectory per module, as lgpm installs one.
+// Empty when this build ships none.
+QString iosWebModulesDir();
+
 } // namespace basecamp::web

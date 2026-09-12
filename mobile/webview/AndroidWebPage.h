@@ -30,4 +30,18 @@ PlatformPageFactory androidPlatformPageFactory();
 //   <files>/logos-runtime       where the app unpacks it from its assets
 QString androidQmlRuntimeDir();
 
+// The directory the app's Downloaded `web` modules were unpacked into, or empty
+// when this build ships none. See unpackAndroidWebAssets.
+QString androidWebModulesDir();
+
+// COPY THE APK'S `assets/logos-web` OUT, ONCE. An APK asset is not a file --
+// Qt reads it through a virtual file engine that cannot answer
+// canonicalFilePath(), which is how LogosWebPaths refuses a traversal -- so the
+// runtime and the modules are unpacked into the app's data directory, where the
+// same rule that guards the desktop container guards them.
+//
+// `stamp` identifies this build's assets: an unchanged one does not unpack
+// again, a new app build does. Call before the Web container is installed.
+void unpackAndroidWebAssets(const QString& stamp);
+
 } // namespace basecamp::web

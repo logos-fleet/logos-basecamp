@@ -69,6 +69,12 @@ signals:
 
 private:
     void registerBundledSet();
+    // Every module the core discovered must be `bare` or `web`: those are the
+    // two containers a phone has. A Qt plugin needs a subprocess module host,
+    // which neither platform allows (ADR 0003, 0006). Reported rather than
+    // asserted at the core, because liblogos' container policies name ONE
+    // container each and this process legitimately runs two -- see start().
+    void refuseSubprocessArtifacts();
     // Where THIS platform's loader will find a member's image. The manifest
     // records the path inside the SET, and the two platforms do different
     // things with it: iOS preserves the layout inside <App>.app, Android

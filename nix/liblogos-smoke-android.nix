@@ -16,6 +16,11 @@
   # app's native library directory, which since API 29 is the only place
   # Android will dlopen from at all.
   bundledSet,
+  # nix/mobile-web-assets.nix: the bundled Qt-wasm QML runtime and the
+  # Downloaded `web` modules this app ships. Packaged as APK ASSETS (the only
+  # way an APK carries a directory tree) and unpacked into the app's data
+  # directory on first launch -- see unpackAndroidWebAssets.
+  webAssets,
 }:
 
 let
@@ -117,6 +122,7 @@ let
       "-DLOGOS_LIB_ROOTS=${apkLibs}"
       "-DLOGOS_INCLUDE_ROOTS=${joined includeRoots}"
       "-DLOGOS_BUNDLED_SET_MANIFEST=${bundledSet}/bundled-set.json"
+      "-DLOGOS_ANDROID_WEB_ASSETS=${webAssets}"
     ];
     meta.description = "liblogos_core smoke host, packaged as an Android APK";
   }).overrideAttrs (old: {
@@ -210,5 +216,7 @@ in
   # <repo> --target android-arm64 --bundle <apps>` builds. The APK above
   # packages exactly it.
   bundled-set = bundledSet;
+  # The `web` half on its own, so `nix build` can weigh it without an APK.
+  web-assets = webAssets;
   run-liblogos-smoke-android = runner;
 }

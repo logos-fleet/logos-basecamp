@@ -131,6 +131,37 @@ module loads -- so a failure here is not mistaken for a module's.
 The container itself, and what running it on a Samsung changed about it, is
 [`../webview/README.md`](../webview/README.md).
 
+## ...and the Downloaded `web` modules themselves
+
+After the Bundled set, the host loads the app's shipped `web` variants through
+the SAME core, into real webviews, and drives the live-runtime budget with them
+(`WebModuleRunner`). This is what the probe above cannot answer: whether a 25 MB
+Qt-wasm QML runtime BOOTS here, what a Downloaded module's UI costs to
+cold-start on this device, and what happens to the first module when a second
+one is shown.
+
+```
+[smoke] web modules: web_counter, web_counter_b (from <App>.app/web-modules)
+[smoke] Web container: app memory before any web module: 56 MB
+[smoke] web module web_counter: loaded and published in 857 ms
+[qt] Web container: web_counter is visible; 1 live runtime(s), 240 MB of 240 MB
+[smoke] web web_counter: qml: logos-view: ready web_counter count=0
+[smoke] COLD START: web_counter's UI ready at 959 ms (spike baseline 2600-3000 ms)
+[smoke] web module web_counter: its view is laid out inside the page
+[qt] Web container: over budget -- web_counter gives up its UI page (240 MB reclaimed)
+[smoke] live-runtime budget: web_counter gave up its UI page for web_counter_b
+[smoke] web modules: PASS
+```
+
+Which modules those are is the BUILD's answer, not this file's: the app ships
+whatever `web` variants exist at its pins (`nix/mobile-web-assets.nix`), and the
+runner loads the ones the core discovered. A build whose pins produce none says
+so and passes -- there is nothing to fail.
+
+`logos-view: ready <module> count=0` is the module's own QML reporting that it
+took its backend replica over the MessagePort. It is the only window into a view
+that draws into a canvas, which is why the fixture variant narrates itself.
+
 ## Run it
 
 ```bash

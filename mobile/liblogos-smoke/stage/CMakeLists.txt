@@ -49,6 +49,8 @@ add_library(liblogos_smoke_host STATIC
     ${WEBVIEW}/MobileWebContainerBackend.h
     ${WEBVIEW}/WebPageProbe.cpp
     ${WEBVIEW}/WebPageProbe.h
+    ${WEBVIEW}/AppMemory.cpp
+    ${WEBVIEW}/AppMemory.h
     ${SRC}/SmokeRunner.cpp
     ${SRC}/SmokeRunner.h
     ${SRC}/BundledSetRunner.cpp
@@ -59,6 +61,8 @@ add_library(liblogos_smoke_host STATIC
     ${SRC}/BundledSetCoreRuntime.h
     ${SRC}/ViewModuleRunner.cpp
     ${SRC}/ViewModuleRunner.h
+    ${SRC}/WebModuleRunner.cpp
+    ${SRC}/WebModuleRunner.h
 )
 
 # LogosViewPlugin.h — the HOST side of the view-plugin interface, from
@@ -172,6 +176,7 @@ set_target_properties(liblogos_smoke_host PROPERTIES EXPORT_NAME LiblogosSmokeHo
 install(TARGETS liblogos_smoke_host EXPORT LiblogosSmokeHostTargets ARCHIVE DESTINATION lib)
 install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledSetRunner.h ${SRC}/NetworkSmokeRunner.h
         ${SRC}/BundledSetCoreRuntime.h ${SRC}/ViewModuleRunner.h
+        ${SRC}/WebModuleRunner.h
         ${BASECAMP_APP}/interfaces/ICoreRuntime.h
         DESTINATION include/liblogos-smoke-host)
 # The Web container's headers keep their DIRECTORY, so `webview/...` and
@@ -184,6 +189,7 @@ install(FILES
         ${WEBVIEW}/MobileWebContainerBackend.h
         ${WEBVIEW}/LiveRuntimeBudget.h
         ${WEBVIEW}/WebPageProbe.h
+        ${WEBVIEW}/AppMemory.h
         DESTINATION include/liblogos-smoke-host/webview)
 install(FILES ${BASECAMP_APP}/web/LogosWebPaths.h
         DESTINATION include/liblogos-smoke-host/web)

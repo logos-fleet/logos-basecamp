@@ -30,6 +30,7 @@
 #include "BundledSetRunner.h"
 #include "NetworkSmokeRunner.h"
 #include "SmokeRunner.h"
+#include "WebModuleRunner.h"
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
 #include "ViewModuleRunner.h"
 #endif
@@ -39,7 +40,9 @@
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QMetaObject>
 #include <QSocketNotifier>
+#include <QThread>
 #include <QTimer>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -73,10 +76,30 @@ void console(const char* tag, const QString& line)
 #endif
 }
 
+// THE ON-SCREEN LOG, FROM WHATEVER THREAD. Qt Widgets may only be touched from
+// the GUI thread, and lines reach here from several others: Android serves a
+// webview's requests on a Chromium thread, and liblogos traces from its module
+// workers. Appending directly corrupts the QTextDocument -- measured on a
+// Samsung SM-G990B, 2026-09-12, twice: a SIGSEGV inside
+// QTextDocumentPrivate::insert while a page logged, and later a SIGSEGV reading
+// a block's text back during an input-method query, which is the same damage
+// showing up one frame later.
+void appendToLog(const QString& line)
+{
+    if (!g_log) return;
+    if (QThread::currentThread() == g_log->thread()) {
+        g_log->appendPlainText(line);
+        return;
+    }
+    QMetaObject::invokeMethod(g_log, [line] {
+        if (g_log) g_log->appendPlainText(line);
+    }, Qt::QueuedConnection);
+}
+
 void say(const QString& line)
 {
     console("smoke", line);
-    if (g_log) g_log->appendPlainText(line);
+    appendToLog(line);
 }
 
 // Clean shutdown on request, where the request is a signal: the Quit button
@@ -98,7 +121,7 @@ void qtMessages(QtMsgType type, const QMessageLogContext&, const QString& msg)
     // The core traces every LogosAPI call; all of it goes to the platform
     // console, and only warnings and above compete for the small screen.
     console("qt", msg);
-    if (g_log && type >= QtWarningMsg) g_log->appendPlainText("qt: " + msg);
+    if (type >= QtWarningMsg) appendToLog("qt: " + msg);
 }
 
 } // namespace
@@ -168,13 +191,20 @@ int main(int argc, char* argv[])
     // The budget is the phone's: ONE live QML runtime, which the spike measured
     // at 185-240 MB. A tablet could afford more and this is where that decision
     // would be made.
+    QString webModulesDir;
     {
         using basecamp::web::MobileWebContainerBackend;
         auto* web = MobileWebContainerBackend::instance();
 #if defined(Q_OS_IOS)
+        webModulesDir = basecamp::web::iosWebModulesDir();
         web->install(basecamp::web::iosQmlRuntimeDir(),
                      basecamp::web::iosPlatformPageFactory());
 #elif defined(Q_OS_ANDROID)
+        // BEFORE THE CONTAINER, because the runtime directory the container is
+        // installed with has to exist by then: an APK's assets are not files,
+        // so the app's `web` half is copied out once into the data directory.
+        basecamp::web::unpackAndroidWebAssets(QStringLiteral(LOGOS_WEB_ASSETS_STAMP));
+        webModulesDir = basecamp::web::androidWebModulesDir();
         // ANDROID DIFFERS TWICE. The shim travels INSIDE the entry document,
         // because there is no user-script API and evaluateJavascript runs after
         // the page's own first script; and the page is served over https,
@@ -216,7 +246,17 @@ int main(int argc, char* argv[])
     }
 #endif
 
-    BundledSetCoreRuntime core(runner.prepare(argc, argv));
+    ICoreRuntime::Config coreConfig = runner.prepare(argc, argv);
+    // THE APP'S SHIPPED `web` MODULES, as a second modules directory. Unlike
+    // the Bundled set -- which is native code and therefore fixed in the app
+    // image (ADR 0003) -- a `web` variant is wasm and JavaScript, so it is
+    // DISCOVERED the way the desktop discovers an installed package: a
+    // directory per module with its manifest at the top. Read-only on iOS
+    // (inside the app bundle) and unpacked on Android, and the core does not
+    // care which.
+    if (!webModulesDir.isEmpty())
+        coreConfig.modulesDirs.push_back(webModulesDir.toStdString());
+    BundledSetCoreRuntime core(coreConfig);
     QObject::connect(&core, &BundledSetCoreRuntime::log, &say);
     core.start();
     runner.report();
@@ -255,6 +295,22 @@ int main(int argc, char* argv[])
     } else {
         say(QStringLiteral("networking modules: none in this Bundled set"));
     }
+
+    // ...and the app's Downloaded WEB modules: a `ui_qml` module's `web`
+    // variant loaded through the same core into a real webview, driven, and
+    // weighed against the live-runtime budget. This is slice 28's subject and
+    // the one thing no desktop check can answer -- whether a Qt-wasm QML
+    // runtime boots in THIS platform's webview.
+    //
+    // After the Bundled set, because the page's own calls go out as the
+    // module's identity and their first hop is capability_module, which the
+    // core brings up at start; and after the networking modules, so a slow
+    // 25 MB runtime does not delay a verdict that has nothing to do with it.
+    WebModuleRunner webModules(&core, webModulesDir);
+    QObject::connect(&webModules, &WebModuleRunner::log, &say);
+    const bool webOk = webModules.run();
+    say(webOk ? QStringLiteral("web modules: PASS")
+              : QStringLiteral("web modules: FAIL"));
 
 #if defined(LOGOS_SMOKE_WITH_VIEW_MODULE)
     // ...and the app's Bundled VIEW module, if --bundle put one in the set,
