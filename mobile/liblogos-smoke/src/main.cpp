@@ -40,7 +40,9 @@
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QMetaObject>
 #include <QSocketNotifier>
+#include <QThread>
 #include <QTimer>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -74,10 +76,30 @@ void console(const char* tag, const QString& line)
 #endif
 }
 
+// THE ON-SCREEN LOG, FROM WHATEVER THREAD. Qt Widgets may only be touched from
+// the GUI thread, and lines reach here from several others: Android serves a
+// webview's requests on a Chromium thread, and liblogos traces from its module
+// workers. Appending directly corrupts the QTextDocument -- measured on a
+// Samsung SM-G990B, 2026-09-12, twice: a SIGSEGV inside
+// QTextDocumentPrivate::insert while a page logged, and later a SIGSEGV reading
+// a block's text back during an input-method query, which is the same damage
+// showing up one frame later.
+void appendToLog(const QString& line)
+{
+    if (!g_log) return;
+    if (QThread::currentThread() == g_log->thread()) {
+        g_log->appendPlainText(line);
+        return;
+    }
+    QMetaObject::invokeMethod(g_log, [line] {
+        if (g_log) g_log->appendPlainText(line);
+    }, Qt::QueuedConnection);
+}
+
 void say(const QString& line)
 {
     console("smoke", line);
-    if (g_log) g_log->appendPlainText(line);
+    appendToLog(line);
 }
 
 // Clean shutdown on request, where the request is a signal: the Quit button
@@ -99,7 +121,7 @@ void qtMessages(QtMsgType type, const QMessageLogContext&, const QString& msg)
     // The core traces every LogosAPI call; all of it goes to the platform
     // console, and only warnings and above compete for the small screen.
     console("qt", msg);
-    if (g_log && type >= QtWarningMsg) g_log->appendPlainText("qt: " + msg);
+    if (type >= QtWarningMsg) appendToLog("qt: " + msg);
 }
 
 } // namespace
