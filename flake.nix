@@ -692,11 +692,8 @@
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
         nixpkgs.lib.mapAttrs
           (system: chain:
-            import (
-              if system == "aarch64-android"
-              then ./nix/liblogos-smoke-android.nix
-              else ./nix/ios-apps.nix
-            ) ({
+            let isAndroid = system == "aarch64-android"; in
+            import (if isAndroid then ./nix/android-apps.nix else ./nix/ios-apps.nix) {
               inherit (chain) pkgs;
               inherit chain;
               src = ./.;
@@ -706,46 +703,48 @@
               # them from. The host reads bundled-set.json out of it and knows
               # nothing else about what it carries.
               bundledSet = mobileBundledSetFor { inherit system androidBuildSystem; };
-              # The app's `web` half: the bundled QML runtime and the Downloaded
-              # `web` modules it ships. See mobileWebAssetsFor above.
+
+              # The app's `web` half: the bundled QML runtime and the
+              # Downloaded `web` modules it ships. See mobileWebAssetsFor
+              # above. Both phones, keyed off the build platform alone --
+              # wasm and JavaScript are architecture-free.
               webAssets = mobileWebAssetsFor { inherit chain androidBuildSystem; };
-            }
-            # INSIDE the parentheses: `import f a // b` is `(import f a) // b`,
-            # which merges an attribute into the RESULT that no build phase
-            # ever reads.
-            #
-            # The view framework is iOS-only, and so are these arguments: on
-            # Android Qt is a set of shared objects, so a ui_qml module there
-            # is a different artifact with a different gate and
-            # logos-module-builder publishes no `view` key at all -- and
-            # main_ui there is the desktop plugin with another suffix rather
-            # than a static import, which is a slice of its own.
-            // nixpkgs.lib.optionalAttrs (system != "aarch64-android") {
+
               # LogosViewPlugin.h — the HOST side of the view-plugin
               # interface, header-only. The runtime's library and its ui-host
               # binary are a desktop concern; on a phone the host holds the
               # view object itself and only needs the declaration to cast to.
+              #
+              # Both phones, even though only iOS has a view module to mount:
+              # the mobile catalog publishes no `ui_qml` variant for Android,
+              # but BundledSetShellHost is the same file on both and it is
+              # what mounts one.
               viewRuntimeSrc = logos-view-module-runtime;
 
               # The Shell's own images: the design system and main_ui, cross
               # built as static archives. Pure UI -- no logos input reaches
               # them -- so they are keyed off the chain's package set alone.
-              shellUi = import ./nix/shell-ui-ios.nix {
-                inherit (chain) pkgs;
-                src = ./.;
-                # Only `.version` is read; no logos input reaches these
-                # stages, and the nulls are what says so.
-                version = (import ./nix/default.nix {
+              # Two files rather than one because the platforms differ in what
+              # they do with the archives, not in which ones they are: see the
+              # header of each.
+              shellUi = import
+                (if isAndroid then ./nix/shell-ui-android.nix else ./nix/shell-ui-ios.nix)
+                {
                   inherit (chain) pkgs;
-                  logosSdk = null;
-                  logosProtocolPkg = null;
-                  logosQtHost = null;
-                  logosModule = null;
-                  logosLiblogos = null;
-                }).version;
-                designSystemSrc = logos-design-system;
-              };
-            }))
+                  src = ./.;
+                  # Only `.version` is read; no logos input reaches these
+                  # stages, and the nulls are what says so.
+                  version = (import ./nix/default.nix {
+                    inherit (chain) pkgs;
+                    logosSdk = null;
+                    logosProtocolPkg = null;
+                    logosQtHost = null;
+                    logosModule = null;
+                    logosLiblogos = null;
+                  }).version;
+                  designSystemSrc = logos-design-system;
+                };
+            })
           (logos-liblogos.lib.mkMobileChains { inherit androidBuildSystem; });
 
       # One smoke set per Android build platform; `packages`, `apps` and
@@ -1335,6 +1334,7 @@
         #   nix run .#run-liblogos-smoke-ios-sim
         #   LOGOS_IOS_TEAM_ID=... LOGOS_IOS_DEVICE=... nix run .#run-liblogos-smoke-ios-device
         #   nix run .#run-liblogos-smoke-android
+        #   nix run .#run-basecamp-shell-android
         #
         # The left operand is named rather than read back off `self.apps`: an
         # attribute of `apps` cannot refer to `apps` itself, `or { }` does not
@@ -1364,11 +1364,22 @@
               type = "app";
               program = "${mobileSmokeFor.aarch64-darwin.aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
             };
+            # ...and the Shell on the other phone. main_ui is a static archive
+            # on Android too (nix/shell-ui-android.nix), so the two runs are
+            # the same app over the same host.
+            run-basecamp-shell-android = {
+              type = "app";
+              program = "${mobileSmokeFor.aarch64-darwin.aarch64-android.run-basecamp-shell-android}/bin/run-basecamp-shell-android";
+            };
           };
           x86_64-linux = (desktopApps.x86_64-linux or { }) // {
             run-liblogos-smoke-android = {
               type = "app";
               program = "${mobileSmoke.aarch64-android.run-liblogos-smoke-android}/bin/run-liblogos-smoke-android";
+            };
+            run-basecamp-shell-android = {
+              type = "app";
+              program = "${mobileSmoke.aarch64-android.run-basecamp-shell-android}/bin/run-basecamp-shell-android";
             };
           };
         };
@@ -1411,6 +1422,20 @@
         # Darwin only, because it is an iOS cross build: the value is not
         # evaluated at all on a Linux host.
         ios-shell-host = mobileSmoke.aarch64-ios-simulator.basecamp-shell-host-ios;
+      } // pkgs.lib.optionalAttrs (builtins.elem system logos-nix.lib.androidBuildSystems) {
+        # The Android Shell's own two stages, CROSS BUILT. The APK above them
+        # needs gradle and a 300 MB download-free sandbox and is built by `ws
+        # build logos-basecamp#basecamp-shell-android --target android-arm64`;
+        # these two are what break when main_ui gains a Qt module the Android
+        # set does not carry, or when the design system's QML stops compiling
+        # for another platform -- and until now nothing built them at all.
+        #
+        # Only on a build platform an Android cross set exists for; the value
+        # is not evaluated elsewhere.
+        android-shell-ui = pkgs.linkFarmFromDrvs "basecamp-android-shell-ui" [
+          mobileSmokeFor.${system}.aarch64-android.main-ui-plugin
+          mobileSmokeFor.${system}.aarch64-android.design-system
+        ];
       });
 
       devShells = forAllSystems ({ pkgs, logosSdk, logosProtocolPkg, logosQtHost, logosModule, logosLiblogos, logosPackageManagerLibrary, logosPackageManagerModule, logosCapabilityModule, logosPackageLib, logosDesignSystem, logosCppSdkSrc, logosLiblogosSrc, logosPackageManagerModuleSrc, logosCapabilityModuleSrc, ... }: {

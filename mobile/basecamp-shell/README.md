@@ -1,8 +1,9 @@
 # Basecamp's Shell on a phone
 
 The real UI shell — `src/`, `main_ui`, the same sources the desktop plugin is
-built from — running on iOS over the app's **Bundled set**. Its Modules tab
-lists the set, and its Load/Unload buttons go through the Native container.
+built from — running on **both phones** over the app's **Bundled set**. Its
+Modules tab lists the set, and its Load/Unload buttons go through the Native
+container.
 
 ```bash
 ws run logos-basecamp --target ios-sim-arm64 --bundle view_counter --app shell
@@ -13,6 +14,14 @@ LOGOS_IOS_TEAM_ID=<team> LOGOS_IOS_DEVICE=<udid> \
   ws run logos-basecamp --target ios-arm64 --app shell \
   --bundle capability_module,libp2p_module,chat_ui \
   -- --chat-peer <the desktop installation's get_address>
+
+# ...and the same Shell on Android. No `chat_ui`: the mobile catalog
+# publishes no ui_qml variant for this platform, so the set is the four core
+# modules and the sidebar carries no app tile (see "One Shell, two phones").
+ws run logos-basecamp --target android-arm64 --app shell \
+  --bundle capability_module,libp2p_module,delivery_module,chat_module \
+  -- --peer <the desktop libp2p peer's multiaddr> \
+     --chat-peer <the desktop installation's get_address>
 ```
 
 `chat_ui` is one name and three modules: its closure is `chat_ui ->
@@ -31,7 +40,7 @@ nothing else. Three things below it are:
 
 |  | desktop | here |
 |---|---|---|
-| how the Shell is loaded | `QPluginLoader` opens `main_ui.dylib` | linked in and reached through `QPluginLoader::staticInstances()` — Qt for iOS is static archives, there is no plugin to open (ADR 0001) |
+| how the Shell is loaded | `QPluginLoader` opens `main_ui.dylib` | linked in and reached through `QPluginLoader::staticInstances()` — on iOS because Qt is static archives and there is no plugin to open (ADR 0001); on Android because an APK gives an app exactly one directory it may `dlopen` from and a plugin path inside it is a second problem on top of a packaging one |
 | where the module set comes from | a modules **directory**, scanned | the Bundled-set **manifest** the build compiled in; a phone may not download native code (ADR 0003) |
 | what answers the QML `backend` | `MainUIBackend` over three managers | `ShellModulesBackend`: the Modules tab and the app launcher are live, over the desktop app's own `ModuleInstanceModel` + `CoreModuleManager` + `ICoreRuntime`; packages and repositories say they are not here yet |
 | where an app's backend runs | a `ui-host` **subprocess**, over a local socket | in THIS process, with the same typed replica carried over a socketpair — no subprocess a store will accept (ADR 0003) |
@@ -101,6 +110,38 @@ screen and painting throughout.
 
 Standing the desktop peer up is
 [`../liblogos-smoke/desktop-peers/`](../liblogos-smoke/desktop-peers/README.md).
+
+## One Shell, two phones
+
+`main_ui` and the design system are cross-built as **static archives** for
+both targets — [`../../nix/shell-ui-ios.nix`](../../nix/shell-ui-ios.nix) and
+[`../../nix/shell-ui-android.nix`](../../nix/shell-ui-android.nix) — and
+`src/main.cpp` above them is one file. Everything that differs is in the two
+platform projects (`app/` + the Xcode step on iOS, `android/` + gradle on
+Android), and it is three things:
+
+| | iOS | Android |
+|---|---|---|
+| the app image | an `.app` linked and signed by Xcode, so the build is pure up to one static archive and impure above it (ADR 0002) | one nix derivation: `androiddeployqt` and gradle both run in the sandbox |
+| how `import QtQuick` resolves | static Qt QML plugins in the EXECUTABLE, chosen by `qmlimportscanner` at link time | shared Qt QML modules PACKAGED in the APK, chosen by `qmlimportscanner` at deploy time. Same scan, same input — the Shell's QML is compiled bytecode, so both are pointed at the trees it came from (`shellUi.qmlScanRoots`) |
+| the SVG icons | the `qsvg` archive linked and `Q_IMPORT_PLUGIN`ed by hand | the `qsvg` plugin named in `QT_PLUGIN_TARGETS` by hand. One cause: Qt finds a module's plugins by globbing its OWN cmake directory, and qsvg's config lives in the qtsvg prefix — so nothing asks for it and every icon renders as an empty square |
+| the Bundled set's apps | `ui_qml` members are mounted from a sidebar tile | none: logos-module-builder publishes no `view` output for Android, so no set built here carries one and the launcher is empty |
+
+What is NOT different: the host, the runtime seam, the Modules tab, the chat
+bring-up, and both cold-start numbers. On an SM-G990B the Shell is on screen
+in ~900 ms and chat is usable in ~2.8 s, against ~300–400 ms and ~1.5–2.4 s on
+the iPads — the gap is the phone, not the platform code.
+
+### Unloading a threaded Bare module kills the Android process
+
+Driving the Modules tab's Load/Unload on `chat_module` takes the app down with
+no tombstone and no `am_kill`, right after `In-process module stopped`. The
+container does the careful thing (`InProcContainer::terminate` asks the module
+to unload, stops the dispatch thread, then `dlclose`s), and on iOS `dlclose`
+of a framework does not actually unmap — so the same sequence is survivable
+there and fatal here, where bionic really unmaps an image whose Rust runtime
+still has threads in it. It is not the Shell's: the probe never unloads, which
+is why nothing saw it until there was a Modules tab on this platform.
 
 ## The app, opened from the sidebar
 

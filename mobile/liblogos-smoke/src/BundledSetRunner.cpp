@@ -10,6 +10,8 @@
 #include <QVariantMap>
 
 #if defined(Q_OS_ANDROID)
+#  include "PlatformConsole.h"
+
 #  include <spdlog/sinks/android_sink.h>
 #  include <spdlog/spdlog.h>
 #  include <algorithm>
@@ -27,12 +29,14 @@ namespace {
 // the device. Adding a logcat sink to every registered channel is the whole
 // fix, and it works because there is exactly ONE spdlog registry in the
 // process: libspdlog.so is a shared library here and both the app and
-// liblogos_core.so link it.
+// liblogos_core.so link it. Under the tag the host's own lines carry, so
+// `adb logcat -s logos-smoke` shows both interleaved (PlatformConsole.h).
 //
 // Called before the set is loaded, so each load's own log is covered.
 void routeCoreLogsToLogcat()
 {
-    static const auto sink = std::make_shared<spdlog::sinks::android_sink_mt>("logos-smoke");
+    static const auto sink =
+        std::make_shared<spdlog::sinks::android_sink_mt>(basecamp::mobile::kAndroidLogTag);
     const auto attach = [](const std::shared_ptr<spdlog::logger>& lg) {
         if (!lg) return;
         auto& sinks = lg->sinks();
@@ -70,8 +74,8 @@ bool BundledSetRunner::run()
 
     // NOTE for Android, where nothing appears here: a module's `lp_*` are bound
     // by a DT_NEEDED on liblogos_protocol.so that the APK build records
-    // (nix/liblogos-smoke-android.nix). It is not something the app can arrange
-    // at runtime -- bionic never puts an app's own libraries in the linker
+    // (nix/android-apps.nix). It is not something the app can arrange at
+    // runtime -- bionic never puts an app's own libraries in the linker
     // namespace's global group, and re-opening the protocol image with
     // RTLD_GLOBAL does not promote it. Measured, both ways, on an SM-G990B.
 

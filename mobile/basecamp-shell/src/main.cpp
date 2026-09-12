@@ -19,6 +19,7 @@
 #include "IShellHost.h"
 #include "IShellView.h"
 #include "NetworkSmokeRunner.h"
+#include "PlatformConsole.h"
 #include "ShellAppDriver.h"
 #include "ShellModulesDriver.h"
 #include "ShellSections.h"
@@ -45,8 +46,7 @@ namespace {
 
 void console(const QString& line)
 {
-    std::fprintf(stderr, "[shell] %s\n", qUtf8Printable(line));
-    std::fflush(stderr);
+    basecamp::mobile::consoleLine("shell", line);
 }
 
 void qtMessages(QtMsgType, const QMessageLogContext&, const QString& msg)
@@ -54,8 +54,7 @@ void qtMessages(QtMsgType, const QMessageLogContext&, const QString& msg)
     // QML warnings are the interesting output of a shell that renders a
     // scene it has never rendered on this platform before, so they go to the
     // platform console like everything else.
-    std::fprintf(stderr, "[qt] %s\n", qUtf8Printable(msg));
-    std::fflush(stderr);
+    basecamp::mobile::consoleLine("qt", msg);
 }
 
 // Clean shutdown on a signal -- simctl terminate sends SIGTERM, and the core

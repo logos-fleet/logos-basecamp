@@ -36,29 +36,14 @@ set(LOGOS_IOS_INCLUDE_ROOTS "" CACHE STRING "Prefixes holding include/ to compil
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 set(WEBVIEW ${CMAKE_CURRENT_SOURCE_DIR}/../../webview)
 set(BASECAMP_APP ${CMAKE_CURRENT_SOURCE_DIR}/../../../app)
+# The host's own sources, shared with the two Android hosts -- see
+# cmake/LogosMobileHostSources.cmake for what is in the list. This stage adds
+# ViewModuleRunner (it mounts the set's view module) and, below, the one
+# Objective-C++ file the Web container needs on this platform.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LogosMobileHostSources.cmake)
+logos_mobile_host_sources(LOGOS_HOST_SOURCES)
 add_library(liblogos_smoke_host STATIC
-    ${BASECAMP_APP}/web/LogosWebPaths.cpp
-    ${BASECAMP_APP}/web/LogosWebPaths.h
-    ${WEBVIEW}/MobileWebBridge.cpp
-    ${WEBVIEW}/MobileWebBridge.h
-    ${WEBVIEW}/MobileWebModuleView.cpp
-    ${WEBVIEW}/MobileWebModuleView.h
-    ${WEBVIEW}/LiveRuntimeBudget.cpp
-    ${WEBVIEW}/LiveRuntimeBudget.h
-    ${WEBVIEW}/MobileWebContainerBackend.cpp
-    ${WEBVIEW}/MobileWebContainerBackend.h
-    ${WEBVIEW}/WebPageProbe.cpp
-    ${WEBVIEW}/WebPageProbe.h
-    ${WEBVIEW}/AppMemory.cpp
-    ${WEBVIEW}/AppMemory.h
-    ${SRC}/SmokeRunner.cpp
-    ${SRC}/SmokeRunner.h
-    ${SRC}/BundledSetRunner.cpp
-    ${SRC}/BundledSetRunner.h
-    ${SRC}/NetworkSmokeRunner.cpp
-    ${SRC}/NetworkSmokeRunner.h
-    ${SRC}/BundledSetCoreRuntime.cpp
-    ${SRC}/BundledSetCoreRuntime.h
+    ${LOGOS_HOST_SOURCES}
     ${SRC}/ViewModuleRunner.cpp
     ${SRC}/ViewModuleRunner.h
     ${SRC}/WebModuleRunner.cpp
@@ -80,9 +65,11 @@ target_include_directories(liblogos_smoke_host PRIVATE ${LOGOS_VIEW_RUNTIME_INCL
 # ICoreRuntime.h -- Basecamp's own runtime seam, header-only. This host
 # implements it (BundledSetCoreRuntime), which is what makes "the Modules tab
 # over a Bundled set" the same interface the desktop shell already codes
-# against rather than a mobile-only lookalike.
+# against rather than a mobile-only lookalike. Same three roots the Android
+# hosts add, plus the installed-interface spelling only a stage needs.
+logos_mobile_host_includes(liblogos_smoke_host PUBLIC)
 target_include_directories(liblogos_smoke_host PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../app/interfaces>
+    $<BUILD_INTERFACE:${SRC}>
     $<INSTALL_INTERFACE:include/liblogos-smoke-host>)
 
 # Which framework the view runner dlopens. Derived by nix from the SAME
@@ -92,14 +79,6 @@ target_include_directories(liblogos_smoke_host PUBLIC
 # asks the manifest rather than assuming one is there.
 target_compile_definitions(liblogos_smoke_host
     PRIVATE LOGOS_VIEW_MODULE_STEM="${LOGOS_VIEW_MODULE_STEM}")
-target_include_directories(liblogos_smoke_host PUBLIC
-    $<BUILD_INTERFACE:${SRC}>
-    # mobile/, so the Web container's headers are reached as `webview/...` and
-    # app/, so its one shared header is reached as `web/LogosWebPaths.h` -- the
-    # same spellings the desktop container and the unit tests use.
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
-    $<BUILD_INTERFACE:${BASECAMP_APP}>
-    $<INSTALL_INTERFACE:include/liblogos-smoke-host>)
 
 if(IOS)
     target_sources(liblogos_smoke_host PRIVATE
@@ -177,6 +156,9 @@ install(TARGETS liblogos_smoke_host EXPORT LiblogosSmokeHostTargets ARCHIVE DEST
 install(FILES ${SRC}/SmokeRunner.h ${SRC}/BundledSetRunner.h ${SRC}/NetworkSmokeRunner.h
         ${SRC}/BundledSetCoreRuntime.h ${SRC}/ViewModuleRunner.h
         ${SRC}/WebModuleRunner.h
+        # Header-only, and it is the APP's main.cpp that includes it -- so it
+        # has to travel in the installed interface like the runners do.
+        ${SRC}/PlatformConsole.h
         ${BASECAMP_APP}/interfaces/ICoreRuntime.h
         DESTINATION include/liblogos-smoke-host)
 # The Web container's headers keep their DIRECTORY, so `webview/...` and
