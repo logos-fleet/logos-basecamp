@@ -18,15 +18,16 @@
 
 namespace {
 
-const char* kLibp2p   = "libp2p_module";
-const char* kDelivery = "delivery_module";
-const char* kChat     = "chat_module";
+const QLatin1String kLibp2p("libp2p_module");
+const QLatin1String kDelivery("delivery_module");
+const QLatin1String kChat("chat_module");
+const QLatin1String kPeerIdSeparator("/p2p/");
 
 // One value from the app's own command line or its environment, in that order.
 // argv is how a simulator and a device runner both pass it (simctl launch /
 // devicectl process launch take trailing arguments; Android's QtActivity reads
-// the `applicationArguments` intent extra), and the environment is the fallback
-// a human has.
+// the `extraappparams` intent extra), and the environment is the fallback a
+// human has.
 QString argOrEnv(const QString& flag, const char* envName, const QString& fallback = {})
 {
     const QStringList args = QCoreApplication::arguments();
@@ -61,17 +62,17 @@ NetworkSmokeRunner::NetworkSmokeRunner(BundledSetCoreRuntime* core, QObject* par
     : QObject(parent)
     , m_core(core)
 {
-    m_peer = argOrEnv(QStringLiteral("--peer"), "LOGOS_SMOKE_PEER");
     m_topic = argOrEnv(QStringLiteral("--topic"), "LOGOS_SMOKE_TOPIC",
                        QStringLiteral("logos-smoke"));
     m_chatPeer = argOrEnv(QStringLiteral("--chat-peer"), "LOGOS_SMOKE_CHAT_PEER");
 
     // `/ip4/.../tcp/9500/p2p/16Uiu2...` is ONE string to a human and two
-    // arguments to connectPeer, which takes the id and the addresses apart.
-    const int p2p = m_peer.indexOf(QStringLiteral("/p2p/"));
-    if (p2p > 0) {
-        m_peerAddr = m_peer.left(p2p);
-        m_peerId = m_peer.mid(p2p + 5);
+    // arguments to connectPeer.
+    const QString peer = argOrEnv(QStringLiteral("--peer"), "LOGOS_SMOKE_PEER");
+    const int separator = peer.indexOf(kPeerIdSeparator);
+    if (separator > 0) {
+        m_peerAddr = peer.left(separator);
+        m_peerId = peer.mid(separator + kPeerIdSeparator.size());
     }
 }
 
@@ -80,7 +81,7 @@ NetworkSmokeRunner::~NetworkSmokeRunner() = default;
 bool NetworkSmokeRunner::hasWork() const
 {
     const QStringList loaded = m_core->loadedModules();
-    return loaded.contains(QLatin1String(kLibp2p)) || loaded.contains(QLatin1String(kChat));
+    return loaded.contains(kLibp2p) || loaded.contains(kChat);
 }
 
 bool NetworkSmokeRunner::call(LogosAPIClient* client, const QString& module,
@@ -122,15 +123,15 @@ bool NetworkSmokeRunner::run()
     bool ok = true;
     const QStringList loaded = m_core->loadedModules();
 
-    if (loaded.contains(QLatin1String(kLibp2p)))
+    if (loaded.contains(kLibp2p))
         ok = runLibp2p() && ok;
     else
         emit log(QStringLiteral("libp2p_module: not in this Bundled set"));
 
-    if (loaded.contains(QLatin1String(kDelivery)))
+    if (loaded.contains(kDelivery))
         emit log(QStringLiteral("delivery_module: loaded (the chat core below runs on it)"));
 
-    if (loaded.contains(QLatin1String(kChat)))
+    if (loaded.contains(kChat))
         ok = runChat() && ok;
     else
         emit log(QStringLiteral("chat_module: not in this Bundled set"));
@@ -141,12 +142,12 @@ bool NetworkSmokeRunner::run()
 bool NetworkSmokeRunner::runLibp2p()
 {
     LogosAPI api(QStringLiteral("mobile_host"));
-    LogosAPIClient* client = api.getClient(QLatin1String(kLibp2p));
+    LogosAPIClient* client = api.getClient(kLibp2p);
     if (!client) {
         emit log(QStringLiteral("no client for libp2p_module"));
         return false;
     }
-    const QString mod = QLatin1String(kLibp2p);
+    const QString mod = kLibp2p;
 
     // A fresh node from a call-time config, so the listen address and the
     // transport are this run's choice rather than the module's defaults.
@@ -163,11 +164,9 @@ bool NetworkSmokeRunner::runLibp2p()
 
     QElapsedTimer clock;
     clock.start();
-    QVariant ignored;
-    if (!call(client, mod, QStringLiteral("createNode"),
-              QVariantList{ jsonCompact(cfg) }, &ignored))
+    if (!call(client, mod, QStringLiteral("createNode"), QVariantList{ jsonCompact(cfg) }))
         return false;
-    if (!call(client, mod, QStringLiteral("start"), QVariantList{}, &ignored))
+    if (!call(client, mod, QStringLiteral("start"), QVariantList{}))
         return false;
     emit log(QStringLiteral("libp2p node created and started in %1 ms").arg(clock.elapsed()));
 
@@ -193,22 +192,21 @@ bool NetworkSmokeRunner::runLibp2p()
 
 bool NetworkSmokeRunner::exchangeWithPeer(LogosAPIClient* client)
 {
-    const QString mod = QLatin1String(kLibp2p);
+    const QString mod = kLibp2p;
     QVariant out;
 
     // SUBSCRIBE FIRST. Gossipsub only forwards a topic to a peer that is in its
     // mesh for it, and the mesh is built from the subscription both ends
     // announce when the connection comes up. Subscribing after the dial races
     // the desktop's first publish.
-    if (!call(client, mod, QStringLiteral("gossipsubSubscribe"),
-              QVariantList{ m_topic }, &out))
+    if (!call(client, mod, QStringLiteral("gossipsubSubscribe"), QVariantList{ m_topic }))
         return false;
     emit log(QStringLiteral("  subscribed to '%1'").arg(m_topic));
 
     QElapsedTimer clock;
     clock.start();
     if (!call(client, mod, QStringLiteral("connectPeer"),
-              QVariantList{ m_peerId, QVariantList{ m_peerAddr }, qint64(20000) }, &out))
+              QVariantList{ m_peerId, QVariantList{ m_peerAddr }, qint64(20000) }))
         return false;
     emit log(QStringLiteral("  dialled %1 at %2 in %3 ms")
                  .arg(m_peerId, m_peerAddr).arg(clock.elapsed()));
@@ -227,7 +225,7 @@ bool NetworkSmokeRunner::exchangeWithPeer(LogosAPIClient* client)
     // be rather than the only chance it had.
     for (int attempt = 0; attempt < 30; ++attempt) {
         if (!call(client, mod, QStringLiteral("gossipsubPublish"),
-                  QVariantList{ m_topic, nonce }, &out, 30000, /*quiet=*/true)) {
+                  QVariantList{ m_topic, nonce }, nullptr, 30000, /*quiet=*/true)) {
             // Not fatal on its own: a publish before the mesh exists is refused
             // for want of peers, which is what the retries are for.
             if (attempt == 0)
@@ -256,12 +254,12 @@ bool NetworkSmokeRunner::exchangeWithPeer(LogosAPIClient* client)
 bool NetworkSmokeRunner::runChat()
 {
     LogosAPI api(QStringLiteral("mobile_host"));
-    LogosAPIClient* client = api.getClient(QLatin1String(kChat));
+    LogosAPIClient* client = api.getClient(kChat);
     if (!client) {
         emit log(QStringLiteral("no client for chat_module"));
         return false;
     }
-    const QString mod = QLatin1String(kChat);
+    const QString mod = kChat;
     QVariant out;
 
     // health() first, and it is not ceremony: it is reachable without init and

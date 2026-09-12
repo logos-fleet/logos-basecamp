@@ -31,8 +31,8 @@ public:
     explicit NetworkSmokeRunner(BundledSetCoreRuntime* core, QObject* parent = nullptr);
     ~NetworkSmokeRunner() override;
 
-    // Every step this run is going to attempt, decided from the set and the
-    // arguments. Empty when the set carries none of the networking modules.
+    // Whether this set carries anything for run() to exercise. False when it
+    // holds none of the networking modules.
     bool hasWork() const;
 
     // Runs what hasWork() advertised. False if a step that was attempted failed;
@@ -53,19 +53,21 @@ private:
 
     // A `result`-returning universal method: unwrap the LogosResult the Native
     // container re-materialises from the module's JSON, log its error if it
-    // failed, and hand back the value.
+    // failed, and hand back the value. A null `value` is for the calls whose
+    // answer nothing reads.
     //
     // `quiet` is for the calls whose FAILURE is an ordinary outcome -- an empty
     // gossipsub queue answers "timeout waiting for message", and polling it
     // thirty times would otherwise bury the run's real lines under thirty
     // identical ones.
     bool call(LogosAPIClient* client, const QString& module, const QString& method,
-              const QVariantList& args, QVariant* value, int timeoutMs = 30000,
-              bool quiet = false);
+              const QVariantList& args, QVariant* value = nullptr,
+              int timeoutMs = 30000, bool quiet = false);
 
     BundledSetCoreRuntime* m_core;
-    QString m_peer;        // the whole multiaddr, /p2p/<id> included
-    QString m_peerId;      // ...and its two halves, split once
+    // The desktop peer's multiaddr and id: `--peer` hands them over as one
+    // string and connectPeer takes them apart, so they are split once here.
+    QString m_peerId;
     QString m_peerAddr;
     QString m_topic;
     QString m_chatPeer;    // the desktop installation's chat address

@@ -387,22 +387,24 @@
           isAndroid = system == "aarch64-android";
           signingKey = { inherit (catalogTestKey) name jwk; };
 
-          barePayload = catalogLib.mkVariantPayload {
-            drv = bareCounter.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
-            stem = "bare_counter_bare";
-            inherit target;
-          };
-
-          # ── the networking set (slice 21) ─────────────────────────────
-          # libp2p_module, delivery_module and chat_module, each as the Bare
-          # image its own flake cross-builds for this target. Same shape as the
-          # counter above and the same `mobile.<target>.bare` key: nothing here
-          # knows that one of them carries a nim libp2p, another a nim delivery
-          # core plus zerokit's rln, and the third a Rust chat core.
-          barePayloadFor = { module, name }: catalogLib.mkVariantPayload {
-            drv = module.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
-            stem = "${name}_bare";
-            inherit target;
+          # One catalog entry per Bare module, and they are all the same shape:
+          # the `mobile.<target>.bare` image the module's OWN flake cross-builds,
+          # published under `<name>_bare` and signed with the dev key. Nothing
+          # here knows that one of them carries a nim libp2p, another a nim
+          # delivery core plus zerokit's rln, and the third a Rust chat core.
+          #
+          # `dependencies` is the module's own metadata.json answer, not a
+          # convenience: the Bundled set resolves a CLOSURE out of it, so
+          # `--bundle chat_module` has to bring delivery_module along without
+          # naming it.
+          mkBareSpec = { name, version, category, description, module, dependencies ? [ ] }: {
+            inherit name version category description dependencies signingKey;
+            type = "core";
+            variants.${target} = catalogLib.mkVariantPayload {
+              drv = module.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
+              stem = "${name}_bare";
+              inherit target;
+            };
           };
 
           viewPayload = catalogLib.mkVariantPayload {
@@ -417,19 +419,16 @@
           };
 
           specs = {
-            bare_counter = {
+            bare_counter = mkBareSpec {
               name = "bare_counter";
               version = "1.0.0";
-              type = "core";
               category = "testing";
               description = "The counter, as a Bundled Bare module for the mobile host";
-              dependencies = [ ];
-              variants.${target} = barePayload;
-              inherit signingKey;
+              module = bareCounter;
             };
 
             # The capability broker. Not a networking module, and here for what
-            # the three of them NEED: a module-to-module call mints its token
+            # the three below NEED: a module-to-module call mints its token
             # through `capability_module` (LogosAPIClient::mintAndCacheToken),
             # and without it in the set the call goes out with no token, the
             # target's ModuleProxy refuses it and the caller is told "token not
@@ -440,58 +439,36 @@
             # liblogos already knows this module by name -- the in-process
             # container grants it `token_registry` / `token_delivery`
             # (hostServicesJsonFor) -- so bundling it is the whole of the wiring.
-            capability_module = {
+            capability_module = mkBareSpec {
               name = "capability_module";
               version = "1.0.0";
-              type = "core";
               category = "system";
               description = "The capability broker, as a Bundled Bare module";
-              dependencies = [ ];
-              variants.${target} = barePayloadFor {
-                module = logos-capability-module; name = "capability_module";
-              };
-              inherit signingKey;
+              module = logos-capability-module;
             };
 
-            # The three networking modules. `dependencies` is the module's own
-            # metadata.json answer, not a convenience: the Bundled set resolves
-            # a CLOSURE out of it, so `--bundle chat_module` has to bring
-            # delivery_module along without naming it.
-            libp2p_module = {
+            # ── the networking set (slice 21) ─────────────────────────────
+            libp2p_module = mkBareSpec {
               name = "libp2p_module";
               version = "1.0.0";
-              type = "core";
               category = "protocol";
               description = "nim-libp2p's C bindings as a Bundled Bare module";
-              dependencies = [ ];
-              variants.${target} = barePayloadFor {
-                module = logos-libp2p-module; name = "libp2p_module";
-              };
-              inherit signingKey;
+              module = logos-libp2p-module;
             };
-            delivery_module = {
+            delivery_module = mkBareSpec {
               name = "delivery_module";
               version = "0.2.1";
-              type = "core";
               category = "protocol";
               description = "logosdelivery + rln as a Bundled Bare module";
-              dependencies = [ ];
-              variants.${target} = barePayloadFor {
-                module = logos-delivery-module; name = "delivery_module";
-              };
-              inherit signingKey;
+              module = logos-delivery-module;
             };
-            chat_module = {
+            chat_module = mkBareSpec {
               name = "chat_module";
               version = "0.2.2";
-              type = "core";
               category = "messaging";
               description = "The Rust chat core as a Bundled Bare module";
+              module = logos-chat-module;
               dependencies = [ "delivery_module" ];
-              variants.${target} = barePayloadFor {
-                module = logos-chat-module; name = "chat_module";
-              };
-              inherit signingKey;
             };
           } // nixpkgs.lib.optionalAttrs (!isAndroid) {
             view_counter = {
