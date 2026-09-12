@@ -39,6 +39,12 @@ pkgs.stdenv.mkDerivation {
     pkgs.qt6.qtdeclarative     # QtWebEngineQuick's own dependency
     pkgs.qt6.qtwebengine
     pkgs.qt6.qtwebchannel
+    # logos-cpp-sdk's exported config does find_dependency on all three, so they
+    # have to be findable here even though the driver links none of them
+    # directly — it takes the seam header and the core's C ABI and nothing else.
+    pkgs.nlohmann_json
+    pkgs.openssl
+    pkgs.boost
   ];
 
   dontUseCmakeConfigure = true;
