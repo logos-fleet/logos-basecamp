@@ -1,11 +1,17 @@
 #pragma once
 
+#include <QLatin1String>
 #include <QSet>
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
 
 namespace basecamp::shell {
+
+// A Bundled member of this type is the HOST's to instantiate, not the core's to
+// load (ADR 0006). Every place that asks this question -- here and in
+// ShellModulesBackend -- must agree, so there is one spelling of it.
+inline const QLatin1String kViewModuleType("ui_qml");
 
 // WHAT A STORE SHELL'S MODULES TAB AND SIDEBAR SHOW, as a pure function of the
 // four facts that decide it.
@@ -60,6 +66,9 @@ struct ModuleFacts {
     QSet<QString> openPages;
 };
 
+// Every name in the Bundled-set manifest, in its order.
+QStringList bundledNames(const QVariantList& bundledSet);
+
 // Names the core knows that neither the manifest nor the shipped tree accounts
 // for, in discovery order. Empty on a build that has never installed anything.
 QStringList downloadedModules(const ModuleFacts& facts);
@@ -71,7 +80,19 @@ QStringList downloadedModules(const ModuleFacts& facts);
 QVariantList moduleRows(const ModuleFacts& facts);
 
 // The sidebar's tiles, in UIPluginManager::buildAppRow's shape: the Bundled
-// set's `ui_qml` members, then the Downloaded modules with a page.
+// set's `ui_qml` members, then every module whose UI is a page in the Web
+// container.
 QVariantList launcherApps(const ModuleFacts& facts);
+
+// Whether this module's UI is a PAGE in the Web container rather than a
+// framework the host instantiates -- which is what decides how it is put on
+// screen (BundledSetShellHost::mountApp), and is the same question `launcherApps`
+// answers to give it a tile. The two must not be able to disagree: a tile whose
+// module the host then refuses to mount is a button that does nothing.
+//
+// Shipped or Downloaded makes no difference to it. Both are discovered by the
+// core rather than declared by the manifest, both run in the container, and
+// only where they CAME FROM tells them apart (see `shipped`).
+bool isWebContainerApp(const ModuleFacts& facts, const QString& name);
 
 } // namespace basecamp::shell

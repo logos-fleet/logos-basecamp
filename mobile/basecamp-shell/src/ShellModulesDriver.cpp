@@ -88,7 +88,7 @@ void ShellModulesDriver::run()
         emit log(QStringLiteral("WRONG: the Modules tab does not list what the app has"));
         return;
     }
-    emit log(QStringLiteral("SHELL MODULES TAB LISTS THE BUNDLED SET"));
+    emit log(QStringLiteral("SHELL MODULES TAB LISTS WHAT THE APP HAS"));
 
     // ── 2b. every row came in with the app image ──
     // A Store shell may not gain a native module at runtime (ADR 0003), so

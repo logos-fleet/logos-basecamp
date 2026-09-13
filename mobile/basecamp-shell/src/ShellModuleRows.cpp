@@ -4,17 +4,16 @@ namespace basecamp::shell {
 
 namespace {
 
-// A Bundled member of this type is the HOST's to instantiate, not the core's to
-// load (ADR 0006).
-const QLatin1String kViewModuleType("ui_qml");
 const QLatin1String kCoreModuleType("core");
 
-QStringList bundledNames(const QVariantList& bundledSet)
+// The rule `isWebContainerApp` publishes, taking the manifest's name list from
+// the caller: `launcherApps` asks it once per known module and must not rebuild
+// that list every time.
+bool runsInWebContainer(const ModuleFacts& facts, const QStringList& bundled,
+                        const QString& name)
 {
-    QStringList names;
-    for (const QVariant& row : bundledSet)
-        names << row.toMap().value(QStringLiteral("name")).toString();
-    return names;
+    return facts.openPages.contains(name)
+        && (facts.shipped.contains(name) || !bundled.contains(name));
 }
 
 QVariantMap tile(const QString& name, bool loaded)
@@ -39,6 +38,14 @@ QVariantMap tile(const QString& name, bool loaded)
 }
 
 } // namespace
+
+QStringList bundledNames(const QVariantList& bundledSet)
+{
+    QStringList names;
+    for (const QVariant& row : bundledSet)
+        names << row.toMap().value(QStringLiteral("name")).toString();
+    return names;
+}
 
 QStringList downloadedModules(const ModuleFacts& facts)
 {
@@ -148,12 +155,17 @@ QVariantList launcherApps(const ModuleFacts& facts)
     // A page is what makes one an app, and that is the same question for a
     // shipped `web` module as for an installed one -- neither is in the
     // manifest, and both run in the Web container.
+    const QStringList bundled = bundledNames(facts.bundledSet);
     for (const QString& name : facts.known) {
-        if (facts.openPages.contains(name)
-            && (facts.shipped.contains(name) || !bundledNames(facts.bundledSet).contains(name)))
+        if (runsInWebContainer(facts, bundled, name))
             apps.append(tile(name, facts.loaded.contains(name)));
     }
     return apps;
+}
+
+bool isWebContainerApp(const ModuleFacts& facts, const QString& name)
+{
+    return runsInWebContainer(facts, bundledNames(facts.bundledSet), name);
 }
 
 } // namespace basecamp::shell

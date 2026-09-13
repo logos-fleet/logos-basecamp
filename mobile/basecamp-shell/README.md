@@ -61,9 +61,9 @@ run reads the verdicts off the console:
 [shell] COLD START: Shell shown at 812 ms
 [shell] shell: Settings -> Module Inspector is on screen
 [shell] modules tab rows: bare_counter, capability_module, view_counter
-[shell] bundled set:      bare_counter, capability_module, view_counter
-[shell] SHELL MODULES TAB LISTS THE BUNDLED SET
-[shell] all 3 rows are installType 'embedded' -- no Downloaded module
+[shell] app ships:        bare_counter, capability_module, view_counter
+[shell] SHELL MODULES TAB LISTS WHAT THE APP HAS
+[shell] all 3 shipped row(s) are installType 'embedded'; 0 downloaded
 [shell] modules tab stats: bare_counter 0.0%/1.4 MB, capability_module 0.0%/0.9 MB, ...
 [shell] SHELL MODULES TAB SHOWS THE SET'S STATS
 [shell] load bare_counter

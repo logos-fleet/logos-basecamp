@@ -19,10 +19,6 @@ namespace {
 // policy is written against the name that calls it.
 const char* kApiName = "basecamp_shell";
 
-// A Bundled member of this type is the HOST's to instantiate, not the core's
-// to load (ADR 0006). Two places ask, and they must agree.
-const QLatin1String kViewModuleType("ui_qml");
-
 } // namespace
 
 ShellModulesBackend::ShellModulesBackend(BundledSetCoreRuntime* core, QObject* parent)
@@ -135,7 +131,8 @@ bool ShellModulesBackend::isViewModule(const QString& name) const
     for (const QVariant& row : m_core->bundledSet()) {
         const QVariantMap entry = row.toMap();
         if (entry.value(QStringLiteral("name")).toString() == name)
-            return entry.value(QStringLiteral("type")).toString() == kViewModuleType;
+            return entry.value(QStringLiteral("type")).toString()
+                       == basecamp::shell::kViewModuleType;
     }
     return false;
 }
@@ -182,10 +179,7 @@ void ShellModulesBackend::rebuildRows()
 
 QStringList ShellModulesBackend::bundledSetNames() const
 {
-    QStringList names;
-    for (const QVariant& row : m_core->bundledSet())
-        names << row.toMap().value(QStringLiteral("name")).toString();
-    return names;
+    return basecamp::shell::bundledNames(m_core->bundledSet());
 }
 
 QStringList ShellModulesBackend::viewModuleNames() const
@@ -193,7 +187,8 @@ QStringList ShellModulesBackend::viewModuleNames() const
     QStringList names;
     for (const QVariant& row : m_core->bundledSet()) {
         const QVariantMap entry = row.toMap();
-        if (entry.value(QStringLiteral("type")).toString() == kViewModuleType)
+        if (entry.value(QStringLiteral("type")).toString()
+                == basecamp::shell::kViewModuleType)
             names << entry.value(QStringLiteral("name")).toString();
     }
     return names;
@@ -223,9 +218,9 @@ QStringList ShellModulesBackend::downloadedModules() const
     return basecamp::shell::downloadedModules(facts());
 }
 
-bool ShellModulesBackend::isDownloadedApp(const QString& name) const
+bool ShellModulesBackend::isWebContainerApp(const QString& name) const
 {
-    return m_openPages.contains(name) && downloadedModules().contains(name);
+    return basecamp::shell::isWebContainerApp(facts(), name);
 }
 
 void ShellModulesBackend::watchWebContainer()

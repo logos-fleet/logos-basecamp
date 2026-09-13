@@ -153,9 +153,12 @@ public:
     // tree accounts for: everything a user installed. The Shell's own answer
     // to "where did this come from".
     QStringList downloadedModules() const;
-    // Whether this one is a Downloaded module with a page open in the Web
-    // container -- i.e. an app the sidebar carries a tile for.
-    bool isDownloadedApp(const QString& name) const;
+    // Whether this one's UI is a page in the Web container rather than a
+    // framework the host instantiates -- i.e. an app the sidebar carries a tile
+    // for and mounts by z-order. The SAME rule the tile is made by, so the two
+    // cannot disagree; shipped or Downloaded makes no difference to it
+    // (ShellModuleRows.h).
+    bool isWebContainerApp(const QString& name) const;
 
     // Subscribe to the phone's Web container: a Downloaded module's page
     // opening is what makes it an APP here, and there is nothing else the Shell

@@ -260,6 +260,46 @@ private slots:
         QCOMPARE(namesOf(basecamp::shell::launcherApps(facts)),
                  (QStringList{ QStringLiteral("chat_ui"), QStringLiteral("web_counter") }));
     }
+
+    // ── the tile and the mount are the same question ──────────────────────
+    //
+    // The sidebar draws a tile, and pressing it sends the name to
+    // BundledSetShellHost::mountApp, which has to decide whether to dock a
+    // QQuickWidget or tell the Web container to bring a page forward. If the
+    // tile is made by one rule and the mount gated by another, a tile can exist
+    // for a module the host then refuses -- a button that does nothing, on a
+    // phone, where there is nothing else to press.
+
+    void everyTileTheSidebarDrawsIsOneTheHostCanMount()
+    {
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("web_shipped") };
+        facts.known << QStringLiteral("web_shipped") << QStringLiteral("web_installed");
+        facts.loaded << QStringLiteral("web_shipped") << QStringLiteral("web_installed");
+        facts.openPages.insert(QStringLiteral("web_shipped"));
+        facts.openPages.insert(QStringLiteral("web_installed"));
+        facts.mountedViews.insert(QStringLiteral("chat_ui"));
+
+        for (const QString& name : namesOf(basecamp::shell::launcherApps(facts))) {
+            // chat_ui is the Bundled view module: the HOST instantiates it, so
+            // it is the one tile that is NOT the container's.
+            const bool isBundledView = name == QLatin1String("chat_ui");
+            QCOMPARE(basecamp::shell::isWebContainerApp(facts, name), !isBundledView);
+        }
+    }
+
+    void aModuleWithNoPageIsNotTheContainersToShow()
+    {
+        // Nothing to bring forward: a `web` variant of a headless module opens
+        // no page, and a Bundled framework never had one.
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("web_indexer") };
+        facts.known << QStringLiteral("web_indexer") << QStringLiteral("notes");
+
+        QVERIFY(!basecamp::shell::isWebContainerApp(facts, QStringLiteral("web_indexer")));
+        QVERIFY(!basecamp::shell::isWebContainerApp(facts, QStringLiteral("notes")));
+        QVERIFY(!basecamp::shell::isWebContainerApp(facts, QStringLiteral("chat_ui")));
+    }
 };
 
 QTEST_MAIN(ShellModuleRowsTest)
