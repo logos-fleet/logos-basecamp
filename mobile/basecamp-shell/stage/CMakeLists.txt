@@ -34,6 +34,8 @@ set(BASECAMP_MOBILE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 # what "load" means. Both are plain Qt over ICoreRuntime -- CoreModuleManager's
 # only other input is LogosAPI, for the per-module Interface drill-down.
 add_library(basecamp_shell_host STATIC
+    ${SRC}/ShellModuleRows.cpp
+    ${SRC}/ShellModuleRows.h
     ${SRC}/ShellModulesBackend.cpp
     ${SRC}/ShellModulesBackend.h
     ${SRC}/BundledSetShellHost.cpp
@@ -79,6 +81,7 @@ target_link_libraries(basecamp_shell_host PUBLIC
 set_target_properties(basecamp_shell_host PROPERTIES EXPORT_NAME ShellHost)
 install(TARGETS basecamp_shell_host EXPORT BasecampShellHostTargets ARCHIVE DESTINATION lib)
 install(FILES
+    ${SRC}/ShellModuleRows.h
     ${SRC}/ShellModulesBackend.h
     ${SRC}/ShellStoreBackend.h
     ${SRC}/BundledSetShellHost.h

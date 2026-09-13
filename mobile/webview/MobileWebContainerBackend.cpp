@@ -256,4 +256,13 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
     return evicted;
 }
 
+void MobileWebContainerBackend::hideAll()
+{
+    for (auto it = m_views.constBegin(); it != m_views.constEnd(); ++it)
+        it.value()->setFrontmost(false);
+    qInfo().noquote()
+        << QStringLiteral("Web container: no module is visible; %1 live runtime(s) held")
+               .arg(m_budget.live().size());
+}
+
 } // namespace basecamp::web

@@ -132,6 +132,17 @@ public:
     // device run.
     QStringList show(const QString& moduleName);
 
+    // NOBODY IS LOOKING AT A MODULE. Every page goes behind the host's own
+    // surface and the budget's books are not touched: closing an app is not
+    // showing another one, and it is not an eviction -- the module stays loaded
+    // and keeps answering, its page simply stops covering the Shell.
+    //
+    // It cannot be spelled `show({})`: that would enter a visible module under a
+    // name no module has, and the next real show() would evict against a
+    // phantom. Z-order rather than visibility, for the reason in the class note
+    // -- a hidden webview is throttled and a background module needs its timers.
+    void hideAll();
+
     const LiveRuntimeBudget& budget() const { return m_budget; }
 
     // WHAT THE APP WEIGHS RIGHT NOW, as one log line. show() prints it, and the

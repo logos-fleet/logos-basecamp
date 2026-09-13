@@ -1381,23 +1381,31 @@
         # anything asks for apps.aarch64-darwin.
         // {
           aarch64-darwin = (desktopApps.aarch64-darwin or { }) // {
+            # THIS MAC'S SET, not the canonical Linux one, and only because of
+            # the `web` half. An iOS cross build is keyed off the host that runs
+            # Xcode whichever of these is asked, but nix/mobile-web-assets.nix is
+            # keyed off `androidBuildSystem` -- so with mobileSmoke here a Mac
+            # would be asked to build an x86_64-linux wasm derivation to fill its
+            # own app, and refuse ("platform mismatch"). Both iOS apps carry the
+            # Qt-wasm QML runtime now (the Shell RUNS what a user installed into
+            # the Web container), so both runners are bound here.
             run-liblogos-smoke-ios-sim = {
               type = "app";
-              program = "${mobileSmoke.aarch64-ios-simulator.run-liblogos-smoke-ios-sim}/bin/run-liblogos-smoke-ios-sim";
+              program = "${mobileSmokeFor.aarch64-darwin.aarch64-ios-simulator.run-liblogos-smoke-ios-sim}/bin/run-liblogos-smoke-ios-sim";
             };
             run-liblogos-smoke-ios-device = {
               type = "app";
-              program = "${mobileSmoke.aarch64-ios.run-liblogos-smoke-ios-device}/bin/run-liblogos-smoke-ios-device";
+              program = "${mobileSmokeFor.aarch64-darwin.aarch64-ios.run-liblogos-smoke-ios-device}/bin/run-liblogos-smoke-ios-device";
             };
             # Basecamp's real UI shell on a phone, over the same Bundled set:
             #   nix run .#run-basecamp-shell-ios-sim
             run-basecamp-shell-ios-sim = {
               type = "app";
-              program = "${mobileSmoke.aarch64-ios-simulator.run-basecamp-shell-ios-sim}/bin/run-basecamp-shell-ios-sim";
+              program = "${mobileSmokeFor.aarch64-darwin.aarch64-ios-simulator.run-basecamp-shell-ios-sim}/bin/run-basecamp-shell-ios-sim";
             };
             run-basecamp-shell-ios-device = {
               type = "app";
-              program = "${mobileSmoke.aarch64-ios.run-basecamp-shell-ios-device}/bin/run-basecamp-shell-ios-device";
+              program = "${mobileSmokeFor.aarch64-darwin.aarch64-ios.run-basecamp-shell-ios-device}/bin/run-basecamp-shell-ios-device";
             };
             run-liblogos-smoke-android = {
               type = "app";

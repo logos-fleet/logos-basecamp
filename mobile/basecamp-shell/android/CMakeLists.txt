@@ -52,6 +52,7 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/main.cpp
     ${LOGOS_HOST_SOURCES}
     ${SMOKE_SRC}/ViewModuleRunner.cpp ${SMOKE_SRC}/ViewModuleRunner.h
+    ${SHELL_SRC}/ShellModuleRows.cpp ${SHELL_SRC}/ShellModuleRows.h
     ${SHELL_SRC}/ShellModulesBackend.cpp ${SHELL_SRC}/ShellModulesBackend.h
     ${SHELL_SRC}/BundledSetShellHost.cpp ${SHELL_SRC}/BundledSetShellHost.h
     ${SHELL_SRC}/ShellSceneDriver.cpp ${SHELL_SRC}/ShellSceneDriver.h
@@ -109,6 +110,33 @@ target_link_libraries(BasecampShell PRIVATE
     Qt6::Qml Qt6::Quick Qt6::QuickWidgets Qt6::QuickControls2 Qt6::Svg)
 
 logos_android_package_source_dir(BasecampShell)
+
+# ── the `web` half: the QML runtime a Downloaded module's page loads ──────
+# Same contract, same macro-copied Java WebView, and the same reason as the
+# probe next door (mobile/liblogos-smoke/android/CMakeLists.txt): an APK asset
+# is NOT a file, so the tree is unpacked into the app's data directory on first
+# launch and the STAMP is the store path's name, so a new build unpacks again
+# and an unchanged one does not.
+#
+# The Shell ships it now because a Store shell INSTALLS `web` variants -- a
+# phone may not download native code (ADR 0003) -- and without the runtime a
+# module installed from the catalog has nowhere to run. The `web-modules`
+# directory beside it is the build's own, and is scanned first; what the user
+# installs lands in the writable one (appmanager/ModuleDirectories.h).
+set(LOGOS_ANDROID_WEB_ASSETS "" CACHE STRING
+    "Directory holding logos-runtime/ and web-modules/ to ship in the APK")
+if(LOGOS_ANDROID_WEB_ASSETS)
+    file(COPY ${LOGOS_ANDROID_WEB_ASSETS}/
+         DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/android-package/assets/logos-web)
+    get_filename_component(_web_assets_stamp "${LOGOS_ANDROID_WEB_ASSETS}" NAME)
+else()
+    set(_web_assets_stamp "none")
+    message(WARNING
+        "BasecampShell: no LOGOS_ANDROID_WEB_ASSETS -- the APK ships no QML "
+        "runtime, so a module installed from the catalog has nowhere to run.")
+endif()
+target_compile_definitions(BasecampShell
+    PRIVATE LOGOS_WEB_ASSETS_STAMP="${_web_assets_stamp}")
 
 # ── the Qt QML modules, packaged at DEPLOY time ───────────────────────────
 # androiddeployqt runs qmlimportscanner over these roots to decide which Qt

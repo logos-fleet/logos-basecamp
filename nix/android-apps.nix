@@ -266,10 +266,9 @@ let
     ];
     cmakeFlags = [
       "-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=${pkgs.qt6.qtremoteobjects}"
-      # The Web container's half of the app image. Only the probe ships it --
-      # the Shell installs no web backend of its own, so it carries none and
-      # its CMakeLists asserts nothing about one. Same split as iOS, where
-      # `webAssetsPath` is the smoke app's argument alone.
+      # The Web container's half of the app image. Both apps ship it: the
+      # probe DRIVES the app's own `web` modules as an acceptance pass, and the
+      # Shell RUNS what a user installed from the catalog into it.
       "-DLOGOS_ANDROID_WEB_ASSETS=${webAssets}"
     ];
   };
@@ -315,6 +314,11 @@ let
       # can carry a view module and the stem is empty by construction -- the
       # host asks the manifest rather than assuming one is there.
       "-DLOGOS_VIEW_MODULE_STEM="
+      # The Web container's half of the app image, which the Shell ships now
+      # too: a Store shell INSTALLS `web` variants and nothing else, so without
+      # the QML runtime a module it installed from the catalog has nowhere to
+      # run.
+      "-DLOGOS_ANDROID_WEB_ASSETS=${webAssets}"
     ];
     # Every icon in the Shell is an SVG in a qrc, and the plugin that decodes
     # one is not in any list Qt builds by itself -- see the CMakeLists for

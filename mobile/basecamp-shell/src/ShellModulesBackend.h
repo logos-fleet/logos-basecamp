@@ -21,6 +21,7 @@
 
 #include "ICoreRuntime.h"
 #include "ModuleInstanceModel.h"
+#include "ShellModuleRows.h"
 
 #include <QObject>
 #include <QSet>
@@ -132,8 +133,39 @@ public:
     // for. ShellModulesDriver checks that against the scene.
     QStringList bundledSetNames() const;
 
-    // The set's `ui_qml` members, in manifest order. The Shell's apps.
+    // The set's `ui_qml` members, in manifest order. The BUNDLED apps -- a
+    // Downloaded one is not here, because it is the core's to load and not the
+    // host's to instantiate (see ShellModuleRows.h).
     QStringList viewModuleNames() const;
+
+    // The modules this build SHIPS beside the Bundled-set manifest: the app's
+    // own `web-modules` tree, which the core discovers exactly as it discovers
+    // an installed package. Told apart by nothing, one of them reads as
+    // something the build downloaded for the user.
+    //
+    // Set once at startup, from the directory the app image carries.
+    void setShippedModules(const QStringList& names);
+    // Everything the app image carries, under either rule -- what a Store
+    // shell's Modules tab is entitled to show with nothing installed.
+    QStringList shippedModuleNames() const;
+
+    // Modules the core discovered that neither the manifest nor the shipped
+    // tree accounts for: everything a user installed. The Shell's own answer
+    // to "where did this come from".
+    QStringList downloadedModules() const;
+    // Whether this one is a Downloaded module with a page open in the Web
+    // container -- i.e. an app the sidebar carries a tile for.
+    bool isDownloadedApp(const QString& name) const;
+
+    // Subscribe to the phone's Web container: a Downloaded module's page
+    // opening is what makes it an APP here, and there is nothing else the Shell
+    // could read that off. Also answers an over-budget module with no headless
+    // document by unloading it through the core, which is what the container
+    // announces rather than does (webview/MobileWebContainerBackend.h).
+    //
+    // Separate from the constructor because a build with no container installed
+    // is legitimate -- the desktop unit tests construct neither.
+    void watchWebContainer();
     // Whether this member is one -- i.e. the host's to instantiate and render
     // rather than the core's to load (ADR 0006).
     bool isViewModule(const QString& name) const;
@@ -223,6 +255,9 @@ private:
     // every two seconds.
     void rebuildRows();
     QVariantList snapshot() const;
+    // The four facts every row and every tile is derived from. One place, so
+    // the tab and the sidebar cannot disagree about what is installed.
+    basecamp::shell::ModuleFacts facts() const;
 
     BundledSetCoreRuntime* m_core;    // not owned
     LogosAPI*              m_api;     // owned
@@ -239,5 +274,9 @@ private:
     int                    m_sectionIndex = 0;
     // The view modules whose framework is open and whose QML is on screen.
     QSet<QString>          m_mounted;
+    // Downloaded modules the Web container has a page open for.
+    QSet<QString>          m_openPages;
+    // The app's own `web-modules` tree, by name.
+    QStringList            m_shipped;
     QString                m_currentVisibleApp;
 };

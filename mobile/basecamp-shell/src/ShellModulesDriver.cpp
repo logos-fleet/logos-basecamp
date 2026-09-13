@@ -42,14 +42,18 @@ void ShellModulesDriver::run()
     }
     emit log(QStringLiteral("shell: Settings -> Module Inspector is on screen"));
 
-    // ── 2. the rows on screen ARE the Bundled set ──
+    // ── 2. the rows on screen ARE what the app SHIPS ──
     // Counted off the SCENE, not off the model: the model is built from the
     // manifest, so the two agreeing would prove only that this host can copy
     // a list. What can still go wrong above it is the view -- a filter proxy
     // dropping a row, a delegate that never instantiated, a table showing a
     // module the manifest does not account for -- and each row's status badge
     // carries its module's name, so the badges ARE the rendered list.
-    const QStringList set = backend->bundledSetNames();
+    // The Bundled-set manifest PLUS the app's own `web-modules` tree. Both came
+    // in with the app image; the manifest names only the native Bare
+    // frameworks, and a shell that asserted on it alone would fail on its own
+    // shipped `web` modules the moment it carried a Web container.
+    const QStringList set = backend->shippedModuleNames();
     QStringList rows;
     {
         const QString prefix = QStringLiteral("moduleInspector.status.");
@@ -68,9 +72,20 @@ void ShellModulesDriver::run()
     emit log(QStringLiteral("modules tab rows: %1")
                  .arg(rows.isEmpty() ? QStringLiteral("(none)")
                                      : rows.join(QStringLiteral(", "))));
-    emit log(QStringLiteral("bundled set:      %1").arg(expected.join(QStringLiteral(", "))));
+    emit log(QStringLiteral("app ships:        %1").arg(expected.join(QStringLiteral(", "))));
+    QStringList downloaded = backend->downloadedModules();
+    downloaded.sort();
+    if (!downloaded.isEmpty()) {
+        // Legitimate, and it has to be SAID: a Store shell that installed
+        // something is the point of the App Manager, and a row the app image
+        // does not account for is only a defect when nothing installed one.
+        emit log(QStringLiteral("downloaded:       %1")
+                     .arg(downloaded.join(QStringLiteral(", "))));
+        expected += downloaded;
+        expected.sort();
+    }
     if (rows != expected) {
-        emit log(QStringLiteral("WRONG: the Modules tab does not list the Bundled set"));
+        emit log(QStringLiteral("WRONG: the Modules tab does not list what the app has"));
         return;
     }
     emit log(QStringLiteral("SHELL MODULES TAB LISTS THE BUNDLED SET"));
@@ -84,6 +99,10 @@ void ShellModulesDriver::run()
     // would be a module that arrived some other way.
     QStringList notEmbedded;
     for (const QString& name : rows) {
+        // ...except what the user installed, which is `downloaded` BY DESIGN
+        // and is the one thing this column exists to tell apart.
+        if (downloaded.contains(name))
+            continue;
         QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
         QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
         const QString installType = row ? row->property("installType").toString()
@@ -96,8 +115,8 @@ void ShellModulesDriver::run()
                      .arg(notEmbedded.join(QStringLiteral(", "))));
         return;
     }
-    emit log(QStringLiteral("all %1 rows are installType 'embedded' -- no Downloaded module")
-                 .arg(rows.size()));
+    emit log(QStringLiteral("all %1 shipped row(s) are installType 'embedded'; %2 downloaded")
+                 .arg(rows.size() - downloaded.size()).arg(downloaded.size()));
 
     // ── 2c. and the tab shows their stats ──
     // Off the rendered CELLS, for the same reason the row list is counted off

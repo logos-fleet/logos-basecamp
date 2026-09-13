@@ -411,6 +411,34 @@ private slots:
         QVERIFY(m_pages[1]->frontmost);
     }
 
+    // THE WORKSPACE IS BACK ON THE SHELL'S OWN CHROME. Closing an app is not
+    // showing another one, and it is not an eviction either -- the module stays
+    // loaded and keeps answering, its page simply stops covering the Shell.
+    //
+    // It cannot be spelled `show("")`: the budget would enter a visible module
+    // under a name no module has, and the next real show() would evict against
+    // a phantom. Nothing about the books changes here; only the surface.
+    void hidingEveryPagePutsTheHostsOwnSurfaceBack()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(2));
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+        backend->show("counter_ui");
+        QVERIFY(m_pages[0]->frontmost);
+
+        const int liveBefore = backend->budget().live().size();
+        backend->hideAll();
+
+        QVERIFY(!m_pages[0]->frontmost);
+        QVERIFY(!m_pages[1]->frontmost);
+        // Still loaded, still in the books: a module whose UI is not on screen
+        // is not a module that was given up.
+        QCOMPARE(backend->loadedModules().size(), 2);
+        QCOMPARE(backend->budget().live().size(), liveBefore);
+        QVERIFY(backend->hasUiPage("counter_ui"));
+    }
+
     // The host's own cost, which is what slice 28's "memory returns to within a
     // stated budget" is measured in. A platform that will not say answers -1;
     // every platform this runs on says something.
