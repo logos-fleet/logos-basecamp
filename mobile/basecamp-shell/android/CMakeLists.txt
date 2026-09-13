@@ -29,6 +29,9 @@ set(SHELL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 set(SMOKE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../liblogos-smoke/src)
 set(SMOKE_CMAKE ${CMAKE_CURRENT_SOURCE_DIR}/../../liblogos-smoke/cmake)
 set(BASECAMP_APP ${CMAKE_CURRENT_SOURCE_DIR}/../../../app)
+# The App Manager's platform-free half, shared with the desktop unit tests and
+# with the iOS stage. Same list on both phones, by construction.
+set(BASECAMP_MOBILE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
 # The Native-container host's own sources, the same list the probe and the iOS
 # stage compile (see cmake/LogosMobileHostSources.cmake).
@@ -54,13 +57,18 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/ShellSceneDriver.cpp ${SHELL_SRC}/ShellSceneDriver.h
     ${SHELL_SRC}/ShellModulesDriver.cpp ${SHELL_SRC}/ShellModulesDriver.h
     ${SHELL_SRC}/ShellAppDriver.cpp ${SHELL_SRC}/ShellAppDriver.h
+    ${SHELL_SRC}/ShellStoreBackend.cpp ${SHELL_SRC}/ShellStoreBackend.h
+    ${BASECAMP_MOBILE}/appmanager/CatalogEntry.cpp ${BASECAMP_MOBILE}/appmanager/CatalogEntry.h
+    ${BASECAMP_MOBILE}/appmanager/ConsentQueue.cpp ${BASECAMP_MOBILE}/appmanager/ConsentQueue.h
+    ${BASECAMP_MOBILE}/appmanager/InstallGate.cpp ${BASECAMP_MOBILE}/appmanager/InstallGate.h
+    ${BASECAMP_MOBILE}/appmanager/StoreAppManager.cpp ${BASECAMP_MOBILE}/appmanager/StoreAppManager.h
     ${BASECAMP_APP}/ModuleInstanceModel.cpp ${BASECAMP_APP}/ModuleInstanceModel.h
     ${BASECAMP_APP}/CoreModuleManager.cpp ${BASECAMP_APP}/CoreModuleManager.h)
 
 include(${SMOKE_CMAKE}/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(BasecampShell PRIVATE "${LOGOS_INCLUDE_ROOTS}")
 logos_mobile_host_includes(BasecampShell PRIVATE)
-target_include_directories(BasecampShell PRIVATE ${SHELL_SRC} ${SMOKE_SRC})
+target_include_directories(BasecampShell PRIVATE ${SHELL_SRC} ${SMOKE_SRC} ${BASECAMP_MOBILE})
 
 # LogosViewPlugin.h — the HOST side of the view-plugin interface, header only.
 set(LOGOS_VIEW_RUNTIME_INCLUDE "" CACHE STRING "logos-view-module-runtime include/")

@@ -42,7 +42,7 @@ nothing else. Three things below it are:
 |---|---|---|
 | how the Shell is loaded | `QPluginLoader` opens `main_ui.dylib` | linked in and reached through `QPluginLoader::staticInstances()` — on iOS because Qt is static archives and there is no plugin to open (ADR 0001); on Android because an APK gives an app exactly one directory it may `dlopen` from and a plugin path inside it is a second problem on top of a packaging one |
 | where the module set comes from | a modules **directory**, scanned | the Bundled-set **manifest** the build compiled in; a phone may not download native code (ADR 0003) |
-| what answers the QML `backend` | `MainUIBackend` over three managers | `ShellModulesBackend`: the Modules tab and the app launcher are live, over the desktop app's own `ModuleInstanceModel` + `CoreModuleManager` + `ICoreRuntime`; packages and repositories say they are not here yet |
+| what answers the QML `backend` | `MainUIBackend` over three managers | `ShellModulesBackend`: the Modules tab, the app launcher and the App Manager are live, over the desktop app's own `ModuleInstanceModel` + `CoreModuleManager` + `ICoreRuntime` plus [`../appmanager/`](../appmanager/README.md); repositories say they are not here yet |
 | where an app's backend runs | a `ui-host` **subprocess**, over a local socket | in THIS process, with the same typed replica carried over a socketpair — no subprocess a store will accept (ADR 0003) |
 
 The runtime underneath is `BundledSetCoreRuntime`, shared with
@@ -110,6 +110,43 @@ screen and painting throughout.
 
 Standing the desktop peer up is
 [`../liblogos-smoke/desktop-peers/`](../liblogos-smoke/desktop-peers/README.md).
+
+## The App Manager
+
+`backend.appManager` is a `StoreAppManager`
+([`../appmanager/`](../appmanager/README.md)): the catalog, per-variant
+availability, the signer-trust prompt and the per-module consent prompt. Every
+decision in it is platform-free and unit-tested on a desktop; what this directory
+adds is `src/ShellStoreBackend.cpp`, the one seam, over package_downloader,
+package_manager, capability_module and `QDesktopServices`.
+
+`main.cpp` starts it once the set is up, and the run says what it got:
+
+```
+[shell] app manager: catalog not in this build, consent armed
+```
+
+Two independent halves, and both are normal answers rather than errors. A Store
+shell's Bundled set is data (ADR 0007), so a build that carries neither package
+module cannot browse a catalog and says so — an empty App Manager would read as
+"the catalog has nothing in it", which is a different and much more alarming
+claim. Consent is separate because `capability_module` is in every set that calls
+anything, so a shell with no catalog still prompts for a Downloaded module an
+earlier launch installed.
+
+Two things the device settled, both about LAZY LOADING (SM-G990B, 2026-09-13):
+
+| | |
+|---|---|
+| **`loadedModules()` is not "does this build have it".** The Native container loads a Bundled member lazily, so gating on it reported `consent unavailable` in a build that carries capability_module, because nothing had called it yet. Presence is `knownModules()`; `onEventWhenAvailable` is built to arm against a module still coming up. | `ShellStoreBackend::isPresent` |
+| **Nothing else calls the package modules.** If the App Manager does not load them, nobody does — so `configure()` loads both before answering `hasCatalog()`, rather than waiting for a first call that would fail. | `ShellStoreBackend::ensureLoaded` |
+
+And one that is a C++ trap rather than a platform one: `ShellStoreBackend` is
+constructed *from* `m_api` and `m_modules`, and members are initialised in
+DECLARATION order whatever the constructor's initialiser list says. Declared
+above those two it captured uninitialised pointers and the Shell took a SIGSEGV
+inside `CoreModuleManager::loadedModules()` on the first catalog probe — before
+the first frame, so the app died with the Shell never on screen.
 
 ## One Shell, two phones
 
@@ -252,6 +289,7 @@ and the signal spy stays at zero.
 
 ```
 src/ShellModulesBackend.*   the QML-facing `backend`
+src/ShellStoreBackend.*     the App Manager's one seam, over the real modules
 src/BundledSetShellHost.*   IShellHost over it
 src/ShellSceneDriver.*      finding, settling and pressing in the Shell's
                             rendered scenes -- shared by the two drivers below

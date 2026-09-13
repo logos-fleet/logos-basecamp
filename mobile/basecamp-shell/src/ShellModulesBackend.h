@@ -32,6 +32,9 @@
 class BundledSetCoreRuntime;
 class CoreModuleManager;
 class LogosAPI;
+class ShellStoreBackend;
+
+namespace basecamp::appmanager { class StoreAppManager; }
 
 class ShellModulesBackend : public QObject
 {
@@ -50,6 +53,17 @@ class ShellModulesBackend : public QObject
     // disk lists what the manifest says the app carries.
     Q_PROPERTY(QVariantList launcherApps READ launcherApps NOTIFY launcherAppsChanged)
     Q_PROPERTY(QString currentVisibleApp READ currentVisibleApp NOTIFY currentVisibleAppChanged)
+
+    // ── live: the App Manager ──
+    // The catalog, the signer-trust prompt and the per-module consent prompt,
+    // over the package modules and capability_module. Answered when the Bundled
+    // set carries the package modules and says so when it does not -- a Store
+    // shell's set is data (ADR 0007) and a build without them is legitimate.
+    //
+    // A separate object rather than more methods here: everything it decides is
+    // platform-free and unit-tested (mobile/appmanager/), and flattening it into
+    // this facade would put the rules behind a core.
+    Q_PROPERTY(QObject* appManager READ appManagerObject CONSTANT)
 
     // ── inert: nothing on a phone answers these yet ──
     Q_PROPERTY(QAbstractItemModel* uiModulesModel READ uiModulesModel CONSTANT)
@@ -74,6 +88,19 @@ public:
     ~ShellModulesBackend() override;
 
     QAbstractItemModel* coreModulesModel() const;
+
+    // The App Manager, as QML sees it (QObject* so the property needs no
+    // metatype registration for the concrete class).
+    QObject* appManagerObject() const;
+    basecamp::appmanager::StoreAppManager* appManager() const { return m_appManager; }
+
+    // Point package_manager at this shell's directories, declare the Store
+    // shell's policy (`require` signatures, `web` variants only) and subscribe to
+    // capability_module's consent announcements. Call once the Bundled set has
+    // loaded; a set without those modules is a no-op and the App Manager reports
+    // it.
+    void startAppManager(const QString& userModulesDirectory,
+                         const QString& userUiPluginsDirectory);
     // nullptr, deliberately: an EMPTY model of the wrong shape would answer
     // the Apps Inspector's role names with nothing and look like a working
     // view with no rows. `null` is what the QML already guards for.
@@ -194,6 +221,14 @@ private:
     LogosAPI*              m_api;     // owned
     CoreModuleManager*     m_modules; // owned (parent = this)
     ModuleInstanceModel*   m_coreModulesModel;
+    // AFTER m_api and m_modules, and that is not cosmetic: members are
+    // initialised in DECLARATION order regardless of what the constructor's
+    // initialiser list says, and this one is constructed FROM those two. Declared
+    // above them it captured two uninitialised pointers and the Shell took a
+    // SIGSEGV in CoreModuleManager::loadedModules() on the first catalog probe --
+    // measured on a Samsung SM-G990B, 2026-09-13.
+    ShellStoreBackend*     m_storeBackend; // owned (plain, not a QObject)
+    basecamp::appmanager::StoreAppManager* m_appManager; // owned (parent = this)
     int                    m_sectionIndex = 0;
     // The view modules whose framework is open and whose QML is on screen.
     QSet<QString>          m_mounted;
