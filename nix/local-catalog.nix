@@ -42,10 +42,18 @@
   testKey
 , # 256x256 PNG. The LGX icon contract makes one mandatory for `ui_qml`.
   icon
-, # name -> logos-module-builder's `web` output for a ui_qml module. Each holds
-  # one `<name>_web/` directory: the manifest, the loader pages and the Qt-wasm
-  # backend image. That directory IS the variant payload -- an installed `web`
-  # module is that tree, copied.
+, # name -> { drv, type ? "ui_qml", category ? "test", description ? … }.
+  #
+  # `drv` is a module's `web` output, holding one `<name>_web/` directory: the
+  # manifest, the loader page(s) and the wasm image. That directory IS the
+  # variant payload -- an installed `web` module is that tree, copied.
+  #
+  # `type` IS NOT COSMETIC and is why this is a spec rather than a bare
+  # derivation. A `ui_qml` package must declare a view and carry an icon (the
+  # manifest 0.4.0 contract, asserted by mkPackage); a `core` one declares
+  # neither and HAS neither -- the keystore's `web` variant is a Worker and a
+  # wasm image, and a catalog that published it as a view would fail at `lgx
+  # sign` naming a QML document that was never in it.
   webVariants ? { }
 , # name -> a directory holding `<name>.lgx`, published verbatim. The fixture
   # catalog's members come in this way: a NATIVE-ONLY package is what makes
@@ -64,39 +72,46 @@ let
   # not the assumption that produced it.
   viewEntry = "view/Counter.qml";
 
-  # One `web` variant, out of a logos-module-builder `web` output.
-  webPayload = name: drv: {
-    main = "index.html";
-    payload = pkgs.runCommand "${name}-web-payload" { } ''
+  # One `web` variant, out of a module's `web` output.
+  webPayload = name: spec:
+    let isView = (spec.type or "ui_qml") == "ui_qml"; in
+    {
+      main = "index.html";
+    payload = pkgs.runCommand "${name}-web-payload" { } (''
       set -euo pipefail
-      src=$(echo ${drv}/*_web)
-      [ -d "$src" ] || { echo "error: ${drv} holds no <module>_web directory" >&2; exit 1; }
+      src=$(echo ${spec.drv}/*_web)
+      [ -d "$src" ] || { echo "error: ${spec.drv} holds no <module>_web directory" >&2; exit 1; }
       mkdir -p $out
       cp -r "$src"/. $out/
       chmod -R u+w $out
 
-      # The three things the rest of this file assumes, each failing HERE with
-      # its own name rather than deep inside `lgx sign`.
+      # The things the rest of this file assumes, each failing HERE with its own
+      # name rather than deep inside `lgx sign`.
       test -f $out/manifest.json || { echo "error: ${name}'s web variant has no manifest" >&2; exit 1; }
       grep -q '"name":"${name}"' $out/manifest.json \
         || { echo "error: ${name}'s manifest does not name it" >&2; exit 1; }
       test -f $out/index.html || { echo "error: ${name} has no index.html to be its main" >&2; exit 1; }
+    '' + lib.optionalString isView ''
       test -f $out/${viewEntry} \
         || { echo "error: ${name} ships no ${viewEntry}; the view contract would fail at sign time" >&2; exit 1; }
-    '';
+    '');
   };
 
-  mkWebPackage = name: drv: catalog.mkPackage {
-    inherit name icon;
-    version = "1.0.0";
-    type = "ui_qml";
-    description = "${name}, published as a `web` variant for a Store shell";
-    category = "test";
-    view = viewEntry;
-    dependencies = [ ];
-    variants.web = webPayload name drv;
-    signingKey = { inherit (testKey) jwk name; };
-  };
+  mkWebPackage = name: spec:
+    let type = spec.type or "ui_qml"; in
+    catalog.mkPackage ({
+      inherit name type;
+      version = "1.0.0";
+      description = spec.description or
+        "${name}, published as a `web` variant for a Store shell";
+      category = spec.category or "test";
+      dependencies = [ ];
+      variants.web = webPayload name spec;
+      signingKey = { inherit (testKey) jwk name; };
+    } // lib.optionalAttrs (type == "ui_qml") {
+      inherit icon;
+      view = viewEntry;
+    });
 
   webPackages = lib.mapAttrs mkWebPackage webVariants;
   members = lib.mapAttrsToList (name: drv: { inherit name drv; }) (webPackages // prebuilt);

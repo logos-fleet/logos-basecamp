@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLatin1String>
 
 #include <utility>
 
@@ -34,6 +35,27 @@ QString headlessEntryOf(const QString& moduleDir)
     // there would turn every eviction into a page that loads nothing, and the
     // module would go quiet with no error anywhere.
     return QFile::exists(QDir(moduleDir).filePath(entry)) ? entry : QString();
+}
+
+// WHETHER THIS PACKAGE'S PAGE IS THE MODULE'S UI. The package's declared
+// `type`, read from the same manifest as the headless entry above.
+//
+// A `core` module has no user interface -- that is what `core` MEANS -- and it
+// still gets a page, because a wasm image has nowhere else to live. So the two
+// facts had to stop being one: "the container opened a page" was the Shell's
+// only evidence of a UI for as long as every `web` variant in the tree was a
+// counter, and the first `core` one (the keystore) turned that into a sidebar
+// tile onto a blank document.
+//
+// A manifest with no `type` reads as a UI, which is what every package written
+// before a `core` `web` variant existed is.
+bool servesUiOf(const QString& moduleDir)
+{
+    QFile manifest(QDir(moduleDir).filePath(QStringLiteral("manifest.json")));
+    if (!manifest.open(QIODevice::ReadOnly)) return true;
+    const QJsonObject root = QJsonDocument::fromJson(manifest.readAll()).object();
+    const QString type = root.value(QStringLiteral("type")).toString();
+    return type != QLatin1String("core");
 }
 
 // The web transport's endpoint on a phone's page, over the bridge.
@@ -96,6 +118,7 @@ MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& 
     m_platform = platform;
     m_shimInDocument = shimInDocument;
     m_uiEntry = entryFile;
+    m_servesUi = servesUiOf(moduleDir);
     m_headlessEntry = headlessEntryOf(moduleDir);
     if (m_headlessEntry.isEmpty()) {
         qInfo() << "Web module" << m_moduleName

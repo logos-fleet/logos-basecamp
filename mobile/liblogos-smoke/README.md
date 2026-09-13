@@ -194,7 +194,7 @@ the log below appears in the terminal as well as on the screen.
 [smoke] known: bare_counter
 [smoke] known modules: 1 (the Bundled set, registered by the runtime)
 [smoke] core up, 8 ms since main()
-[smoke]   bare_counter loaded in 7 ms (Native container)
+[smoke]   bare_counter loaded in 7 ms
 [smoke]   view_counter: view module, loaded by the host
 [smoke] bundled set loaded: bare_counter
 [smoke] add(1, 2) = 3
@@ -214,7 +214,7 @@ the log below appears in the terminal as well as on the screen.
 
 ```
 [smoke]   bare_counter unloaded
-[smoke]   bare_counter loaded in 3 ms (Native container)
+[smoke]   bare_counter loaded in 3 ms
 [smoke] drive modules: bare_counter loaded -> not loaded -> loaded
 [smoke] MODULES TAB ROUND TRIP OK
 ```

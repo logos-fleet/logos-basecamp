@@ -261,8 +261,15 @@ bool BundledSetCoreRuntime::loadModule(const QString& name, LoadPolicy policy)
     // The dlopen itself is timed and logged INSIDE the Native container
     // (InProcContainer::launch), which is the only place that can measure it
     // alone. This number is the whole load: registration checks, the container
-    // handshake, publication on the in-process transport.
-    emit log(QStringLiteral("  %1 loaded in %2 ms (Native container)").arg(name).arg(t.elapsed()));
+    // handshake, publication on the transport.
+    //
+    // AND IT DOES NOT NAME A CONTAINER, because this function cannot know
+    // which one ran: the core picks it from the module's FORMAT, and a phone
+    // has two (a Bare framework goes to the Native container, a `web` variant
+    // to the Web container, and a `web` module reported "Native container"
+    // here for as long as the only `web` module in the tree was a counter
+    // nobody read this line about).
+    emit log(QStringLiteral("  %1 loaded in %2 ms").arg(name).arg(t.elapsed()));
     return true;
 }
 
