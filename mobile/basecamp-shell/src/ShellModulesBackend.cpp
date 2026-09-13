@@ -6,6 +6,7 @@
 #include "ShellStoreBackend.h"
 
 #include "appmanager/StoreAppManager.h"
+#include "webview/MobileWebContainerBackend.h"
 
 #include <logos_api.h>
 
@@ -17,10 +18,6 @@ namespace {
 // desktop app already uses that on the same protocol, and a module's access
 // policy is written against the name that calls it.
 const char* kApiName = "basecamp_shell";
-
-// A Bundled member of this type is the HOST's to instantiate, not the core's
-// to load (ADR 0006). Two places ask, and they must agree.
-const QLatin1String kViewModuleType("ui_qml");
 
 } // namespace
 
@@ -134,53 +131,43 @@ bool ShellModulesBackend::isViewModule(const QString& name) const
     for (const QVariant& row : m_core->bundledSet()) {
         const QVariantMap entry = row.toMap();
         if (entry.value(QStringLiteral("name")).toString() == name)
-            return entry.value(QStringLiteral("type")).toString() == kViewModuleType;
+            return entry.value(QStringLiteral("type")).toString()
+                       == basecamp::shell::kViewModuleType;
     }
     return false;
 }
 
+basecamp::shell::ModuleFacts ShellModulesBackend::facts() const
+{
+    // bundledSet() is what the app SHIPS -- names, versions and types, including
+    // the members the core never registers because a view module is the host's
+    // to load (ADR 0006) -- and knownModules()/loadedModules() is what the core
+    // has. A row is one answer from each, and a Downloaded module is a name the
+    // second has that the first does not.
+    basecamp::shell::ModuleFacts out;
+    out.bundledSet   = m_core->bundledSet();
+    out.known        = m_modules->knownModules();
+    out.loaded       = m_modules->loadedModules();
+    out.shipped      = m_shipped;
+    out.mountedViews = m_mounted;
+    out.openPages    = m_openPages;
+    return out;
+}
+
 QVariantList ShellModulesBackend::snapshot() const
 {
-    // The Bundled set is the row list, in the manifest's order -- which is the
-    // closure's load order, dependencies first. Deliberately NOT
-    // knownModules(): on a phone the app's installed set is what the build
-    // embedded, and a member the core refused to register is exactly the thing
-    // the Modules tab has to keep showing (as "Not loaded") rather than hide.
-    const QStringList loaded = m_modules->loadedModules();
-    const QStringList known  = m_modules->knownModules();
-
-    QVariantList rows;
-    for (const QVariant& value : m_core->bundledSet()) {
-        const QVariantMap entry = value.toMap();
-        const QString name = entry.value(QStringLiteral("name")).toString();
-        const QString type = entry.value(QStringLiteral("type")).toString();
-        const bool isView = type == kViewModuleType;
-
-        QVariantMap row;
-        row[QStringLiteral("name")] = name;
-        row[QStringLiteral("displayName")] = name;
-        row[QStringLiteral("version")] = entry.value(QStringLiteral("version"));
-        row[QStringLiteral("type")] = type;
-        row[QStringLiteral("category")] = QStringLiteral("bundled");
-        // Every member came in with the app image, which is what "embedded"
-        // means everywhere else in Basecamp: not installed by the user, and
-        // not removable.
-        row[QStringLiteral("installType")] = QStringLiteral("embedded");
-        // A view module reads as loaded when the HOST has it mounted, not
-        // because it is one: the whole claim of the Modules tab is that it
-        // shows what is running.
-        row[QStringLiteral("isLoaded")] =
-            isView ? m_mounted.contains(name) : loaded.contains(name);
-        // A Bundled member the core never registered has something wrong with
-        // its image -- the closure was resolved and verified at build time, so
-        // there is no missing dependency to install. Saying so in the one
-        // status column the row has beats a silent "Not loaded".
-        row[QStringLiteral("hasMissingDeps")] = !isView && !known.contains(name);
-
-        const QVariantMap stats = m_modules->moduleStats(name);
+    QVariantList rows = basecamp::shell::moduleRows(facts());
+    // The only thing the rule above cannot answer: what each module is costing
+    // right now. It is a live reading rather than a fact about the set, and it
+    // moves every two seconds -- ModuleInstanceModel patches those two roles in
+    // place, which is what keeps the table from flickering on every tick.
+    for (QVariant& value : rows) {
+        QVariantMap row = value.toMap();
+        const QVariantMap stats =
+            m_modules->moduleStats(row.value(QStringLiteral("name")).toString());
         row[QStringLiteral("cpu")] = stats.value(QStringLiteral("cpu"), 0.0);
         row[QStringLiteral("memory")] = stats.value(QStringLiteral("memory"), 0.0);
-        rows.append(row);
+        value = row;
     }
     return rows;
 }
@@ -192,10 +179,7 @@ void ShellModulesBackend::rebuildRows()
 
 QStringList ShellModulesBackend::bundledSetNames() const
 {
-    QStringList names;
-    for (const QVariant& row : m_core->bundledSet())
-        names << row.toMap().value(QStringLiteral("name")).toString();
-    return names;
+    return basecamp::shell::bundledNames(m_core->bundledSet());
 }
 
 QStringList ShellModulesBackend::viewModuleNames() const
@@ -203,7 +187,8 @@ QStringList ShellModulesBackend::viewModuleNames() const
     QStringList names;
     for (const QVariant& row : m_core->bundledSet()) {
         const QVariantMap entry = row.toMap();
-        if (entry.value(QStringLiteral("type")).toString() == kViewModuleType)
+        if (entry.value(QStringLiteral("type")).toString()
+                == basecamp::shell::kViewModuleType)
             names << entry.value(QStringLiteral("name")).toString();
     }
     return names;
@@ -211,28 +196,89 @@ QStringList ShellModulesBackend::viewModuleNames() const
 
 QVariantList ShellModulesBackend::launcherApps() const
 {
-    QVariantList apps;
-    for (const QString& name : viewModuleNames()) {
-        QVariantMap app;
-        app[QStringLiteral("name")] = name;
-        // The manifest carries no display name -- a catalog entry's is a
-        // publishing concern the Bundled set does not reproduce -- so the
-        // module name is the label, and the delegate falls back to it anyway.
-        app[QStringLiteral("displayName")] = name;
-        app[QStringLiteral("isLoaded")] = m_mounted.contains(name);
-        // No icon travels with an embedded framework: there is nowhere in
-        // <App>.app/Frameworks/ to put one beside the image. The delegate
-        // draws its initial instead.
-        app[QStringLiteral("iconPath")] = QString();
-        app[QStringLiteral("supportsFullBleedIcon")] = false;
-        // The set is a closure that was resolved and verified at build time,
-        // so a Bundled app cannot be missing a dependency: anything that could
-        // have blocked it failed the build instead.
-        app[QStringLiteral("hasMissingDeps")] = false;
-        app[QStringLiteral("depBlockKind")] = QString();
-        apps.append(app);
-    }
-    return apps;
+    return basecamp::shell::launcherApps(facts());
+}
+
+void ShellModulesBackend::setShippedModules(const QStringList& names)
+{
+    if (m_shipped == names)
+        return;
+    m_shipped = names;
+    emit launcherAppsChanged();
+    rebuildRows();
+}
+
+QStringList ShellModulesBackend::shippedModuleNames() const
+{
+    return bundledSetNames() + m_shipped;
+}
+
+QStringList ShellModulesBackend::downloadedModules() const
+{
+    return basecamp::shell::downloadedModules(facts());
+}
+
+bool ShellModulesBackend::isWebContainerApp(const QString& name) const
+{
+    return basecamp::shell::isWebContainerApp(facts(), name);
+}
+
+void ShellModulesBackend::watchWebContainer()
+{
+    using basecamp::web::MobileWebContainerBackend;
+    auto* web = MobileWebContainerBackend::instance();
+
+    // A PAGE IS WHAT MAKES A DOWNLOADED MODULE AN APP. The Shell holds no
+    // manifest for one -- the core discovered it in a directory an install
+    // wrote -- so "does this have a UI" is answered by the container having
+    // opened a page for it, and by nothing else. A `web` variant of a HEADLESS
+    // module opens none and gets no tile.
+    connect(web, &MobileWebContainerBackend::viewOpened, this,
+            [this](const QString& name, void*) {
+                if (m_openPages.contains(name))
+                    return;
+                m_openPages.insert(name);
+                emit log(QStringLiteral("web container: %1 has a page").arg(name));
+                emit launcherAppsChanged();
+                rebuildRows();
+            });
+    connect(web, &MobileWebContainerBackend::viewClosed, this,
+            [this](const QString& name) {
+                if (m_openPages.remove(name)) {
+                    emit launcherAppsChanged();
+                    rebuildRows();
+                }
+            });
+
+    // What the container ANNOUNCES and deliberately does not do: a module over
+    // the live-runtime budget whose package ships no headless document has
+    // nowhere to put its page, so the host takes it down through the core --
+    // which tears the view down through the ordinary path. A backend that
+    // destroyed it itself would leave a published module with a dead channel.
+    connect(web, &MobileWebContainerBackend::uiEvictionRequired, this,
+            [this](const QString& name) {
+                emit log(QStringLiteral("web container: unloading %1, which is over the "
+                                        "live-runtime budget and ships no headless "
+                                        "document").arg(name));
+                m_modules->unloadModuleWithDependents(name);
+                rebuildRows();
+            });
+    // Backgrounded rather than unloaded: the module keeps its channel and keeps
+    // answering, and all the Shell has to do is stop claiming its UI is up.
+    connect(web, &MobileWebContainerBackend::uiEvicted, this,
+            [this](const QString& name) {
+                emit log(QStringLiteral("web container: %1 gave up its UI page and is "
+                                        "still answering").arg(name));
+                if (m_currentVisibleApp == name)
+                    setCurrentVisibleApp(QString());
+            });
+
+    // Everything the page writes to its own console. A `web` variant draws into
+    // a canvas, so what it says is the only thing outside it can read.
+    connect(web, &MobileWebContainerBackend::pageLog, this,
+            [this](const QString& name, const QString& level, const QString& message) {
+                emit log(QStringLiteral("%1 page [%2]: %3").arg(name, level, message));
+            });
 }
 
 void ShellModulesBackend::setUiModuleMounted(const QString& name, bool mounted)

@@ -2,6 +2,7 @@
 
 #include "ShellSections.h"
 #include "ViewModuleRunner.h"
+#include "webview/MobileWebContainerBackend.h"
 
 #include <QQuickWidget>
 
@@ -65,6 +66,24 @@ void BundledSetShellHost::mountApp(const QString& name)
             m_observer->onPresentAppRequested(already->widget);
         return;
     }
+    // A WEB-CONTAINER APP IS NOT A WIDGET, and that is the whole difference. A
+    // Bundled `ui_qml` member is a framework this process instantiates, whose
+    // QML goes into a QQuickWidget the Shell docks. A module the core
+    // discovered has its UI in a PAGE the Web container already opened when the
+    // core loaded it, mounted by the platform at the window's size and sitting
+    // behind the Shell's own surface -- so "open it" is a z-order instruction
+    // and there is no widget to hand the observer
+    // (webview/MobileWebContainerBackend.h).
+    //
+    // show() is also what spends the live-runtime budget: it is the sentence
+    // "the user is looking at this module", and the container answers it by
+    // giving some other module's page up.
+    if (m_backend.isWebContainerApp(name)) {
+        basecamp::web::MobileWebContainerBackend::instance()->show(name);
+        m_backend.setCurrentVisibleApp(name);
+        m_backend.report(QStringLiteral("web app %1 is on screen").arg(name));
+        return;
+    }
     if (!m_backend.isViewModule(name)) {
         m_backend.report(QStringLiteral("app %1 is not a view module in this Bundled set")
                              .arg(name));
@@ -99,6 +118,18 @@ void BundledSetShellHost::mountApp(const QString& name)
 
 void BundledSetShellHost::unmountApp(const QString& name)
 {
+    // Closing a web-container app is the z-order instruction in reverse, and it
+    // is NOT an unload: the module stays loaded and keeps answering calls, its
+    // page simply stops covering the Shell. Nothing is destroyed behind the
+    // container's back.
+    if (m_backend.isWebContainerApp(name)) {
+        basecamp::web::MobileWebContainerBackend::instance()->hideAll();
+        if (m_backend.currentVisibleApp() == name)
+            m_backend.setCurrentVisibleApp(QString());
+        m_backend.report(QStringLiteral("web app %1 is off screen and still "
+                                        "running").arg(name));
+        return;
+    }
     const auto it = m_mounted.constFind(name);
     if (it == m_mounted.cend()) {
         m_backend.report(QStringLiteral("app %1 is not mounted").arg(name));

@@ -25,6 +25,13 @@
 #include "ShellModulesDriver.h"
 #include "ShellSections.h"
 #include "SmokeRunner.h"
+#include "web/LogosWebPaths.h"
+#include "webview/MobileWebContainerBackend.h"
+#if defined(Q_OS_IOS)
+#include "webview/IosWebPage.h"
+#elif defined(Q_OS_ANDROID)
+#include "webview/AndroidWebPage.h"
+#endif
 
 #include <QApplication>
 #include <QDir>
@@ -109,8 +116,47 @@ int main(int argc, char* argv[])
     // ModuleDirectories is what keeps those the same place.
     const QString appDataRoot =
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+
+    // THE WEB CONTAINER, BEFORE THE CORE AND BEFORE THE DIRECTORIES. liblogos
+    // registers the Web container in every process and leaves the webview
+    // unset, so a `web` module loaded before this ran would report the missing
+    // bridge rather than opening a page -- and installing it HERE rather than
+    // at the first load is also what pins the Qt main thread as the one a
+    // webview is built on.
+    //
+    // This is the half a Store shell could not do until now. A Downloaded
+    // module IS a `web` variant (a phone may not download native code, ADR
+    // 0003), so without a container the App Manager could install one and
+    // there was nowhere for it to run.
+    //
+    // The budget is the phone's: ONE live QML runtime, measured at 185-240 MB.
+    QString shippedWebModulesDir;
+    {
+        using basecamp::web::MobileWebContainerBackend;
+        auto* web = MobileWebContainerBackend::instance();
+#if defined(Q_OS_IOS)
+        shippedWebModulesDir = basecamp::web::iosWebModulesDir();
+        web->install(basecamp::web::iosQmlRuntimeDir(),
+                     basecamp::web::iosPlatformPageFactory());
+#elif defined(Q_OS_ANDROID)
+        // BEFORE THE CONTAINER: an APK's assets are not files, so the app's
+        // `web` half is copied out once into the data directory and the
+        // runtime directory the container is installed with has to exist by
+        // then.
+        basecamp::web::unpackAndroidWebAssets(QStringLiteral(LOGOS_WEB_ASSETS_STAMP));
+        shippedWebModulesDir = basecamp::web::androidWebModulesDir();
+        // Android differs twice: the shim travels INSIDE the entry document
+        // (no user-script API) and the page is served over https (Chromium's
+        // Fetch refuses a non-standard scheme there). See LogosWebPaths.h.
+        web->install(basecamp::web::androidQmlRuntimeDir(),
+                     basecamp::web::androidPlatformPageFactory(),
+                     basecamp::web::LiveRuntimeBudget(), /*shimInDocument=*/true,
+                     basecamp::web::WebOrigin::android());
+#endif
+    }
+
     const basecamp::appmanager::ModuleDirectories moduleDirs =
-        basecamp::appmanager::ModuleDirectories::under(appDataRoot);
+        basecamp::appmanager::ModuleDirectories::under(appDataRoot, shippedWebModulesDir);
     QDir().mkpath(moduleDirs.installModulesDir);
     QDir().mkpath(moduleDirs.installUiPluginsDir);
 
@@ -141,6 +187,21 @@ int main(int argc, char* argv[])
 
     BundledSetShellHost host(&core);
     QObject::connect(host.backend(), &ShellModulesBackend::log, &console);
+    // The container is installed; this is the Shell listening to it. A page
+    // opening is what makes a Downloaded module an APP here -- there is no
+    // manifest for one to read a type off -- and an over-budget module with no
+    // headless document is unloaded through the core, which is what the
+    // container announces rather than does.
+    host.backend()->watchWebContainer();
+    // WHAT THIS BUILD SHIPS BESIDE THE MANIFEST. The app's own `web-modules`
+    // tree is discovered by the core exactly as an installed package is -- same
+    // scan, same shape -- so without this every shipped `web` module would read
+    // as one the user downloaded.
+    if (!shippedWebModulesDir.isEmpty()) {
+        host.backend()->setShippedModules(
+            QDir(shippedWebModulesDir).entryList(QDir::Dirs | QDir::NoDotAndDotDot,
+                                                 QDir::Name));
+    }
 
     // The App Manager. AFTER the set is loaded, because everything it does
     // depends on which package modules the build carries, and it reports that

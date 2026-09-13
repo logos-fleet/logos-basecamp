@@ -240,9 +240,9 @@ let
     bundleId = "co.logos.liblogos.smoke";
     appSrcDir = "mobile/liblogos-smoke/app";
     stage = smokeStage;
-    # The Web container's half of the app image. The Shell has no
-    # LOGOS_IOS_WEB_ASSETS yet -- it does not install a web backend -- so it
-    # ships none and the runner asserts nothing about it.
+    # The Web container's half of the app image. Both apps ship it now: the
+    # probe DRIVES the app's own `web` modules as an acceptance pass, and the
+    # Shell RUNS what a user installed from the catalog into it.
     webAssetsPath = "${webAssets}";
   };
 
@@ -260,6 +260,11 @@ let
     configureFlags = [
       "-DBASECAMP_QML_SCAN_ROOTS=${lib.concatStringsSep ";" shellUi.qmlScanRoots}"
     ];
+    # A Store shell INSTALLS `web` variants and nothing else (ADR 0003), so the
+    # QML runtime a Downloaded module's page loads has to be in the app image:
+    # without it the App Manager installs a module the core discovers and whose
+    # page then fails, in the page, naming what is missing.
+    webAssetsPath = "${webAssets}";
   };
 in
 shellUi.packages
