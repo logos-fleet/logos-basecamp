@@ -432,6 +432,14 @@
         };
       };
 
+      # One comma-separated list, read from one environment variable, with the
+      # default standing in whenever it is unset -- which in a pure evaluation
+      # is always, because `getEnv` is "" there.
+      envList = varName: default:
+        let e = builtins.getEnv varName; in
+        if e == "" then default
+        else builtins.filter (a: a != "") (nixpkgs.lib.splitString "," e);
+
       # ── the Bundled set ───────────────────────────────────────────────────
       # Which modules the app carries is a LIST, and a list cannot be a flake
       # attribute name: `--bundle a,b` and `--bundle b,a` would be two outputs
@@ -445,10 +453,7 @@
       # AC 5, and the reason this is an env read rather than codegen: adding an
       # app to --bundle changes no source file. The set is resolved from the
       # catalog, and the host reads it from a manifest at runtime.
-      requestedBundle = default:
-        let e = builtins.getEnv "LOGOS_BUNDLE_APPS"; in
-        if e == "" then default
-        else builtins.filter (a: a != "") (nixpkgs.lib.splitString "," e);
+      requestedBundle = envList "LOGOS_BUNDLE_APPS";
 
       # WHICH `web` MODULES THE APP IMAGE CARRIES. The same mechanism and the
       # same rules as `--bundle` above: a list cannot be a flake attribute name,
@@ -463,10 +468,7 @@
       # `web_counter` and installs `web_counter_b`:
       #
       #   LOGOS_SHELL_WEB_MODULES=web_counter nix run --impure .#run-basecamp-shell-ios-sim
-      requestedWebModules = default:
-        let e = builtins.getEnv "LOGOS_SHELL_WEB_MODULES"; in
-        if e == "" then default
-        else builtins.filter (a: a != "") (nixpkgs.lib.splitString "," e);
+      requestedWebModules = envList "LOGOS_SHELL_WEB_MODULES";
 
       # The dev catalog: the two mobile modules in this repo, published as
       # signed .lgx packages with per-target variants, exactly as a release

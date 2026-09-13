@@ -68,6 +68,12 @@ void ShellCatalogDriver::reportCatalog()
         const QVariantMap e = row.toMap();
         const QString name = e.value(QStringLiteral("name")).toString();
         const bool available = e.value(QStringLiteral("available")).toBool();
+        const bool canInstall = e.value(QStringLiteral("canInstall")).toBool();
+        const QString verdict =
+            available ? QStringLiteral("installable here as the '%1' variant")
+                            .arg(e.value(QStringLiteral("variant")).toString())
+                      : e.value(QStringLiteral("unavailableReason")).toString();
+
         // AVAILABILITY AND THE INSTALL CONTROL ON ONE LINE, because the
         // criterion is about the two together: an unavailable row must carry a
         // reason AND no control, and a row that said one without the other
@@ -75,13 +81,9 @@ void ShellCatalogDriver::reportCatalog()
         emit log(QStringLiteral("  %1 %2 -- %3; install control: %4")
                      .arg(name,
                           e.value(QStringLiteral("version")).toString(),
-                          available
-                              ? QStringLiteral("installable here as the '%1' variant")
-                                    .arg(e.value(QStringLiteral("variant")).toString())
-                              : e.value(QStringLiteral("unavailableReason")).toString(),
-                          e.value(QStringLiteral("canInstall")).toBool()
-                              ? QStringLiteral("shown") : QStringLiteral("absent")));
-        if (!available && e.value(QStringLiteral("canInstall")).toBool())
+                          verdict,
+                          canInstall ? QStringLiteral("shown") : QStringLiteral("absent")));
+        if (!available && canInstall)
             emit log(QStringLiteral("WRONG: %1 is unavailable and still offers an install")
                          .arg(name));
     }

@@ -60,10 +60,11 @@ bool InstallGate::begin(const CatalogEntry& entry)
     }
     m_lgxPath = downloaded.value(QStringLiteral("path")).toString();
     if (m_lgxPath.isEmpty()) {
-        // A success with no path is not a success. Installing "" would ask
+        // No error and no path is not a success either. Installing "" would ask
         // package_manager to read a directory and report a confusing error two
         // steps from the cause.
-        refuse(QStringLiteral("the download of '%1' reported success but no file").arg(entry.name));
+        refuse(QStringLiteral("the download of '%1' reported no error and no file")
+                   .arg(entry.name));
         return false;
     }
 

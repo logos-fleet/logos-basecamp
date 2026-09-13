@@ -81,13 +81,17 @@ CatalogSource CatalogSource::fromArguments(const QStringList& args)
             continue;
         }
 
-        // kInstall
-        if (!out.m_install.isEmpty()) {
-            out.m_refusals << QStringLiteral("already installing %1; ignoring %2")
-                                  .arg(out.m_install, value);
-            continue;
+        if (arg == kInstall) {
+            // ONE row, and the first one, for the reason --repository takes the
+            // first: last-wins discards a name the user can still see on the
+            // line they typed.
+            if (!out.m_install.isEmpty()) {
+                out.m_refusals << QStringLiteral("already installing %1; ignoring %2")
+                                      .arg(out.m_install, value);
+                continue;
+            }
+            out.m_install = value;
         }
-        out.m_install = value;
     }
 
     return out;

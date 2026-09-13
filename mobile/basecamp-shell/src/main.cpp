@@ -283,17 +283,18 @@ int main(int argc, char* argv[])
     // last check happened to end on. It is also what makes a screen recording
     // of the run worth anything -- the Modules tab's pass is three console
     // lines, and the app being on screen is the thing you would want to see.
-    auto backToTheApp = [&host, apps, catalog]() {
+    auto finishOnTheApp = [&host, apps, catalog]() {
         if (apps->hasWork() || catalog->hasWork())
             host.setCurrentSectionIndex(ShellSection::Workspace);
         // AND THE LAST THING OF ALL, after every driver: opening a catalog
         // row's links hands a URL to the platform, which puts a browser over
         // the Shell and stops turning its event loop. A driver sequenced behind
-        // it would be waiting on a suspended process.
+        // it would be waiting on a suspended process. It settles on the app
+        // first, so the workspace above is what a recording of the run shows.
         catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app, [network, driver, apps, catalog, backToTheApp]() {
+    QTimer::singleShot(0, &app, [network, driver, apps, catalog, finishOnTheApp]() {
         // The catalog FIRST when there is one: the module it installs is what
         // the Modules tab and the sidebar then have to account for, and a run
         // pointed at a catalog is a developer's rather than a cold-start
@@ -315,16 +316,16 @@ int main(int argc, char* argv[])
             // perfectly fine.
             apps->run(network->madeConversation());
             driver->run();
-            backToTheApp();
+            finishOnTheApp();
         } else {
             console(QStringLiteral("networking modules: none in this Bundled set"));
             // Nothing ran ahead of it, so the tab needs its own settle: a QML
             // item has no geometry until the scene has painted, and a press
             // at the centre of a zero-sized button lands on nothing.
-            QTimer::singleShot(2500, driver, [driver, apps, backToTheApp]() {
+            QTimer::singleShot(2500, driver, [driver, apps, finishOnTheApp]() {
                 apps->run();
                 driver->run();
-                backToTheApp();
+                finishOnTheApp();
             });
         }
     });
