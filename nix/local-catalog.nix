@@ -72,11 +72,18 @@ let
   # not the assumption that produced it.
   viewEntry = "view/Counter.qml";
 
+  # One entry of `webVariants` with its defaults filled in, so that every
+  # question below asks `spec.type` rather than re-deciding what an unspecified
+  # one means.
+  specFor = name: spec: {
+    type = "ui_qml";
+    category = "test";
+    description = "${name}, published as a `web` variant for a Store shell";
+  } // spec;
+
   # One `web` variant, out of a module's `web` output.
-  webPayload = name: spec:
-    let isView = (spec.type or "ui_qml") == "ui_qml"; in
-    {
-      main = "index.html";
+  webPayload = name: spec: {
+    main = "index.html";
     payload = pkgs.runCommand "${name}-web-payload" { } (''
       set -euo pipefail
       src=$(echo ${spec.drv}/*_web)
@@ -91,24 +98,25 @@ let
       grep -q '"name":"${name}"' $out/manifest.json \
         || { echo "error: ${name}'s manifest does not name it" >&2; exit 1; }
       test -f $out/index.html || { echo "error: ${name} has no index.html to be its main" >&2; exit 1; }
-    '' + lib.optionalString isView ''
+    '' + lib.optionalString (spec.type == "ui_qml") ''
       test -f $out/${viewEntry} \
         || { echo "error: ${name} ships no ${viewEntry}; the view contract would fail at sign time" >&2; exit 1; }
     '');
   };
 
-  mkWebPackage = name: spec:
-    let type = spec.type or "ui_qml"; in
+  # A `core` package declares no view and carries no icon, and must not: the
+  # manifest 0.4.0 contract asserted by mkPackage makes both mandatory for a
+  # `ui_qml` one and meaningless for anything else.
+  mkWebPackage = name: entry:
+    let spec = specFor name entry; in
     catalog.mkPackage ({
-      inherit name type;
+      inherit name;
+      inherit (spec) type description category;
       version = "1.0.0";
-      description = spec.description or
-        "${name}, published as a `web` variant for a Store shell";
-      category = spec.category or "test";
       dependencies = [ ];
       variants.web = webPayload name spec;
       signingKey = { inherit (testKey) jwk name; };
-    } // lib.optionalAttrs (type == "ui_qml") {
+    } // lib.optionalAttrs (spec.type == "ui_qml") {
       inherit icon;
       view = viewEntry;
     });

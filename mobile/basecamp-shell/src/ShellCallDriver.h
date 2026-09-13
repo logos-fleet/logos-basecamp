@@ -28,7 +28,6 @@
 #include <QString>
 
 class ICoreRuntime;
-class LogosAPI;
 class LogosAPIClient;
 
 class ShellCallDriver : public QObject
@@ -61,6 +60,6 @@ private:
     bool ensureLoaded(const QString& name);
     bool awaitReachable(LogosAPIClient* client, const QString& name);
 
-    ICoreRuntime*                        m_core;  // not owned
+    ICoreRuntime* m_core;  // not owned
     basecamp::appmanager::ModuleCallScript m_script;
 };

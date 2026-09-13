@@ -13,6 +13,16 @@ namespace basecamp::web {
 
 namespace {
 
+// THE PACKAGE'S OWN MANIFEST, or an empty object when it ships none -- every
+// question below then answers as it does for a package written before that
+// question existed.
+QJsonObject manifestOf(const QString& moduleDir)
+{
+    QFile manifest(QDir(moduleDir).filePath(QStringLiteral("manifest.json")));
+    if (!manifest.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(manifest.readAll()).object();
+}
+
 // THE HEADLESS ENTRY DOCUMENT THIS PACKAGE SHIPS, or empty when it ships none.
 //
 // Read out of the package's own manifest rather than assumed, because the file
@@ -21,12 +31,9 @@ namespace {
 // already names there, and a package built before that key existed simply has
 // no headless document -- which a container must be able to discover, since the
 // only other answer to an eviction is to unload the module.
-QString headlessEntryOf(const QString& moduleDir)
+QString headlessEntryOf(const QJsonObject& manifest, const QString& moduleDir)
 {
-    QFile manifest(QDir(moduleDir).filePath(QStringLiteral("manifest.json")));
-    if (!manifest.open(QIODevice::ReadOnly)) return {};
-    const QJsonObject root = QJsonDocument::fromJson(manifest.readAll()).object();
-    const QString entry = root.value(QStringLiteral("logos_web_view"))
+    const QString entry = manifest.value(QStringLiteral("logos_web_view"))
                               .toObject()
                               .value(QStringLiteral("headless"))
                               .toString();
@@ -38,7 +45,7 @@ QString headlessEntryOf(const QString& moduleDir)
 }
 
 // WHETHER THIS PACKAGE'S PAGE IS THE MODULE'S UI. The package's declared
-// `type`, read from the same manifest as the headless entry above.
+// `type`.
 //
 // A `core` module has no user interface -- that is what `core` MEANS -- and it
 // still gets a page, because a wasm image has nowhere else to live. So the two
@@ -49,13 +56,9 @@ QString headlessEntryOf(const QString& moduleDir)
 //
 // A manifest with no `type` reads as a UI, which is what every package written
 // before a `core` `web` variant existed is.
-bool servesUiOf(const QString& moduleDir)
+bool servesUiOf(const QJsonObject& manifest)
 {
-    QFile manifest(QDir(moduleDir).filePath(QStringLiteral("manifest.json")));
-    if (!manifest.open(QIODevice::ReadOnly)) return true;
-    const QJsonObject root = QJsonDocument::fromJson(manifest.readAll()).object();
-    const QString type = root.value(QStringLiteral("type")).toString();
-    return type != QLatin1String("core");
+    return manifest.value(QStringLiteral("type")).toString() != QLatin1String("core");
 }
 
 // The web transport's endpoint on a phone's page, over the bridge.
@@ -118,8 +121,9 @@ MobileWebModuleView::MobileWebModuleView(const LogosCore::WebModuleViewRequest& 
     m_platform = platform;
     m_shimInDocument = shimInDocument;
     m_uiEntry = entryFile;
-    m_servesUi = servesUiOf(moduleDir);
-    m_headlessEntry = headlessEntryOf(moduleDir);
+    const QJsonObject manifest = manifestOf(moduleDir);
+    m_servesUi = servesUiOf(manifest);
+    m_headlessEntry = headlessEntryOf(manifest, moduleDir);
     if (m_headlessEntry.isEmpty()) {
         qInfo() << "Web module" << m_moduleName
                 << "ships no headless entry document; an eviction will have to "

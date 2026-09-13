@@ -119,8 +119,6 @@ void ShellCallDriver::run()
 
     LogosAPI api(QStringLiteral("shell_call_driver"));
 
-    int made = 0;
-    int failed = 0;
     for (const QString& module : m_script.modules()) {
         if (!ensureLoaded(module))
             continue;
@@ -134,6 +132,8 @@ void ShellCallDriver::run()
         emit log(QStringLiteral("call: %1 is loaded and answering").arg(module));
     }
 
+    int made = 0;
+    int failed = 0;
     for (const ModuleCall& call : m_script.calls()) {
         LogosAPIClient* client = api.getClient(call.module);
         if (!client) {

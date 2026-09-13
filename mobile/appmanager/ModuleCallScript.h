@@ -1,10 +1,9 @@
 #pragma once
 
+#include <QList>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
-
-#include <QList>
 
 namespace basecamp::appmanager {
 
