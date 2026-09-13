@@ -76,9 +76,12 @@ public:
     // { caller, target, granted }. Empty when nothing was pending.
     QVariantMap answer(bool granted);
 
-    // "Not now": drop the current prompt without deciding. Nothing is sent, and
-    // the pair will be announced again the next time the module tries — which is
-    // the honest outcome of a question the user did not answer.
+    // "Not now": drop the current prompt without deciding. Nothing is sent, so
+    // the pair stays undecided in capability_module and the calls it gates keep
+    // failing — which is the honest outcome of a question the user did not
+    // answer. It is not re-asked on the module's next retry (capability_module
+    // announces an undecided pair once per process run); the question comes back
+    // on a later launch, or after forgetConsent.
     void dismiss();
 
     // Every pair already answered in this session, so a Shell can show them and

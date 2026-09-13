@@ -8,9 +8,7 @@ const QLatin1String kDownloaded("downloaded");
 
 QString ConsentQueue::Prompt::question() const
 {
-    // Name the DOWNLOADED party as something the user chose to install, because
-    // that is the decision they are being asked to stand behind. When both are
-    // Downloaded the caller is named: it is the one reaching out.
+    // Which party is named, and why, is documented on the declaration.
     if (callerOrigin == kDownloaded) {
         return QStringLiteral("\u201c%1\u201d, which you installed, wants to use \u201c%2\u201d.")
             .arg(caller, target);
@@ -79,10 +77,11 @@ void ConsentQueue::dismiss()
     if (m_pending.isEmpty())
         return;
     const Prompt p = m_pending.takeFirst();
-    // The key goes too: the module WILL try again, capability_module will
-    // announce again (its own announcement is per process run and this pair is
-    // still undecided there), and that second announcement has to be able to put
-    // the question back on screen.
+    // The key goes too, so the NEXT announcement for this pair is not swallowed
+    // here as a duplicate. capability_module announces an undecided pair once
+    // per process run, so that next one arrives on a later launch (it does not
+    // persist what it has announced) or after forgetConsent -- not on the
+    // module's very next retry.
     m_queuedKeys.remove(key(p.caller, p.target));
 }
 

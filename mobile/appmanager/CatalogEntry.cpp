@@ -18,6 +18,22 @@ bool isLoopback(const QString& host)
         || host == QLatin1String("::1");
 }
 
+// One catalog link, as the entry carries it: the URL when this shell will open
+// it, else a refusal saying why not.
+//
+// An ABSENT link is not a refusal worth reporting -- most of a catalog will
+// carry none, and a Shell logging that per row would say nothing -- so it leaves
+// both empty.
+void resolveLink(const QString& raw, QUrl& url, QString& refusal)
+{
+    refusal.clear();
+    if (raw.isEmpty())
+        return;
+    refusal = linkRefusal(raw);
+    if (refusal.isEmpty())
+        url = QUrl(raw, QUrl::StrictMode);
+}
+
 } // namespace
 
 QString linkRefusal(const QString& raw)
@@ -88,21 +104,10 @@ CatalogEntry entryFrom(const QVariantMap& annotatedRow,
         e.installedVersion = *installed;
     }
 
-    const QString report = annotatedRow.value(QStringLiteral("reportUrl")).toString();
-    e.reportUrlRefusal = linkRefusal(report);
-    if (e.reportUrlRefusal.isEmpty())
-        e.reportUrl = QUrl(report, QUrl::StrictMode);
-    // "no link" is not a refusal worth reporting: most of a catalog will have
-    // none, and a Shell logging that per row would say nothing.
-    if (report.isEmpty())
-        e.reportUrlRefusal.clear();
-
-    const QString universal = annotatedRow.value(QStringLiteral("universalLink")).toString();
-    e.universalLinkRefusal = linkRefusal(universal);
-    if (e.universalLinkRefusal.isEmpty())
-        e.universalLink = QUrl(universal, QUrl::StrictMode);
-    if (universal.isEmpty())
-        e.universalLinkRefusal.clear();
+    resolveLink(annotatedRow.value(QStringLiteral("reportUrl")).toString(),
+                e.reportUrl, e.reportUrlRefusal);
+    resolveLink(annotatedRow.value(QStringLiteral("universalLink")).toString(),
+                e.universalLink, e.universalLinkRefusal);
 
     return e;
 }

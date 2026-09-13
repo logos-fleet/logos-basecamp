@@ -137,10 +137,11 @@ void StoreAppManager::beginInstall(const QString& packageName)
         refuseWithGateError();
         return;
     }
+    const QVariantMap prompt = signerPrompt();
     emit log(QStringLiteral("%1: downloaded; signed by %2 (%3)")
                  .arg(packageName,
-                      signerPrompt().value(QStringLiteral("signerName")).toString(),
-                      signerPrompt().value(QStringLiteral("signerDid")).toString()));
+                      prompt.value(QStringLiteral("signerName")).toString(),
+                      prompt.value(QStringLiteral("signerDid")).toString()));
     emit signerPromptChanged();
 }
 

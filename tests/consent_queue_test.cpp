@@ -183,8 +183,9 @@ private slots:
 
     void adismissedPairCanBeAskedAgain()
     {
-        // Which is the point: the module retries, capability_module announces
-        // again, and the question has to be able to come back on screen.
+        // Which is the point: a later announcement for the same pair -- the next
+        // launch, or after forgetConsent -- has to be able to come back on
+        // screen rather than be swallowed here as a duplicate.
         ConsentQueue q;
         q.offer(required(QStringLiteral("counter_ui"), QStringLiteral("chat_module")));
         q.dismiss();
