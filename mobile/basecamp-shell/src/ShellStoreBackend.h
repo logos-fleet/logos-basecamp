@@ -61,10 +61,30 @@ public:
     // downloaded claim establishes no trust anchor.
     bool trustSigner(const QString& name, const QString& did, QString* error = nullptr);
 
+    // BRING capability_module UP, rather than waiting for something to want it.
+    //
+    // Every other Bundled member is loaded lazily and that is right: a module
+    // nothing has called costs nothing. capability_module is not one of those —
+    // it is the authority every cross-module call goes through before it is
+    // made, so "nobody has asked for it yet" and "no call can be authorised"
+    // are the same state. A module that calls out finds `requestModule` unable
+    // to acquire it, gets no token, and the target refuses with "auth token not
+    // recognized"; nothing in that chain names the module that is missing.
+    //
+    // MEASURED, iPad Air 13-inch simulator: the wallet UI's `web` variant asked
+    // keystore_module for accounts, `requestModule` failed to acquire
+    // capability_module after 0 ms of its 20 s budget, and the call was refused.
+    // The Native container had never loaded it because a phone's Shell never
+    // calls it itself.
+    //
+    // Returns false when this build's set has no capability_module, which is a
+    // shell where no cross-module call can be authorised at all.
+    bool ensureCapabilityAuthority();
+
     // Subscribe to capability_module's `consentRequired` and forward each payload
-    // to `manager`. Returns false when capability_module is not loaded — in which
-    // case no cross-module call is being authorised at all and there is nothing
-    // to consent to.
+    // to `manager`. Returns false when capability_module is not in this build — in
+    // which case no cross-module call is being authorised at all and there is
+    // nothing to consent to.
     bool subscribeToConsent(basecamp::appmanager::StoreAppManager* manager);
 
     // ── StoreAppManager::Backend ──

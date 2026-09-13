@@ -167,6 +167,11 @@ bool ShellStoreBackend::trustSigner(const QString& name, const QString& did, QSt
     return true;
 }
 
+bool ShellStoreBackend::ensureCapabilityAuthority()
+{
+    return ensureLoaded(kCapabilityModule);
+}
+
 bool ShellStoreBackend::subscribeToConsent(basecamp::appmanager::StoreAppManager* manager)
 {
     if (m_consentSubscribed || !manager || !m_api)

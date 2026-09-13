@@ -2,6 +2,7 @@
 
 #include "web/LogosWebPaths.h"
 
+#include <QDebug>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -76,16 +77,63 @@ const char* kShim = R"JS(
   // and the host assembles by sequence number, so two frames in flight cannot
   // interleave.
   var nextSeq = 0;
+
+  // EVERY CHUNK IS A WHOLE ENCODING, NEVER A SLICE OF ONE.
+  //
+  // The host decodes each chunk on arrival and concatenates the results, so a
+  // chunk has to be decodable BY ITSELF. Encoding the frame once and then
+  // cutting the result every CHUNK characters is not: a percent-escape is three
+  // characters (`%22` for a quote, nine for an em dash) and a boundary landing
+  // inside one produces two pieces that decode to something neither half meant.
+  // The frame the host then delivers is the right shape and the wrong bytes,
+  // the peer drops it without a word, and the container reports "the page never
+  // published a module" about a page that answered perfectly. It took until a
+  // frame that was not all letters to show: 30000 `z` characters encode to
+  // themselves, so no cut could land inside an escape, and JSON -- where `{`,
+  // `"`, `,` and `:` are each three characters on the wire -- is the shape that
+  // finds it.
+  //
+  // So the frame is encoded a code point at a time and the pieces are packed
+  // into chunks, each still inside CHUNK characters. `codePointAt` rather than
+  // an index walk because a surrogate pair encodes as one four-byte sequence
+  // and must not be split either.
+  function splitEncoded(text) {
+    var parts = [];
+    var cur = '';
+    for (var i = 0; i < text.length; ) {
+      var ch = String.fromCodePoint(text.codePointAt(i));
+      i += ch.length;
+      var enc = encodeURIComponent(ch);
+      if (cur.length > 0 && cur.length + enc.length > CHUNK) {
+        parts.push(cur);
+        cur = '';
+      }
+      cur += enc;
+    }
+    parts.push(cur);
+    return parts;
+  }
+
   function post(text) {
-    var encoded = encodeURIComponent(String(text));
-    var count = Math.max(1, Math.ceil(encoded.length / CHUNK));
+    var parts = splitEncoded(String(text));
+    var count = parts.length;
     var seq = String(nextSeq++);
+    // SAID OUT LOUD WHEN IT SPLITS, because a chunked frame is the one shape
+    // this path can get wrong in a way nothing downstream reports: the host
+    // reassembles by sequence number and a frame that arrives short is not a
+    // frame at all, it is silence.
+    if (count > 1) {
+      var encodedChars = 0;
+      for (var j = 0; j < count; j++) encodedChars += parts[j].length;
+      console.log('logos-bridge: frame ' + encodedChars
+                  + ' encoded chars -> ' + count + ' chunks (seq ' + seq + ')');
+    }
     var chain = Promise.resolve();
     for (var i = 0; i < count; i++) {
       (function (index) {
         chain = chain.then(function () {
           return fetch(CONTROL + '/send?s=' + seq + '&i=' + index + '&n=' + count
-                       + '&d=' + encoded.substr(index * CHUNK, CHUNK),
+                       + '&d=' + parts[index],
                        { method: 'GET', cache: 'no-store' });
         });
       })(i);
@@ -367,6 +415,9 @@ void MobileWebBridge::handleSend(const QUrl& url, const QByteArray& body,
             for (const QString& piece : partial.chunks) frame += piece;
             m_partial.erase(seq);
             complete = true;
+            if (count > 1)
+                qInfo() << "Web bridge: reassembled a" << frame.size()
+                        << "char frame from" << count << "chunks";
         }
     }
 
