@@ -52,6 +52,8 @@ add_library(basecamp_shell_host STATIC
     ${BASECAMP_MOBILE}/appmanager/ConsentQueue.h
     ${BASECAMP_MOBILE}/appmanager/InstallGate.cpp
     ${BASECAMP_MOBILE}/appmanager/InstallGate.h
+    ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.cpp
+    ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.h
     ${BASECAMP_MOBILE}/appmanager/StoreAppManager.cpp
     ${BASECAMP_MOBILE}/appmanager/StoreAppManager.h
     ${BASECAMP_APP}/ModuleInstanceModel.cpp
@@ -96,6 +98,7 @@ install(FILES
     ${BASECAMP_MOBILE}/appmanager/CatalogEntry.h
     ${BASECAMP_MOBILE}/appmanager/ConsentQueue.h
     ${BASECAMP_MOBILE}/appmanager/InstallGate.h
+    ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.h
     ${BASECAMP_MOBILE}/appmanager/StoreAppManager.h
     DESTINATION include/basecamp-shell-host/appmanager)
 install(EXPORT BasecampShellHostTargets

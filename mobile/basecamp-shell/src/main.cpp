@@ -16,6 +16,7 @@
 // the catalog at build time. Nothing in this file names one.
 #include "BundledSetCoreRuntime.h"
 #include "BundledSetShellHost.h"
+#include "appmanager/ModuleDirectories.h"
 #include "IShellHost.h"
 #include "IShellView.h"
 #include "NetworkSmokeRunner.h"
@@ -26,6 +27,7 @@
 #include "SmokeRunner.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPluginLoader>
@@ -33,6 +35,7 @@
 #include <QStandardPaths>
 #include <QTimer>
 
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -98,7 +101,27 @@ int main(int argc, char* argv[])
     // The runtime seam. Everything above it asks THIS about modules, exactly
     // as Basecamp does on the desktop; what differs on a phone is where the
     // installed set comes from.
-    BundledSetCoreRuntime core(runner.prepare(argc, argv));
+    //
+    // THE DIRECTORIES, BEFORE THE CORE STARTS, because a module directory can
+    // only be added before logos_core_start(). Everything a Downloaded module
+    // needs to be FOUND is decided here: package_manager installs into
+    // `installModulesDir` and the core scans `coreModulesDirs`, and
+    // ModuleDirectories is what keeps those the same place.
+    const QString appDataRoot =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const basecamp::appmanager::ModuleDirectories moduleDirs =
+        basecamp::appmanager::ModuleDirectories::under(appDataRoot);
+    QDir().mkpath(moduleDirs.installModulesDir);
+    QDir().mkpath(moduleDirs.installUiPluginsDir);
+
+    ICoreRuntime::Config coreConfig = runner.prepare(argc, argv);
+    for (const QString& dir : moduleDirs.coreModulesDirs) {
+        const std::string entry = dir.toStdString();
+        if (std::find(coreConfig.modulesDirs.begin(), coreConfig.modulesDirs.end(), entry)
+            == coreConfig.modulesDirs.end())
+            coreConfig.modulesDirs.push_back(entry);
+    }
+    BundledSetCoreRuntime core(coreConfig);
     QObject::connect(&core, &BundledSetCoreRuntime::log, &console);
     core.start();
     runner.report();
@@ -127,12 +150,13 @@ int main(int argc, char* argv[])
     // The directories are the app's own writable data, which is the only place a
     // phone lets it install anything -- there is no shared modules directory
     // (ADR 0003).
-    {
-        const QString dataDir =
-            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-        host.backend()->startAppManager(dataDir + QStringLiteral("/modules"),
-                                        dataDir + QStringLiteral("/ui-plugins"));
-    }
+    //
+    // The SAME directories the core was started with. They used to be written
+    // out here as `<data>/modules` and `<data>/ui-plugins`, which the core never
+    // scanned: an install succeeded, reported a path, and the module never
+    // appeared.
+    host.backend()->startAppManager(moduleDirs.installModulesDir,
+                                    moduleDirs.installUiPluginsDir);
 
     QMainWindow window;
     QWidget* shellWidget = shell->createShell(&host);
