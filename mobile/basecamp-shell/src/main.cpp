@@ -30,6 +30,7 @@
 #include <QMainWindow>
 #include <QPluginLoader>
 #include <QSocketNotifier>
+#include <QStandardPaths>
 #include <QTimer>
 
 #include <csignal>
@@ -117,6 +118,21 @@ int main(int argc, char* argv[])
 
     BundledSetShellHost host(&core);
     QObject::connect(host.backend(), &ShellModulesBackend::log, &console);
+
+    // The App Manager. AFTER the set is loaded, because everything it does
+    // depends on which package modules the build carries, and it reports that
+    // rather than failing: a Store shell's Bundled set is data (ADR 0007) and
+    // the smallest useful one is chat and nothing else.
+    //
+    // The directories are the app's own writable data, which is the only place a
+    // phone lets it install anything -- there is no shared modules directory
+    // (ADR 0003).
+    {
+        const QString dataDir =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        host.backend()->startAppManager(dataDir + QStringLiteral("/modules"),
+                                        dataDir + QStringLiteral("/ui-plugins"));
+    }
 
     QMainWindow window;
     QWidget* shellWidget = shell->createShell(&host);

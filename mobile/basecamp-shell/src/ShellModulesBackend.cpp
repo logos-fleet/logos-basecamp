@@ -3,6 +3,9 @@
 #include "BundledSetCoreRuntime.h"
 #include "CoreModuleManager.h"
 #include "ShellSections.h"
+#include "ShellStoreBackend.h"
+
+#include "appmanager/StoreAppManager.h"
 
 #include <logos_api.h>
 
@@ -25,7 +28,15 @@ ShellModulesBackend::ShellModulesBackend(BundledSetCoreRuntime* core, QObject* p
     , m_api(new LogosAPI(QString::fromUtf8(kApiName)))
     , m_modules(new CoreModuleManager(m_api, core, this))
     , m_coreModulesModel(new ModuleInstanceModel(this))
+    , m_storeBackend(new ShellStoreBackend(m_api, m_modules))
+    , m_appManager(new basecamp::appmanager::StoreAppManager(m_storeBackend, this))
 {
+    // Every line the App Manager produces goes out the one console a Store shell
+    // has. It owns no logger, and a refusal nobody can read is a button that did
+    // nothing.
+    connect(m_appManager, &basecamp::appmanager::StoreAppManager::log,
+            this, &ShellModulesBackend::log);
+
     // The same wiring MainUIBackend has: the manager announces "the module set
     // changed" -- on refresh() and on every 2s stats tick -- and the model is
     // rebuilt from it. ModuleInstanceModel patches in place when the names are
@@ -40,9 +51,36 @@ ShellModulesBackend::~ShellModulesBackend()
     // m_modules is a QObject child and goes with this object; m_api is not,
     // and is deleted last because the manager's introspection calls reach
     // through it.
+    // m_appManager is a QObject child and goes with this object, but it holds a
+    // raw pointer to m_storeBackend -- which reaches through m_api -- so the
+    // order below is load-bearing: child first, then the backend, then the API.
+    delete m_appManager;
+    m_appManager = nullptr;
+    delete m_storeBackend;
+    m_storeBackend = nullptr;
     delete m_modules;
     m_modules = nullptr;
     delete m_api;
+}
+
+QObject* ShellModulesBackend::appManagerObject() const
+{
+    return m_appManager;
+}
+
+void ShellModulesBackend::startAppManager(const QString& userModulesDirectory,
+                                          const QString& userUiPluginsDirectory)
+{
+    const bool configured =
+        m_storeBackend->configure(userModulesDirectory, userUiPluginsDirectory);
+    // Consent is independent of the catalog: capability_module is in every set
+    // (nothing calls anything without it), so a shell with no package modules
+    // still prompts for a Downloaded module installed by an earlier launch.
+    const bool consent = m_storeBackend->subscribeToConsent(m_appManager);
+    emit log(QStringLiteral("app manager: catalog %1, consent %2")
+                 .arg(configured ? QStringLiteral("ready") : QStringLiteral("not in this build"),
+                      consent ? QStringLiteral("armed") : QStringLiteral("unavailable")));
+    m_appManager->refreshCatalog();
 }
 
 QAbstractItemModel* ShellModulesBackend::coreModulesModel() const
@@ -302,7 +340,7 @@ void ShellModulesBackend::respondToShellIntent(const QString&, bool, const QVari
 }
 void ShellModulesBackend::refreshUiModules()   { }
 void ShellModulesBackend::refreshRepositories() { emit repositoriesChanged(); }
-void ShellModulesBackend::refreshAppCatalog()   { }
+void ShellModulesBackend::refreshAppCatalog()   { m_appManager->refreshCatalog(); }
 void ShellModulesBackend::addRepository(const QString&)        { emit log(notHere("repositories")); }
 void ShellModulesBackend::removeRepository(const QString&)     { emit log(notHere("repositories")); }
 void ShellModulesBackend::setRepositoryEnabled(const QString&, bool) { emit log(notHere("repositories")); }

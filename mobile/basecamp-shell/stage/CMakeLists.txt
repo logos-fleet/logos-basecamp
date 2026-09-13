@@ -22,6 +22,11 @@ find_package(BasecampMainUI CONFIG REQUIRED)
 
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 set(BASECAMP_APP ${CMAKE_CURRENT_SOURCE_DIR}/../../../app)
+# The App Manager's platform-free half, shared with the desktop unit tests --
+# what a catalog row means, the order an install happens in, the consent queue.
+# Its one seam (StoreAppManager::Backend) is implemented HERE, in
+# ShellStoreBackend, which is the only file in it that includes logos-protocol.
+set(BASECAMP_MOBILE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
 # ModuleInstanceModel and CoreModuleManager are the DESKTOP app's, compiled in
 # rather than reimplemented: the Modules tab binds one and drives the other, so
@@ -39,6 +44,16 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/ShellModulesDriver.h
     ${SRC}/ShellAppDriver.cpp
     ${SRC}/ShellAppDriver.h
+    ${SRC}/ShellStoreBackend.cpp
+    ${SRC}/ShellStoreBackend.h
+    ${BASECAMP_MOBILE}/appmanager/CatalogEntry.cpp
+    ${BASECAMP_MOBILE}/appmanager/CatalogEntry.h
+    ${BASECAMP_MOBILE}/appmanager/ConsentQueue.cpp
+    ${BASECAMP_MOBILE}/appmanager/ConsentQueue.h
+    ${BASECAMP_MOBILE}/appmanager/InstallGate.cpp
+    ${BASECAMP_MOBILE}/appmanager/InstallGate.h
+    ${BASECAMP_MOBILE}/appmanager/StoreAppManager.cpp
+    ${BASECAMP_MOBILE}/appmanager/StoreAppManager.h
     ${BASECAMP_APP}/ModuleInstanceModel.cpp
     ${BASECAMP_APP}/ModuleInstanceModel.h
     ${BASECAMP_APP}/CoreModuleManager.cpp
@@ -47,6 +62,7 @@ add_library(basecamp_shell_host STATIC
 
 target_include_directories(basecamp_shell_host PUBLIC
     $<BUILD_INTERFACE:${SRC}>
+    $<BUILD_INTERFACE:${BASECAMP_MOBILE}>
     $<BUILD_INTERFACE:${BASECAMP_APP}>
     $<BUILD_INTERFACE:${BASECAMP_APP}/interfaces>
     $<INSTALL_INTERFACE:include/basecamp-shell-host>)
@@ -62,6 +78,7 @@ set_target_properties(basecamp_shell_host PROPERTIES EXPORT_NAME ShellHost)
 install(TARGETS basecamp_shell_host EXPORT BasecampShellHostTargets ARCHIVE DESTINATION lib)
 install(FILES
     ${SRC}/ShellModulesBackend.h
+    ${SRC}/ShellStoreBackend.h
     ${SRC}/BundledSetShellHost.h
     ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.h
@@ -75,6 +92,12 @@ install(FILES
     ${BASECAMP_APP}/interfaces/InstallEnums.h
     ${BASECAMP_APP}/interfaces/BasecampModelRoles.h
     DESTINATION include/basecamp-shell-host)
+install(FILES
+    ${BASECAMP_MOBILE}/appmanager/CatalogEntry.h
+    ${BASECAMP_MOBILE}/appmanager/ConsentQueue.h
+    ${BASECAMP_MOBILE}/appmanager/InstallGate.h
+    ${BASECAMP_MOBILE}/appmanager/StoreAppManager.h
+    DESTINATION include/basecamp-shell-host/appmanager)
 install(EXPORT BasecampShellHostTargets
     FILE BasecampShellHostTargets.cmake NAMESPACE Basecamp::
     DESTINATION lib/cmake/BasecampShellHost)
