@@ -102,19 +102,37 @@ private:
     // What the shipped shim does: percent-encode the frame, split it, and GET
     // one request per chunk. Neither phone's interceptor is handed a request
     // body, so this -- not the POST below it -- is the path a device uses.
+    //
+    // A CHUNK IS A WHOLE ENCODING, NEVER A SLICE OF ONE, which is the shim's
+    // rule (MobileWebBridge.cpp, splitEncoded) and the reason this helper packs
+    // per code point instead of cutting the encoded text every chunkChars
+    // characters. The host decodes each chunk as it arrives, so a boundary
+    // inside a `%22` would hand it two pieces that decode to something neither
+    // half meant.
     void postChunked(MobileWebBridge& bridge, const QString& frame, int seq,
                      int chunkChars = MobileWebBridge::kChunkChars)
     {
-        const QString encoded = QString::fromUtf8(
-            QUrl::toPercentEncoding(frame, QByteArray(), QByteArray("/")));
-        const int size = int(encoded.size());
-        const int count = std::max(1, (size + chunkChars - 1) / chunkChars);
+        QStringList parts;
+        QString cur;
+        for (QChar ch : frame) {
+            const QString piece = QString(ch);
+            const QString enc = QString::fromUtf8(
+                QUrl::toPercentEncoding(piece, QByteArray(), QByteArray("/")));
+            if (!cur.isEmpty() && cur.size() + enc.size() > chunkChars) {
+                parts.append(cur);
+                cur.clear();
+            }
+            cur += enc;
+        }
+        parts.append(cur);
+
+        const int count = parts.size();
         for (int i = 0; i < count; ++i) {
             QUrlQuery query;
             query.addQueryItem("s", QString::number(seq));
             query.addQueryItem("i", QString::number(i));
             query.addQueryItem("n", QString::number(count));
-            query.addQueryItem("d", encoded.mid(i * chunkChars, chunkChars));
+            query.addQueryItem("d", parts.at(i));
             requestUrl(bridge, "GET", pageUrl(control(bridge, "send"), query));
         }
     }
@@ -278,6 +296,36 @@ private slots:
 
         const QString frame = QStringLiteral("{\"type\":\"Call\",\"payload\":\"%1\"}")
                                   .arg(QString(9000, QLatin1Char('x')));
+        postChunked(*bridge, frame, 0);
+        QCOMPARE(got.size(), size_t(1));
+        QCOMPARE(QString::fromStdString(got[0]), frame);
+    }
+
+    void aChunkedFrameDenseInEscapesIsReassembled()
+    {
+        // THE FRAME THAT BROKE THE WALLET UI ON THE IPAD, in the one shape the
+        // test above cannot have: 9000 letters percent-encode to themselves, so
+        // a boundary drawn every kChunkChars characters of the ENCODED text
+        // could never land inside an escape. A real frame is JSON — every `{`,
+        // `"`, `,` and `:` is three characters on the wire — and a contract
+        // query answering a 40-method surface is the first one big enough to
+        // split. Cut `%22` after its `%` and the two halves decode to two
+        // different strings, the host delivers a frame that is no longer JSON,
+        // and the container reports "the page never published a module" about a
+        // page that answered perfectly.
+        std::unique_ptr<MobileWebBridge> bridge(make());
+        std::vector<std::string> got;
+        bridge->setReceiver([&got](const std::string& text) { got.push_back(text); });
+
+        QString frame = QStringLiteral("{\"type\":\"Reply\",\"methods\":[");
+        for (int i = 0; i < 400; ++i) {
+            if (i) frame += QLatin1Char(',');
+            frame += QStringLiteral("{\"name\":\"method_%1\",\"sig\":\"QString(QString,int)\"}")
+                         .arg(i);
+        }
+        frame += QStringLiteral("]}");
+        QVERIFY(QUrl::toPercentEncoding(frame).size() > 2 * MobileWebBridge::kChunkChars);
+
         postChunked(*bridge, frame, 0);
         QCOMPARE(got.size(), size_t(1));
         QCOMPARE(QString::fromStdString(got[0]), frame);

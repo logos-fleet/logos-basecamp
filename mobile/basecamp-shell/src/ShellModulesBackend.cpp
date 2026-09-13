@@ -81,12 +81,18 @@ QObject* ShellModulesBackend::appManagerObject() const
 void ShellModulesBackend::startAppManager(const basecamp::appmanager::ModuleDirectories& dirs)
 {
     const bool configured = m_storeBackend->configure(dirs);
+    // THE AUTHORITY FIRST, and loaded rather than merely present. See
+    // ShellStoreBackend::ensureCapabilityAuthority: every cross-module call on
+    // this device is authorised through capability_module, so a Bundled member
+    // nobody has called yet is a device on which no module can call another.
+    const bool authority = m_storeBackend->ensureCapabilityAuthority();
     // Consent is independent of the catalog: capability_module is in every set
     // (nothing calls anything without it), so a shell with no package modules
     // still prompts for a Downloaded module installed by an earlier launch.
     const bool consent = m_storeBackend->subscribeToConsent(m_appManager);
-    emit log(QStringLiteral("app manager: catalog %1, consent %2")
+    emit log(QStringLiteral("app manager: catalog %1, capability authority %2, consent %3")
                  .arg(configured ? QStringLiteral("ready") : QStringLiteral("not in this build"),
+                      authority ? QStringLiteral("up") : QStringLiteral("not in this build"),
                       consent ? QStringLiteral("armed") : QStringLiteral("unavailable")));
     m_appManager->refreshCatalog();
 }

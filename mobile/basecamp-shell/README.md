@@ -123,23 +123,25 @@ package_manager, capability_module and `QDesktopServices`.
 `main.cpp` starts it once the set is up, and the run says what it got:
 
 ```
-[shell] app manager: catalog not in this build, consent armed
+[shell] app manager: catalog not in this build, capability authority up, consent armed
 ```
 
-Two independent halves, and both are normal answers rather than errors. A Store
-shell's Bundled set is data (ADR 0007), so a build that carries neither package
-module cannot browse a catalog and says so — an empty App Manager would read as
-"the catalog has nothing in it", which is a different and much more alarming
-claim. Consent is separate because `capability_module` is in every set that calls
-anything, so a shell with no catalog still prompts for a Downloaded module an
-earlier launch installed.
+Three independent halves, and all three are normal answers rather than errors. A
+Store shell's Bundled set is data (ADR 0007), so a build that carries neither
+package module cannot browse a catalog and says so — an empty App Manager would
+read as "the catalog has nothing in it", which is a different and much more
+alarming claim. Consent is separate because `capability_module` is in every set
+that calls anything, so a shell with no catalog still prompts for a Downloaded
+module an earlier launch installed.
 
-Two things the device settled, both about LAZY LOADING (SM-G990B, 2026-09-13):
+Three things the device settled, all about LAZY LOADING (SM-G990B and an iPad Air
+13-inch simulator, 2026-09-13):
 
 | | |
 |---|---|
 | **`loadedModules()` is not "does this build have it".** The Native container loads a Bundled member lazily, so gating on it reported `consent unavailable` in a build that carries capability_module, because nothing had called it yet. Presence is `knownModules()`; `onEventWhenAvailable` is built to arm against a module still coming up. | `ShellStoreBackend::isPresent` |
 | **Nothing else calls the package modules.** If the App Manager does not load them, nobody does — so `configure()` loads both before answering `hasCatalog()`, rather than waiting for a first call that would fail. | `ShellStoreBackend::ensureLoaded` |
+| **capability_module must not be lazy.** It is the authority every cross-module call is authorised through, so "nobody has asked for it yet" and "no call can be authorised" are the same state — and the Shell itself never calls it, so nothing ever would. A `web` module asking keystore_module for accounts had `requestModule` fail to acquire capability_module after 0 ms of its 20 s budget and the target refuse with `auth token not recognized`; nothing in that chain names the module that is missing. | `ShellStoreBackend::ensureCapabilityAuthority` |
 
 And one that is a C++ trap rather than a platform one: `ShellStoreBackend` is
 constructed *from* `m_api` and `m_modules`, and members are initialised in

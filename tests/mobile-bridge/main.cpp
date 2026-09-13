@@ -41,6 +41,7 @@
 #include <QWebEngineUrlSchemeHandler>
 #include <QWebEngineView>
 
+#include <algorithm>
 #include <cstdio>
 #include <vector>
 
@@ -278,6 +279,50 @@ int main(int argc, char* argv[])
               QStringLiteral("%1 chars, %2 z").arg(whole.size()).arg(whole.count(QLatin1Char('z'))));
         check("...and exactly one frame arrived, not one per chunk",
               fromPage.size() == 1, QStringLiteral("%1 frame(s)").arg(fromPage.size()));
+    }
+
+    // ── the chunked sender, with a frame that is not all letters ────────────
+    //
+    // THE FRAME THAT BROKE THE WALLET UI ON THE IPAD, and the one shape the
+    // 30 KB case above cannot have. 30000 `z` characters percent-encode to
+    // themselves, so a boundary drawn every 4000 characters of the ENCODED text
+    // can never land inside an escape. A real frame is JSON — every `{`, `"`,
+    // `,` and `:` is three characters on the wire — and a contract query
+    // answering a forty-method surface was the first one in this tree big
+    // enough to split at all. Cut `%22` after its `%` and the two halves decode
+    // to two different strings: the host delivers something that is no longer
+    // JSON, the peer drops it without a word, and the container reports "the
+    // page never published a module" about a page that answered perfectly.
+    fromPage.clear();
+    QString dense = QStringLiteral("{\"type\":\"Result\",\"methods\":[");
+    for (int i = 0; i < 400; ++i) {
+        if (i) dense += QLatin1Char(',');
+        dense += QStringLiteral("{\"name\":\"method_%1\",\"sig\":\"QString(QString,int)\"}").arg(i);
+    }
+    dense += QStringLiteral("]}");
+    page->runJavaScript(QStringLiteral(
+        "window.__dense = '{\"type\":\"Result\",\"methods\":[' + Array.from({length:400},"
+        "  function (_, i) { return '{\"name\":\"method_' + i"
+        "    + '\",\"sig\":\"QString(QString,int)\"}'; }).join(',') + ']}';"
+        "window.__channel.send(window.__dense);"));
+    const bool denseArrived = waitFor([&fromPage] { return !fromPage.empty(); });
+    check("an escape-dense frame larger than one request arrives", denseArrived,
+          denseArrived ? QStringLiteral("%1 bytes").arg(fromPage.front().size())
+                       : QStringLiteral("nothing arrived"));
+    if (denseArrived) {
+        const QString whole = QString::fromStdString(fromPage.front());
+        check("...and it is the frame the page sent, byte for byte",
+              whole == dense,
+              whole == dense
+                  ? QStringLiteral("%1 chars").arg(whole.size())
+                  : QStringLiteral("expected %1 chars, got %2; first difference at %3")
+                        .arg(dense.size()).arg(whole.size())
+                        .arg([&] {
+                            const int n = std::min(dense.size(), whole.size());
+                            for (int i = 0; i < n; ++i)
+                                if (dense.at(i) != whole.at(i)) return i;
+                            return n;
+                        }()));
     }
 
     // ── the page reporting that it has stopped ──────────────────────────────

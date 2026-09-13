@@ -26,6 +26,25 @@ namespace {
 constexpr int kReachableMs = 60000;
 constexpr int kCallTimeoutMs = 60000;
 
+// HOW LONG THE LOOP TURNS AFTER THE LAST CALL, and it is not padding.
+//
+// A call RETURNING is not the same as a call being over. A `web` module runs on
+// the page's event loop, and the page runs on THIS thread — so while this
+// driver is making calls the page makes almost no progress, and the work a call
+// set in motion (a module asking another module something, a timer it armed
+// when it was admitted) only runs once this stops. A void method is the plain
+// case: the frame is queued and the call returns before the module has seen it.
+//
+// MEASURED, iPad Air 13-inch simulator: the wallet UI's `web` variant asked
+// keystore_module for accounts, the reply reassembled on the host — and the
+// Modules-tab driver's load/unload round trip destroyed the module in the same
+// millisecond, because main.cpp's settle had expired while the page was still
+// starved. Nothing had gone wrong; nothing had been given time either.
+//
+// A run with a `--call` script is a developer's, never a cold-start
+// measurement, so this costs nothing that is measured elsewhere.
+constexpr int kSettleMs = 8000;
+
 // What a module answered, as one line. A QVariant of anything structured is
 // printed as JSON so the answer is readable AND machine-readable -- a driver on
 // the other end of a device console is reading this.
@@ -173,4 +192,12 @@ void ShellCallDriver::run()
     }
 
     emit log(QStringLiteral("CALLS: %1 ok, %2 failed").arg(made).arg(failed));
+
+    // See kSettleMs: the calls are made, and what they started has not run yet.
+    emit log(QStringLiteral("calls: settling for %1 ms so the modules' own "
+                            "asynchronous work can finish").arg(kSettleMs));
+    QElapsedTimer settle;
+    settle.start();
+    while (settle.elapsed() < kSettleMs)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 }
