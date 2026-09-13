@@ -68,6 +68,28 @@
     # only way to ask whether the key survived is a second launch of THIS app.
     logos-evm-keystore-module.url = "github:logos-co/logos-evm-keystore-module";
     logos-evm-keystore-module.inputs.logos-module-builder.follows = "logos-module-builder";
+
+    # ── the wallet's two halves on a phone (slice 30, criterion 2) ──────────
+    #
+    # `eth_rpc_module` is a MEMBER OF THE MOBILE CATALOG: a Bundled Bare module
+    # whose `mobile.<target>.bare` the app image carries, and the only module a
+    # phone has that can answer `eth_getBalance`. The builder follows for the
+    # reason every Bundled module's does -- a Bare image is stamped with the
+    # logos-protocol version it compiled against and the host gates that stamp
+    # at load, so two builders in the closure means an app that refuses its own
+    # bundled module.
+    #
+    # `logos-evm-wallet-ui` is the `web` half: a `ui_qml` `web` variant the app
+    # image ships (LOGOS_SHELL_WEB_MODULES=wallet_ui) whose backend calls
+    # eth_rpc through the container. Its whole dependency tree is followed onto
+    # this flake's copies so the lock carries one of each rather than six
+    # module-builder subtrees; only their published `.lidl` contracts are read.
+    logos-evm-eth-rpc-module.url = "github:logos-co/logos-evm-eth-rpc-module";
+    logos-evm-eth-rpc-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-evm-wallet-ui.url = "github:logos-co/logos-evm-wallet-ui";
+    logos-evm-wallet-ui.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-evm-wallet-ui.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
+    logos-evm-wallet-ui.inputs.keystore_module.follows = "logos-evm-keystore-module";
     # The capability broker, and a MEMBER of the mobile dev catalog
     # (mobileCatalogFor below): the catalog carries its `bare` output, reached
     # as `legacyPackages.<buildSystem>.mobile.<target>.bare`. A module-to-module
@@ -249,7 +271,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -618,6 +640,25 @@
               module = logos-chat-module;
               dependencies = [ "delivery_module" ];
             };
+
+            # ── the wallet's Bundled half (slice 30, criterion 2) ──────────
+            #
+            # The ONE module on a phone that can answer `eth_getBalance`, and
+            # therefore the whole of what the wallet UI's `web` variant has to
+            # fetch a balance FROM. The other five the wallet chain names
+            # (wallet_backend, token_list, uniswap, railgun, and the keystore's
+            # native form) have no mobile Bare build, which is why the `web`
+            # variant talks to this one directly rather than to the coordinator.
+            #
+            # No dependencies: eth_rpc declares none, and a reqwest/rustls
+            # client cross-compiles to both phones with nothing added.
+            eth_rpc_module = mkBareSpec {
+              name = "eth_rpc_module";
+              version = "1.0.0";
+              category = "wallet";
+              description = "Proxyable, fail-closed Ethereum JSON-RPC client";
+              module = logos-evm-eth-rpc-module;
+            };
           } // nixpkgs.lib.optionalAttrs (!isAndroid) {
             # ── the two package modules (slice 29) ────────────────────────
             # What turns `ShellStoreBackend::hasCatalog()` from false into a
@@ -750,6 +791,7 @@
         let
           builderPkgs = logos-module-builder.packages.${androidBuildSystem} or { };
           keystorePkgs = logos-evm-keystore-module.packages.${androidBuildSystem} or { };
+          walletUiPkgs = logos-evm-wallet-ui.packages.${androidBuildSystem} or { };
           wanted = requestedWebModules [ "web_counter" "web_counter_b" ];
           # `set` is where the variant comes from, `name` is what the module is
           # called on this device, `attr` is the output that holds it. Three
@@ -769,7 +811,8 @@
               or null;
           webVariants = from builderPkgs "web_counter" "web-view-counter"
                      // from builderPkgs "web_counter_b" "web-view-counter-b"
-                     // from keystorePkgs "keystore_module" "web";
+                     // from keystorePkgs "keystore_module" "web"
+                     // from walletUiPkgs "wallet_ui" "web";
         };
 
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:

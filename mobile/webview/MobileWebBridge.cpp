@@ -2,6 +2,7 @@
 
 #include "web/LogosWebPaths.h"
 
+#include <QDebug>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -80,6 +81,13 @@ const char* kShim = R"JS(
     var encoded = encodeURIComponent(String(text));
     var count = Math.max(1, Math.ceil(encoded.length / CHUNK));
     var seq = String(nextSeq++);
+    // SAID OUT LOUD WHEN IT SPLITS, because a chunked frame is the one shape
+    // this path can get wrong in a way nothing downstream reports: the host
+    // reassembles by sequence number and a frame that arrives short is not a
+    // frame at all, it is silence.
+    if (count > 1)
+      console.log('logos-bridge: frame ' + encoded.length
+                  + ' encoded chars -> ' + count + ' chunks (seq ' + seq + ')');
     var chain = Promise.resolve();
     for (var i = 0; i < count; i++) {
       (function (index) {
@@ -367,6 +375,9 @@ void MobileWebBridge::handleSend(const QUrl& url, const QByteArray& body,
             for (const QString& piece : partial.chunks) frame += piece;
             m_partial.erase(seq);
             complete = true;
+            if (count > 1)
+                qInfo() << "Web bridge: reassembled a" << frame.size()
+                        << "char frame from" << count << "chunks";
         }
     }
 
