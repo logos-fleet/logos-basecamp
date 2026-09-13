@@ -13,6 +13,7 @@
 // Run: nix build .#unit-tests -L
 #include "appmanager/ModuleDirectories.h"
 
+#include <QFileInfo>
 #include <QtTest/QtTest>
 
 using basecamp::appmanager::ModuleDirectories;
