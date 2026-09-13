@@ -292,16 +292,59 @@ src/ShellModulesBackend.*   the QML-facing `backend`
 src/ShellStoreBackend.*     the App Manager's one seam, over the real modules
 src/BundledSetShellHost.*   IShellHost over it
 src/ShellSceneDriver.*      finding, settling and pressing in the Shell's
-                            rendered scenes -- shared by the two drivers below
+                            rendered scenes -- shared by the three drivers below
 src/ShellModulesDriver.*    the acceptance pass: open the tab, check the rows,
                             their install type and their stats, press the
                             toggle twice
 src/ShellAppDriver.*        the other half: press the sidebar tile and check
                             the app's OWN handles are on screen
+src/ShellCatalogDriver.*    what the app does NOT ship: add a repository, read
+                            the catalog, install a row and open it -- driven by
+                            the command line, because the catalog a device is
+                            pointed at is not a property of the build
 src/main.cpp                core up, shell up, drive, shut down cleanly
 stage/CMakeLists.txt        the pure half — one static archive, built by nix
 app/CMakeLists.txt          the impure half — the Xcode link, embed and sign
 ```
+
+## Installing from a catalog
+
+The Shell takes three arguments, and it is the only way a phone can be pointed
+at a catalog: a device has no config file a developer can edit (ADR 0003).
+
+```
+--repository <url>            a logos-repo.json. https, or http to LOOPBACK --
+                              the same rule a catalog row's links go through
+                              (appmanager/CatalogEntry.cpp), because this curl
+                              carries no CA bundle and a self-signed local
+                              server is unreachable however the URL is spelled
+--trust-signer <name>=<did>   anchor a publisher in this device's keyring. The
+                              Shell's policy is `require`, and a repository's
+                              own `trustedSigners` anchors NOTHING -- a
+                              downloaded claim is not a trust decision
+--install <package>           press Install on that row, log the signer prompt,
+                              approve it, and check the module reached the
+                              workspace
+```
+
+A release to point it at comes out of the same `.lgx` files the Bundled set is
+built from (`../../nix/local-catalog.nix`):
+
+```bash
+nix run .#serve-local-catalog            # 127.0.0.1:8099, prints the launch line
+LOGOS_SHELL_WEB_MODULES=web_counter \
+LOGOS_BUNDLE_APPS=capability_module,package_manager,package_downloader \
+  nix run --impure .#run-basecamp-shell-ios-sim -- \
+    --repository http://127.0.0.1:8099/logos-repo.json \
+    --trust-signer logos-catalog-test=did:jwk:... \
+    --install web_counter_b
+```
+
+`LOGOS_SHELL_WEB_MODULES` is what makes the run mean anything: the app ships
+both `web` fixtures by default, and installing one the image already carries
+would be indistinguishable from not installing at all. The default build is
+unchanged -- `getEnv` is `""` in a pure evaluation, exactly as with
+`LOGOS_BUNDLE_APPS`.
 
 Both halves are wired up in [`../../nix/ios-apps.nix`](../../nix/ios-apps.nix),
 which builds this app and the smoke probe from one description. The two

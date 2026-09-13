@@ -198,6 +198,48 @@ private slots:
         QVERIFY(gate.error().contains(QStringLiteral("already installed")));
     }
 
+    // THE DOWNLOADER'S ACTUAL CONTRACT, which has no `success` key in it.
+    //
+    // package_downloader.downloadPinned answers `{ name, path, ... }` or
+    // `{ name, error }` — the same "success is the ABSENCE of error" shape
+    // installPlugin has, and the same one this gate already reads for the
+    // install step. Reading a `success` the module never writes made
+    // `value("success", false)` false for every download that had just
+    // WORKED: measured on an iPad simulator, 2026-09-13, where a 1.3 MB
+    // package downloaded, verified against the index, and was refused one
+    // line later as "downloading 'web_counter_b' failed".
+    void aDownloadWithNoSuccessKeyIsStillADownload()
+    {
+        FakeModules modules;
+        modules.downloadAnswer = QVariantMap{
+            {QStringLiteral("name"), QStringLiteral("counter_ui")},
+            {QStringLiteral("path"), QStringLiteral("/tmp/counter_ui.lgx")},
+        };
+        InstallGate gate(&modules);
+
+        QVERIFY(gate.begin(installableRow()));
+        QCOMPARE(gate.stage(), InstallGate::Stage::AwaitingSigner);
+        QVERIFY(modules.calls.contains(QStringLiteral("signerTrust:/tmp/counter_ui.lgx")));
+    }
+
+    // ...and the failing half of the same contract: an `error` and no `path`.
+    void aDownloadThatOnlyReportsAnErrorIsRefused()
+    {
+        FakeModules modules;
+        modules.downloadAnswer = QVariantMap{
+            {QStringLiteral("name"), QStringLiteral("counter_ui")},
+            {QStringLiteral("error"),
+             QStringLiteral("download failed for 'counter_ui' — index fetch failed")},
+        };
+        InstallGate gate(&modules);
+
+        QVERIFY(!gate.begin(installableRow()));
+        QCOMPARE(modules.calls.size(), 1);
+        QCOMPARE(gate.stage(), InstallGate::Stage::Refused);
+        QVERIFY(gate.error().contains(QStringLiteral("index fetch failed")));
+        QVERIFY(gate.signerPrompt().isEmpty());
+    }
+
     void aFailedDownloadNeverReachesTheSignerPrompt()
     {
         FakeModules modules;
@@ -220,7 +262,8 @@ private slots:
         // Installing "" would ask package_manager to read a directory and report
         // a confusing error two steps from the cause.
         FakeModules modules;
-        modules.downloadAnswer = QVariantMap{{QStringLiteral("success"), true}};
+        modules.downloadAnswer = QVariantMap{{QStringLiteral("name"),
+                                              QStringLiteral("counter_ui")}};
         InstallGate gate(&modules);
 
         QVERIFY(!gate.begin(installableRow()));

@@ -6,19 +6,23 @@ two prompts a store requires before either happens.
 ```
   CatalogEntry      what one catalog row MEANS here: may it be installed, and
                     which of its links will this shell open
+  CatalogSource     what this device was POINTED AT: the repository, the signers
+                    to anchor, the row to install -- and what it refuses
   InstallGate       the order an install happens in, and the three places it stops
   ConsentQueue      the 4.7.3 prompt queue: one dialog at a time, one per pair
   StoreAppManager   the QML-facing object that owns the three
 
   ../basecamp-shell/src/ShellStoreBackend.cpp   the one seam, over the real modules
+  ../basecamp-shell/src/ShellCatalogDriver.cpp  the run that exercises all of it
 ```
 
 Almost none of it is platform code, and none of it is a module. What a Store
 shell contributes is four answers — the catalog, what is installed, the signer,
 and "open this URL" — and everything else is plain C++ that a desktop test
-drives. `nix build .#unit-tests` covers all four classes in under two seconds
-(`tests/catalog_entry_test.cpp`, `install_gate_signer_test.cpp`,
-`consent_queue_test.cpp`, `store_app_manager_test.cpp`).
+drives. `nix build .#unit-tests` covers every class here in under two seconds
+(`tests/catalog_entry_test.cpp`, `catalog_source_test.cpp`,
+`install_gate_signer_test.cpp`, `consent_queue_test.cpp`,
+`store_app_manager_test.cpp`, `store_module_dirs_test.cpp`).
 
 ## Where each decision lives, and why it lives there
 
@@ -124,19 +128,38 @@ something odd produces one line in the console rather than a report button that
 is silently missing. A row with no link at all says nothing: most of a catalog
 will have none.
 
-## What is not here yet
+## Which catalog, and whose signature
 
-The one criterion this does not discharge is a `web` variant installed at
-runtime actually *running* in the Web container on a device. Two things are
-missing and neither is in this directory:
+Neither is a property of the build, and on a phone neither can be a config file
+a developer edits (ADR 0003). Both arrive on the Shell's command line, through
+`CatalogSource`:
 
-1. **The package modules are not in any mobile Bundled set.** They have no
-   `ios-arm64` / `android-arm64` variant in the mobile catalog —
-   package_downloader is libcurl over the network and package_manager is the lgx
-   library, and both need a Bare build before a phone can carry them. Until then
-   `hasCatalog()` is false on a device and the App Manager says so, which is the
-   honest state rather than a broken one.
-2. **The Web container does not scan the install directory.** `web-modules` is
-   laid out by `nix/mobile-web-assets.nix` at build time
-   (`../webview/README.md`); a module installed into the app's writable data
-   directory at runtime has to be found there too.
+```
+--repository <url>            added to package_downloader
+--trust-signer <name>=<did>   added to package_manager's keyring
+--install <package>           the row to install once the catalog is up
+```
+
+**A repository's own `trustedSigners` anchors nothing.** It is a claim the
+repository makes about itself, fetched from the repository, and wiring it into an
+install decision would let a catalog authorise its own packages — which is
+exactly the failure the field's name invites. logos-package-downloader parses it
+and consults it for nothing, deliberately; the only anchor is the local keyring,
+and `--trust-signer` is the explicit act that enters one.
+
+**The keyring is a named directory** (`ModuleDirectories::keyringDir`), not lgx's
+default. That default is derived from `$XDG_CONFIG_HOME` or `$HOME` — variables a
+phone app does not set and has no claim on — and under the `require` policy a
+keyring that landed anywhere but where `addTrustedKey` wrote refuses every
+install with a message about the PACKAGE rather than about this device's trust.
+
+**The URL goes through `CatalogEntry::linkRefusal`**, the same rule a row's
+report link does. It is fetched rather than opened, but it is the same kind of
+input from the same kind of author, and a second implementation of "which URLs
+will this shell touch" is a second answer — the laxer of which decides.
+
+A release to point it at is [`../../nix/local-catalog.nix`](../../nix/local-catalog.nix):
+the same signed `.lgx` files the Bundled set is built from, published as a
+*repository* (`logos-repo.json` + `packages[].versions[]` with
+url/size/sha256/rootHash/manifest/signature) and served on loopback by
+`nix run .#serve-local-catalog`.

@@ -46,7 +46,10 @@ public:
     public:
         virtual ~Modules() = default;
 
-        // package_downloader.downloadPinned. Returns { success, path, error? }.
+        // package_downloader.downloadPinned. Returns { name, path, ... } or
+        // { name, error }. Success is the ABSENCE of `error` -- there is no
+        // `success` key, and reading one reads every successful download as a
+        // failure.
         virtual QVariantMap downloadPinned(const QString& repositoryUrl,
                                            const QString& packageName,
                                            const QString& version) = 0;

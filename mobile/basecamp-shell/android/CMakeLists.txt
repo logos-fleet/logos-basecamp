@@ -58,8 +58,10 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/ShellSceneDriver.cpp ${SHELL_SRC}/ShellSceneDriver.h
     ${SHELL_SRC}/ShellModulesDriver.cpp ${SHELL_SRC}/ShellModulesDriver.h
     ${SHELL_SRC}/ShellAppDriver.cpp ${SHELL_SRC}/ShellAppDriver.h
+    ${SHELL_SRC}/ShellCatalogDriver.cpp ${SHELL_SRC}/ShellCatalogDriver.h
     ${SHELL_SRC}/ShellStoreBackend.cpp ${SHELL_SRC}/ShellStoreBackend.h
     ${BASECAMP_MOBILE}/appmanager/CatalogEntry.cpp ${BASECAMP_MOBILE}/appmanager/CatalogEntry.h
+    ${BASECAMP_MOBILE}/appmanager/CatalogSource.cpp ${BASECAMP_MOBILE}/appmanager/CatalogSource.h
     ${BASECAMP_MOBILE}/appmanager/ConsentQueue.cpp ${BASECAMP_MOBILE}/appmanager/ConsentQueue.h
     ${BASECAMP_MOBILE}/appmanager/InstallGate.cpp ${BASECAMP_MOBILE}/appmanager/InstallGate.h
     ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.cpp ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.h

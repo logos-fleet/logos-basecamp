@@ -22,6 +22,7 @@
 #include "ICoreRuntime.h"
 #include "ModuleInstanceModel.h"
 #include "ShellModuleRows.h"
+#include "appmanager/ModuleDirectories.h"
 
 #include <QObject>
 #include <QSet>
@@ -100,8 +101,21 @@ public:
     // capability_module's consent announcements. Call once the Bundled set has
     // loaded; a set without those modules is a no-op and the App Manager reports
     // it.
-    void startAppManager(const QString& userModulesDirectory,
-                         const QString& userUiPluginsDirectory);
+    void startAppManager(const basecamp::appmanager::ModuleDirectories& dirs);
+
+    // Anchor a publisher in this device's keyring. NOT a QML affordance: it is
+    // an explicit act a host performs on the user's behalf, and the only thing
+    // that makes a signed package installable under the `require` policy.
+    // Returns false and logs why when the module refused it.
+    bool trustSigner(const QString& name, const QString& did);
+
+    // Press Install on one catalog row, approve the signer it shows, and report
+    // both. The prompt's contents are logged BEFORE the approval, so a console
+    // carries what a user would have read.
+    //
+    // Public because it is what a driver calls; the App Manager's own gate is
+    // what actually decides, and this adds no policy to it.
+    void installFromCatalog(const QString& packageName);
 
     // nullptr, deliberately: an EMPTY model of the wrong shape would answer
     // the Apps Inspector's role names with nothing and look like a working

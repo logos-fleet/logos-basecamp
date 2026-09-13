@@ -432,6 +432,14 @@
         };
       };
 
+      # One comma-separated list, read from one environment variable, with the
+      # default standing in whenever it is unset -- which in a pure evaluation
+      # is always, because `getEnv` is "" there.
+      envList = varName: default:
+        let e = builtins.getEnv varName; in
+        if e == "" then default
+        else builtins.filter (a: a != "") (nixpkgs.lib.splitString "," e);
+
       # ── the Bundled set ───────────────────────────────────────────────────
       # Which modules the app carries is a LIST, and a list cannot be a flake
       # attribute name: `--bundle a,b` and `--bundle b,a` would be two outputs
@@ -445,10 +453,22 @@
       # AC 5, and the reason this is an env read rather than codegen: adding an
       # app to --bundle changes no source file. The set is resolved from the
       # catalog, and the host reads it from a manifest at runtime.
-      requestedBundle = default:
-        let e = builtins.getEnv "LOGOS_BUNDLE_APPS"; in
-        if e == "" then default
-        else builtins.filter (a: a != "") (nixpkgs.lib.splitString "," e);
+      requestedBundle = envList "LOGOS_BUNDLE_APPS";
+
+      # WHICH `web` MODULES THE APP IMAGE CARRIES. The same mechanism and the
+      # same rules as `--bundle` above: a list cannot be a flake attribute name,
+      # `getEnv` is "" in a pure evaluation, and the default below is what every
+      # check and every plain `nix build` sees.
+      #
+      # It exists for the one thing the default build cannot show. A Store shell
+      # installing a module from a catalog has to be a build that does NOT
+      # already ship that module -- otherwise "it installed" and "it came in the
+      # app image" are the same observation, and the Modules tab would call it
+      # `embedded` because it would BE embedded. So the acceptance run ships
+      # `web_counter` and installs `web_counter_b`:
+      #
+      #   LOGOS_SHELL_WEB_MODULES=web_counter nix run --impure .#run-basecamp-shell-ios-sim
+      requestedWebModules = envList "LOGOS_SHELL_WEB_MODULES";
 
       # The dev catalog: the two mobile modules in this repo, published as
       # signed .lgx packages with per-target variants, exactly as a release
@@ -716,8 +736,11 @@
       mobileWebAssetsFor = { chain, androidBuildSystem }:
         let
           builderPkgs = logos-module-builder.packages.${androidBuildSystem} or { };
+          wanted = requestedWebModules [ "web_counter" "web_counter_b" ];
           named = name: attr:
-            nixpkgs.lib.optionalAttrs (builderPkgs ? ${attr}) { ${name} = builderPkgs.${attr}; };
+            nixpkgs.lib.optionalAttrs
+              (builtins.elem name wanted && builderPkgs ? ${attr})
+              { ${name} = builderPkgs.${attr}; };
         in
         import ./nix/mobile-web-assets.nix {
           pkgs = chain.pkgs.pkgsBuildBuild;
@@ -1079,6 +1102,34 @@
           bundledSetRelease =
             bundledSetPublisher.mkRelease { catalog = bundledSetFixture.local; };
 
+          # A REPOSITORY a developer can serve, over the same `.lgx` files.
+          # Different consumer, different index (nix/local-catalog.nix): the
+          # Bundled-set release is read by a BUILD, this one by
+          # logos-package-downloader on a phone at run time.
+          #
+          # Two rows, and the second is not filler. `web_counter_b` is the one
+          # this build can install -- a `web` variant, which is all a Store shell
+          # may download (ADR 0003) -- and `desktop_only` ships darwin and linux
+          # variants and nothing else, which is what makes "listed as unavailable
+          # with the reason, and NO install control" observable against a real
+          # catalog instead of only in a unit test.
+          #
+          # `web_counter_b` rather than `web_counter`: the app ships the first of
+          # the two (nix/mobile-web-assets.nix), and installing something the
+          # image already carries would prove nothing about installing.
+          localCatalog = import ./nix/local-catalog.nix {
+            inherit pkgs;
+            icon = ./mobile/catalog/icon.png;
+            lgx = logosLgx;
+            catalog = bundledSetPublisher;
+            testKey = catalogTestKey;
+            webVariants =
+              let builderPkgs = logos-module-builder.packages.${system} or { }; in
+              nixpkgs.lib.optionalAttrs (builderPkgs ? web-view-counter-b)
+                { web_counter_b = builderPkgs.web-view-counter-b; };
+            prebuilt.desktop_only = bundledSetFixture.drvs.desktop_only;
+          };
+
           # Hoisted so shutdown-test can read the elapsed time for the combined PR-gate budget.
           integrationTest = import ./nix/integration-test.nix { inherit pkgs src logosQtMcp; appPkg = app; };
           integrationTestBundle = import ./nix/integration-test.nix {
@@ -1170,6 +1221,17 @@
           # Merkle root filled in. Copy the result over
           # mobile/catalog/pinned-release/ when the fixtures change.
           bundled-set-release = bundledSetRelease;
+
+          # The same packages as a REPOSITORY, ready to be served:
+          # `logos-repo.json.in` + `index.json.in` (a `@BASEURL@` placeholder,
+          # because a URL carries a port nothing knows at build time) beside the
+          # `.lgx` files. `nix run .#serve-local-catalog` is what fills it in.
+          local-catalog-release = localCatalog.release;
+
+          # ...and the server that fills the placeholder in and listens. Exposed
+          # as a package so `apps` can point at it: an attribute of `apps` cannot
+          # reach into the per-system `let` the release is built in.
+          serve-local-catalog = localCatalog.serve;
 
           # nix run .#shell-preview   (see shell-preview/README.md)
           shell-preview = shellPreview;
@@ -1364,6 +1426,14 @@
             bin-bundle-dir = {
               type = "app";
               program = "${self.packages.${system}.bin-bundle-dir}/bin/LogosBasecamp";
+            };
+            # A local catalog release, served on loopback:
+            #   nix run .#serve-local-catalog [-- <port>]
+            # An app rather than a package because the URLs in the index carry a
+            # port, and a port exists only once something is listening on it.
+            serve-local-catalog = {
+              type = "app";
+              program = "${self.packages.${system}.serve-local-catalog}/bin/serve-local-catalog";
             };
           });
         in

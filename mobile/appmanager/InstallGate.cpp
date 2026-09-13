@@ -47,17 +47,24 @@ bool InstallGate::begin(const CatalogEntry& entry)
     // not arrived, which is why the prompt cannot come first.
     const QVariantMap downloaded =
         m_modules->downloadPinned(entry.repositoryUrl, entry.name, entry.version);
-    if (!downloaded.value(QStringLiteral("success"), false).toBool()) {
-        const QString err = downloaded.value(QStringLiteral("error")).toString();
-        refuse(err.isEmpty() ? QStringLiteral("downloading '%1' failed").arg(entry.name) : err);
+    // SUCCESS IS THE ABSENCE OF `error`, which is package_downloader's contract
+    // and is easy to get backwards -- the same shape installPlugin has below.
+    // There is no `success` key in the answer: reading one made every download
+    // that had just WORKED read as a failure, because an absent key defaults to
+    // false. Measured on an iPad simulator, 2026-09-13: a 1.3 MB package
+    // downloaded, passed the index binding, and was refused one line later.
+    const QString err = downloaded.value(QStringLiteral("error")).toString();
+    if (!err.isEmpty()) {
+        refuse(err);
         return false;
     }
     m_lgxPath = downloaded.value(QStringLiteral("path")).toString();
     if (m_lgxPath.isEmpty()) {
-        // A success with no path is not a success. Installing "" would ask
+        // No error and no path is not a success either. Installing "" would ask
         // package_manager to read a directory and report a confusing error two
         // steps from the cause.
-        refuse(QStringLiteral("the download of '%1' reported success but no file").arg(entry.name));
+        refuse(QStringLiteral("the download of '%1' reported no error and no file")
+                   .arg(entry.name));
         return false;
     }
 

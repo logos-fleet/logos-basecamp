@@ -16,6 +16,9 @@ ModuleDirectories ModuleDirectories::under(const QString& appDataRoot,
     ModuleDirectories dirs;
     dirs.installModulesDir = base.filePath(QStringLiteral("modules"));
     dirs.installUiPluginsDir = base.filePath(QStringLiteral("ui-plugins"));
+    // lgx's own leaf name under a config root, so a keyring copied off a
+    // desktop lands where this one is read from.
+    dirs.keyringDir = base.filePath(QStringLiteral("trusted-keys"));
 
     if (!shippedWebModulesDir.isEmpty())
         dirs.coreModulesDirs << shippedWebModulesDir;
