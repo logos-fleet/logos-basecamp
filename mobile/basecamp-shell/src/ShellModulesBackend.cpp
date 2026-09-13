@@ -9,6 +9,8 @@
 
 #include <logos_api.h>
 
+#include <QFileInfo>
+
 namespace {
 
 // The caller name this shell introspects modules under. Not "basecamp": the
@@ -36,6 +38,17 @@ ShellModulesBackend::ShellModulesBackend(BundledSetCoreRuntime* core, QObject* p
     // nothing.
     connect(m_appManager, &basecamp::appmanager::StoreAppManager::log,
             this, &ShellModulesBackend::log);
+
+    // A MODULE HAS BEEN INSTALLED, AND THE CORE HAS NOT NOTICED.
+    //
+    // The App Manager deliberately does not load it (appmanager/README.md):
+    // "it did not install" and "it installed and will not run" want different
+    // messages. This is the other half, and it is two steps rather than one --
+    // discovery is a SCAN of the module directories, so a package written a
+    // millisecond ago is not `known` until something rescans. Load only then,
+    // and say which of the two failed.
+    connect(m_appManager, &basecamp::appmanager::StoreAppManager::moduleInstalled,
+            this, &ShellModulesBackend::onModuleInstalled);
 
     // The same wiring MainUIBackend has: the manager announces "the module set
     // changed" -- on refresh() and on every 2s stats tick -- and the model is
@@ -81,6 +94,29 @@ void ShellModulesBackend::startAppManager(const QString& userModulesDirectory,
                  .arg(configured ? QStringLiteral("ready") : QStringLiteral("not in this build"),
                       consent ? QStringLiteral("armed") : QStringLiteral("unavailable")));
     m_appManager->refreshCatalog();
+}
+
+void ShellModulesBackend::onModuleInstalled(const QString& packageName, const QString& path)
+{
+    emit log(QStringLiteral("app manager: installed %1 at %2").arg(packageName, path));
+
+    // The scan, then the load. `refreshModules` is the only way a directory
+    // written after logos_core_start() becomes discoverable.
+    m_core->refreshModules();
+    if (!m_modules->knownModules().contains(packageName)) {
+        emit log(QStringLiteral("app manager: %1 installed but the core did not "
+                                "discover it -- check that %2 is a modules "
+                                "directory this build scans")
+                     .arg(packageName, QFileInfo(path).absolutePath()));
+        return;
+    }
+    if (!m_modules->loadModule(packageName)) {
+        emit log(QStringLiteral("app manager: %1 installed and discovered but "
+                                "would not load").arg(packageName));
+        return;
+    }
+    emit log(QStringLiteral("app manager: %1 is running").arg(packageName));
+    rebuildRows();
 }
 
 QAbstractItemModel* ShellModulesBackend::coreModulesModel() const

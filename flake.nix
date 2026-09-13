@@ -49,6 +49,13 @@
     logos-liblogos.inputs.logos-module.follows = "logos-module";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
+    # ...and their BUILDER is this flake's, for the same reason every other
+    # Bundled-set member's is (see the mobile block below): a Bare image is
+    # stamped with the logos-protocol version it compiled against and the host
+    # gates that stamp at load. These two are now mobile catalog members, so a
+    # builder of their own would be a second protocol in the app image.
+    logos-package-manager-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-package-downloader-module.inputs.logos-module-builder.follows = "logos-module-builder";
     # The capability broker, and a MEMBER of the mobile dev catalog
     # (mobileCatalogFor below): the catalog carries its `bare` output, reached
     # as `legacyPackages.<buildSystem>.mobile.<target>.bare`. A module-to-module
@@ -580,6 +587,38 @@
               dependencies = [ "delivery_module" ];
             };
           } // nixpkgs.lib.optionalAttrs (!isAndroid) {
+            # ── the two package modules (slice 29) ────────────────────────
+            # What turns `ShellStoreBackend::hasCatalog()` from false into a
+            # catalog: the App Manager browses through package_downloader and
+            # judges availability through package_manager, and a Store shell
+            # carries them the only way a phone allows -- inside the app image,
+            # at build time (ADR 0007).
+            #
+            # iOS ONLY, and the refusal on the other side is the honest one.
+            # Both libraries reach a phone as STATIC archives (logos-package's
+            # lgx, logos-package-manager's lgpm, logos-package-downloader's lgpd
+            # with curl and OpenSSL folded in), which is what iOS wants anyway.
+            # The same libraries cross-compile for Android as SHARED objects,
+            # and a Bare module linking liblgx.so would need liblgx.so in the
+            # APK beside it -- a second, unbundled soname that the Android
+            # DT_NEEDED gate refuses by design. So `--bundle package_manager
+            # --target android-arm64` is refused BY NAME rather than half-built,
+            # which is the same answer `--bundle view_counter` gets there.
+            package_manager = mkBareSpec {
+              name = "package_manager";
+              version = logos-package-manager-module.config.version;
+              category = "management";
+              description = "Plugin manager for the Logos system";
+              module = logos-package-manager-module;
+            };
+            package_downloader = mkBareSpec {
+              name = "package_downloader";
+              version = logos-package-downloader-module.config.version;
+              category = "management";
+              description = "Online package catalog and download service";
+              module = logos-package-downloader-module;
+            };
+
             view_counter = {
               name = "view_counter";
               version = "1.0.0";

@@ -101,6 +101,11 @@ public:
     // it.
     void startAppManager(const QString& userModulesDirectory,
                          const QString& userUiPluginsDirectory);
+
+    // The other half of StoreAppManager::moduleInstalled: rescan the module
+    // directories and bring the new module up. Public because it is what a
+    // driver would call to check the step without installing anything.
+    void onModuleInstalled(const QString& packageName, const QString& path);
     // nullptr, deliberately: an EMPTY model of the wrong shape would answer
     // the Apps Inspector's role names with nothing and look like a working
     // view with no rows. `null` is what the QML already guards for.
