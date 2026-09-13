@@ -103,6 +103,11 @@ public:
     // headless one. A backgrounded module HAS a view and HAS no UI, and the two
     // questions have different answers for the first time in this class.
     bool hasUiPage(const QString& moduleName) const;
+    // Whether that module's page is its UI AT ALL, which is a fact about the
+    // package rather than about what the page is showing right now. A `core`
+    // module's `web` variant has a page -- a wasm image needs a document -- and
+    // no user interface. See MobileWebModuleView::servesUi.
+    bool pageServesUi(const QString& moduleName) const;
     QStringList loadedModules() const;
 
     // Send one logos-protocol frame into a module's page and observe what comes

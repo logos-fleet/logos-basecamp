@@ -17,12 +17,14 @@
 #include "BundledSetCoreRuntime.h"
 #include "BundledSetShellHost.h"
 #include "appmanager/CatalogSource.h"
+#include "appmanager/ModuleCallScript.h"
 #include "appmanager/ModuleDirectories.h"
 #include "IShellHost.h"
 #include "IShellView.h"
 #include "NetworkSmokeRunner.h"
 #include "PlatformConsole.h"
 #include "ShellAppDriver.h"
+#include "ShellCallDriver.h"
 #include "ShellCatalogDriver.h"
 #include "ShellModulesDriver.h"
 #include "ShellSections.h"
@@ -267,6 +269,15 @@ int main(int argc, char* argv[])
         &host, shellWidget, basecamp::appmanager::CatalogSource::fromArguments(app.arguments()),
         &app);
     QObject::connect(catalog, &ShellCatalogDriver::log, &console);
+
+    // CALLING A MODULE THAT HAS NO UI. `--call <module>.<method>(<args>)`, the
+    // on-device `logoscore call` -- the only way to reach a `core` module on a
+    // phone, where there is no second process to reach it from. Like the
+    // catalog it has work only when the command line asked for some, so it
+    // never appears in the path a cold-start measurement takes.
+    auto* calls = new ShellCallDriver(
+        &core, basecamp::appmanager::ModuleCallScript::fromArguments(app.arguments()), &app);
+    QObject::connect(calls, &ShellCallDriver::log, &console);
     // NOT a third COLD START marker: this clock starts at the tile press, and
     // the press happens after the chat bring-up has spent a minute and a half
     // waiting for the group to commit. Timed from main() it would read as a
@@ -294,7 +305,7 @@ int main(int argc, char* argv[])
         catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app, [network, driver, apps, catalog, finishOnTheApp]() {
+    QTimer::singleShot(0, &app, [network, driver, apps, catalog, calls, finishOnTheApp]() {
         // The catalog FIRST when there is one: the module it installs is what
         // the Modules tab and the sidebar then have to account for, and a run
         // pointed at a catalog is a developer's rather than a cold-start
@@ -303,6 +314,11 @@ int main(int argc, char* argv[])
             catalog->configure();
             catalog->run();
         }
+        // AND THE CALLS AFTER IT, because the module a call names may be the one
+        // the catalog just installed -- and BEFORE the chat bring-up, which
+        // spends a minute and a half waiting for a group to commit and would
+        // put that between a device and its answer.
+        calls->run();
         if (network->hasWork()) {
             const bool ok = network->run();
             console(ok ? QStringLiteral("networking modules: PASS")

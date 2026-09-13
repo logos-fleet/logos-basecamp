@@ -161,6 +161,18 @@ void ShellCatalogDriver::run()
     }
     emit log(QStringLiteral("catalog: %1 is installed and the core knows it").arg(name));
 
+    // A `core` MODULE HAS NOTHING TO PUT ON SCREEN, and that is the whole of
+    // the criterion for one: it came from a catalog, the core loaded it and it
+    // is answering. Looking for a tile it must not have would report the
+    // correct outcome as a failure. What it can DO is reached by calling it
+    // (`--call`, ShellCallDriver), which is the next thing this launch does.
+    if (backend->isHeadlessWebModule(name)) {
+        emit log(QStringLiteral("CATALOG INSTALL OK: %1 came from the catalog and is "
+                                "running headless in the Web container -- no UI, so no "
+                                "tile").arg(name));
+        return;
+    }
+
     if (!openInstalledApp(name))
         return;
     emit log(QStringLiteral("CATALOG INSTALL OK: %1 came from the catalog and is on screen")
@@ -184,9 +196,8 @@ bool ShellCatalogDriver::openInstalledApp(const QString& packageName)
     // gets no tile -- and saying so is the honest outcome rather than hunting
     // for a tile that should not exist.
     if (!backend->isWebContainerApp(packageName)) {
-        emit log(QStringLiteral("catalog: %1 has no page in the Web container, so it has no "
-                                "tile -- it installed and loaded as a headless module")
-                     .arg(packageName));
+        emit log(QStringLiteral("catalog: %1 has no UI page in the Web container, so it has "
+                                "no tile").arg(packageName));
         return false;
     }
 

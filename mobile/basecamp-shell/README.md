@@ -67,7 +67,7 @@ run reads the verdicts off the console:
 [shell] modules tab stats: bare_counter 0.0%/1.4 MB, capability_module 0.0%/0.9 MB, ...
 [shell] SHELL MODULES TAB SHOWS THE SET'S STATS
 [shell] load bare_counter
-[shell]   bare_counter loaded in 6 ms (Native container)
+[shell]   bare_counter loaded in 6 ms
 [shell] unload bare_counter
 [shell] drive modules: bare_counter not loaded -> loaded -> not loaded
 [shell] SHELL MODULES TAB ROUND TRIP OK
@@ -345,6 +345,51 @@ both `web` fixtures by default, and installing one the image already carries
 would be indistinguishable from not installing at all. The default build is
 unchanged -- `getEnv` is `""` in a pure evaluation, exactly as with
 `LOGOS_BUNDLE_APPS`.
+
+A `core` module's `web` variant installs the same way and ends differently, and
+that difference is a criterion rather than a gap: it has no view, so it gets no
+sidebar tile, and the run says so --
+
+```
+[shell] web container: keystore_module runs in a page and declares no UI -- headless, and no app tile
+[shell] CATALOG INSTALL OK: keystore_module came from the catalog and is running headless in the Web container -- no UI, so no tile
+```
+
+Every `web` variant gets a PAGE, because a wasm image needs a document to live
+in; only a `ui_qml` one's page is a user interface. The package's declared
+`type` is what tells them apart (`MobileWebModuleView::servesUi`), and reading
+a page as evidence of a UI gave the first headless module a tile onto a blank
+document.
+
+## Calling a module from the command line
+
+```
+--call <module>.<method>(<arg>,...)     repeatable, run IN ORDER
+```
+
+The on-device `logoscore call`, and the only way to reach a `core` module here:
+it has no UI by definition, and a phone has no second process to call it from.
+The driver loads each module it names, waits for it to become reachable -- a
+`web` module is published by its PAGE, a beat after the core reports it loaded
+-- and prints one line per answer.
+
+```bash
+xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
+  --call 'keystore_module.new_account(hunter2)'
+# [shell] CALL OK keystore_module.new_account(hunter2) -> {"address":"0x…","ok":true}
+```
+
+**Arguments are strings unless they say otherwise** -- `int:42`, `bool:true`,
+`json:{"chainId":1}`, and `str:` to be explicit. That is the opposite of what
+`logoscore call` does and is deliberate: a type inferred from the spelling makes
+a well-formed hex address a NUMBER, and every address-taking method on a
+keystore then answers `null` with status ok
+([#106](https://github.com/logos-fleet/logos-workspace/issues/106)).
+
+Run it TWICE across a restart and it is a persistence test, which is the only
+honest shape for one: a `web` module's store lives in its page and the page dies
+with the process, so nothing inside a single run can tell a durable write from
+one that merely has not been lost yet.
 
 Both halves are wired up in [`../../nix/ios-apps.nix`](../../nix/ios-apps.nix),
 which builds this app and the smoke probe from one description. The two

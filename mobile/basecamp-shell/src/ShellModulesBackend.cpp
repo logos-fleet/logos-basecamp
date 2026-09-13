@@ -272,6 +272,13 @@ bool ShellModulesBackend::isWebContainerApp(const QString& name) const
     return basecamp::shell::isWebContainerApp(facts(), name);
 }
 
+bool ShellModulesBackend::isHeadlessWebModule(const QString& name) const
+{
+    using basecamp::web::MobileWebContainerBackend;
+    auto* web = MobileWebContainerBackend::instance();
+    return web->hasView(name) && !web->pageServesUi(name);
+}
+
 void ShellModulesBackend::watchWebContainer()
 {
     using basecamp::web::MobileWebContainerBackend;
@@ -283,9 +290,20 @@ void ShellModulesBackend::watchWebContainer()
     // opened a page for it, and by nothing else. A `web` variant of a HEADLESS
     // module opens none and gets no tile.
     connect(web, &MobileWebContainerBackend::viewOpened, this,
-            [this](const QString& name, void*) {
+            [this, web](const QString& name, void*) {
                 if (m_openPages.contains(name))
                     return;
+                // A PAGE IS NOT A UI. Every `web` variant gets one -- a wasm
+                // image needs a document to live in -- and a `core` module's
+                // is a Worker and an empty body. `m_openPages` is what gives a
+                // module a sidebar tile and what makes the host mount it, so a
+                // headless one must not enter it: the tile would open onto a
+                // blank page and the Modules tab would call the module a view.
+                if (!web->pageServesUi(name)) {
+                    emit log(QStringLiteral("web container: %1 runs in a page and declares "
+                                            "no UI -- headless, and no app tile").arg(name));
+                    return;
+                }
                 m_openPages.insert(name);
                 emit log(QStringLiteral("web container: %1 has a page").arg(name));
                 emit launcherAppsChanged();

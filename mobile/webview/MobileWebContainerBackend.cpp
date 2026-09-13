@@ -63,8 +63,12 @@ MobileWebModuleView* MobileWebContainerBackend::createView(
 {
     const QString name = QString::fromStdString(request.moduleName);
 
+    // THE MODULE'S OWN ORIGIN, not the container's. What a `web` variant keeps
+    // across a page reload it keeps in IndexedDB, which is keyed by origin, so
+    // one origin for every module is one store for every module. See
+    // WebOrigin::forModule.
     auto* view = new MobileWebModuleView(request, runtimeDir, m_platform, m_shimInDocument,
-                                        m_origin);
+                                        m_origin.forModule(name));
     if (!view->startupError().isEmpty()) {
         delete view;
         return nullptr;
@@ -165,6 +169,12 @@ bool MobileWebContainerBackend::hasUiPage(const QString& moduleName) const
 {
     MobileWebModuleView* view = m_views.value(moduleName, nullptr);
     return view && view->hasUi();
+}
+
+bool MobileWebContainerBackend::pageServesUi(const QString& moduleName) const
+{
+    MobileWebModuleView* view = m_views.value(moduleName, nullptr);
+    return view && view->servesUi();
 }
 
 void MobileWebContainerBackend::observeFramesFrom(const QString& moduleName,

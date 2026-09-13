@@ -115,6 +115,22 @@ public:
 
     const QString& moduleName() const { return m_moduleName; }
 
+    // WHETHER THIS PAGE IS THE MODULE'S USER INTERFACE, or merely where its
+    // code runs. It is the package's declared `type`, and nothing else can
+    // answer it.
+    //
+    // Every `web` variant gets a page -- that is what a `web` variant IS, since
+    // a phone may not download native code (ADR 0003) and a wasm image needs a
+    // document to live in. So "the container opened a page" is NOT the same
+    // question as "the user can look at this", and it stopped being a usable
+    // stand-in for it the moment a `core` module shipped a `web` variant: the
+    // keystore's page is a Worker and a blank body, and a Shell that read a
+    // page as a UI gave it a sidebar tile that opens onto nothing.
+    //
+    // Absent or unrecognised reads as a UI, which is what every package built
+    // before a `core` one existed is.
+    bool servesUi() const { return m_servesUi; }
+
     // The page could not be brought up at all. The container's own verdict is
     // still "the page published no module", which is the same outcome; this is
     // what says WHY in the log.
@@ -214,6 +230,7 @@ private:
 
     QString m_moduleName;
     QString m_startupError;
+    bool m_servesUi = true;
     std::shared_ptr<MobileWebBridge> m_bridge;
     logos::web::MessageChannelPtr m_channel;
     PlatformPage m_page;

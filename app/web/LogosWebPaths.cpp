@@ -6,6 +6,32 @@
 
 namespace basecamp::web {
 
+WebOrigin WebOrigin::forModule(const QString& moduleName) const
+{
+    // The longest label a host may carry. A module name is far shorter in
+    // practice; truncating rather than refusing keeps a pathological name on
+    // an origin of its own instead of back in the shared one.
+    constexpr int kMaxLabel = 63;
+
+    QString label;
+    for (const QChar c : moduleName) {
+        if (c == QLatin1Char('_') || c == QLatin1Char('-'))
+            label.append(QLatin1Char('-'));
+        else if (c.unicode() < 128 && c.isLetterOrNumber())
+            label.append(c.toLower());
+    }
+    if (label.size() > kMaxLabel)
+        label.truncate(kMaxLabel);
+    while (label.startsWith(QLatin1Char('-')))
+        label.remove(0, 1);
+    while (label.endsWith(QLatin1Char('-')))
+        label.chop(1);
+    if (label.isEmpty())
+        return *this;
+
+    return { scheme, label + QLatin1Char('.') + host };
+}
+
 QUrl WebOrigin::url(const QString& path) const
 {
     QUrl out;

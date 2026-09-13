@@ -66,6 +66,30 @@ struct WebOrigin {
         return { QString::fromLatin1(kAndroidScheme), QString::fromLatin1(kAndroidHost) };
     }
 
+    // ONE ORIGIN PER MODULE, and it is about STORAGE rather than tidiness.
+    //
+    // A `web` variant persists INSIDE ITS PAGE: the Wasm host mounts IDBFS and
+    // `commit()` pushes that mount into IndexedDB, which a browser keys by
+    // ORIGIN. Serve every module on `logos://module/` and two modules share one
+    // database under one name -- the keystore's vaults and the next module's
+    // state in the same store, each able to read and clobber the other's, with
+    // nothing in either module able to tell.
+    //
+    // The desktop containers give each module its own NAMED, persistent
+    // QWebEngineProfile rooted in its own directory. A phone webview has no
+    // profile to name (iOS shares one WKWebsiteDataStore, Android one WebView
+    // data directory), and the origin is the lever it does have. Same property,
+    // different mechanism, and it is structural on all three now: two web
+    // modules are two pages, two origins and two stores.
+    //
+    // The module's name becomes the first HOST LABEL rather than the whole
+    // host, so the reserved suffix stays what it was. Module names are
+    // `[a-z0-9_]` and `_` is not a legal host character, so it is spelled with
+    // a dash. A name nothing legal survives of is served on the plain origin:
+    // an unusable host is a page that never loads at all, which is worse than
+    // a shared store.
+    WebOrigin forModule(const QString& moduleName) const;
+
     // `path` under this origin.
     QUrl url(const QString& path) const;
 };

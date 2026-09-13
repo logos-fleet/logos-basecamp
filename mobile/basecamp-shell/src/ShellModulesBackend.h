@@ -174,6 +174,13 @@ public:
     // (ShellModuleRows.h).
     bool isWebContainerApp(const QString& name) const;
 
+    // Whether this module RUNS in the Web container and has no UI: it has a
+    // page and the page is not a user interface. Distinct from "no page at
+    // all", which is a module the container never opened one for, and the two
+    // are opposite verdicts on an install -- a `core` `web` variant that is
+    // running with no tile has done everything it can do.
+    bool isHeadlessWebModule(const QString& name) const;
+
     // Subscribe to the phone's Web container: a Downloaded module's page
     // opening is what makes it an APP here, and there is nothing else the Shell
     // could read that off. Also answers an over-budget module with no headless

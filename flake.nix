@@ -56,6 +56,18 @@
     # builder of their own would be a second protocol in the app image.
     logos-package-manager-module.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-package-downloader-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    # THE FIRST REAL `web` VARIANT OF A `core` MODULE, and the only reason this
+    # app has any business knowing a wallet module exists. A `web` variant is
+    # wasm and JavaScript -- architecture-free -- so what is taken from here is
+    # `packages.<buildSystem>.web` and nothing else: no cross build, nothing in
+    # the Bundled set, and nothing at all in an image that does not name it on
+    # LOGOS_SHELL_WEB_MODULES (see mobileWebAssetsFor).
+    #
+    # It is here because slice 30's criterion is about a phone: a `core` module
+    # keeps its state inside its page, the page dies with the process, and the
+    # only way to ask whether the key survived is a second launch of THIS app.
+    logos-evm-keystore-module.url = "github:logos-co/logos-evm-keystore-module";
+    logos-evm-keystore-module.inputs.logos-module-builder.follows = "logos-module-builder";
     # The capability broker, and a MEMBER of the mobile dev catalog
     # (mobileCatalogFor below): the catalog carries its `bare` output, reached
     # as `legacyPackages.<buildSystem>.mobile.<target>.bare`. A module-to-module
@@ -237,7 +249,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -726,29 +738,38 @@
       # Architecture-free wasm and JavaScript, so it is keyed off the BUILD
       # platform and both phones carry the same bytes.
       #
-      # `web-view-counter` and `web-view-counter-b` are the only `ui_qml` `web`
-      # variants that exist -- the same instrumented fixture built twice under
-      # two names, which logos-module-builder exports precisely so a container
-      # with a live-runtime budget can be shown enforcing it. Both are absent
-      # while a pin predates the Qt-for-WebAssembly outputs they need, which is
-      # a pin rollout rather than a defect: `or null` each, and the app then
-      # ships whichever exist.
+      # `web-view-counter` and `web-view-counter-b` are the two `ui_qml` `web`
+      # variants -- the same instrumented fixture built twice under two names,
+      # which logos-module-builder exports precisely so a container with a
+      # live-runtime budget can be shown enforcing it. `keystore_module` is the
+      # third and is not a fixture: a `core` module with a durable store, which
+      # is the only kind whose criterion needs a SECOND LAUNCH of this app to
+      # ask. Each is absent while a pin predates the output it needs, which is a
+      # pin rollout rather than a defect -- the app then ships whichever exist.
       mobileWebAssetsFor = { chain, androidBuildSystem }:
         let
           builderPkgs = logos-module-builder.packages.${androidBuildSystem} or { };
+          keystorePkgs = logos-evm-keystore-module.packages.${androidBuildSystem} or { };
           wanted = requestedWebModules [ "web_counter" "web_counter_b" ];
-          named = name: attr:
+          # `set` is where the variant comes from, `name` is what the module is
+          # called on this device, `attr` is the output that holds it. Three
+          # arguments rather than two because the counters are FIXTURES of the
+          # builder and the keystore is a module in its own right -- and the
+          # package name and the output name stop coinciding the moment a real
+          # module arrives (`keystore_module` out of `web`).
+          from = set: name: attr:
             nixpkgs.lib.optionalAttrs
-              (builtins.elem name wanted && builderPkgs ? ${attr})
-              { ${name} = builderPkgs.${attr}; };
+              (builtins.elem name wanted && set ? ${attr})
+              { ${name} = set.${attr}; };
         in
         import ./nix/mobile-web-assets.nix {
           pkgs = chain.pkgs.pkgsBuildBuild;
           qmlRuntimeWasm =
             (logos-view-module-runtime.packages.${androidBuildSystem} or { }).qml-runtime-wasm
               or null;
-          webVariants = named "web_counter" "web-view-counter"
-                     // named "web_counter_b" "web-view-counter-b";
+          webVariants = from builderPkgs "web_counter" "web-view-counter"
+                     // from builderPkgs "web_counter_b" "web-view-counter-b"
+                     // from keystorePkgs "keystore_module" "web";
         };
 
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
@@ -1107,16 +1128,25 @@
           # Bundled-set release is read by a BUILD, this one by
           # logos-package-downloader on a phone at run time.
           #
-          # Two rows, and the second is not filler. `web_counter_b` is the one
-          # this build can install -- a `web` variant, which is all a Store shell
-          # may download (ADR 0003) -- and `desktop_only` ships darwin and linux
-          # variants and nothing else, which is what makes "listed as unavailable
-          # with the reason, and NO install control" observable against a real
-          # catalog instead of only in a unit test.
+          # Three rows, and none of them is filler.
           #
-          # `web_counter_b` rather than `web_counter`: the app ships the first of
-          # the two (nix/mobile-web-assets.nix), and installing something the
-          # image already carries would prove nothing about installing.
+          # `web_counter_b` is a `ui_qml` `web` variant -- which is all a Store
+          # shell may download (ADR 0003) -- and it is the SECOND counter rather
+          # than the first because the app image ships the first
+          # (nix/mobile-web-assets.nix), and installing something the image
+          # already carries would prove nothing about installing.
+          #
+          # `keystore_module` is a `core` one, and the difference is the point:
+          # it has no view, no icon and no tile, it is a real module rather than
+          # a fixture, and what a Store shell has to be able to do with it is
+          # install it and then CALL it. Slice 30's first criterion is about a
+          # key surviving a page reload on a phone, and a Downloaded keystore is
+          # the shape that criterion actually has.
+          #
+          # `desktop_only` ships darwin and linux variants and nothing else,
+          # which is what makes "listed as unavailable with the reason, and NO
+          # install control" observable against a real catalog instead of only
+          # in a unit test.
           localCatalog = import ./nix/local-catalog.nix {
             inherit pkgs;
             icon = ./mobile/catalog/icon.png;
@@ -1124,9 +1154,20 @@
             catalog = bundledSetPublisher;
             testKey = catalogTestKey;
             webVariants =
-              let builderPkgs = logos-module-builder.packages.${system} or { }; in
+              let
+                builderPkgs = logos-module-builder.packages.${system} or { };
+                keystorePkgs = logos-evm-keystore-module.packages.${system} or { };
+              in
               nixpkgs.lib.optionalAttrs (builderPkgs ? web-view-counter-b)
-                { web_counter_b = builderPkgs.web-view-counter-b; };
+                { web_counter_b.drv = builderPkgs.web-view-counter-b; }
+              // nixpkgs.lib.optionalAttrs (keystorePkgs ? web)
+                { keystore_module = {
+                    drv = keystorePkgs.web;
+                    type = "core";
+                    category = "wallet";
+                    description = "Keystore: scrypt vaults, secp256k1 signing, as a `web` variant";
+                  };
+                };
             prebuilt.desktop_only = bundledSetFixture.drvs.desktop_only;
           };
 

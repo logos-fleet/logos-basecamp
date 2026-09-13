@@ -17601,6 +17601,26 @@
         "type": "github"
       }
     },
+    "logos-evm-keystore-module": {
+      "inputs": {
+        "logos-module-builder": [
+          "logos-module-builder"
+        ]
+      },
+      "locked": {
+        "lastModified": 1788978335,
+        "narHash": "sha256-TSH9kHIH2Pps33FrEuKjnr8VjvMrdGZ/QYitdjLr480=",
+        "owner": "logos-co",
+        "repo": "logos-evm-keystore-module",
+        "rev": "26a5aeae1cc0446b525b42e6b030dffc80659b6e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-evm-keystore-module",
+        "type": "github"
+      }
+    },
     "logos-liblogos": {
       "inputs": {
         "default-container": "default-container",
@@ -212486,6 +212506,7 @@
         "logos-cpp-sdk": "logos-cpp-sdk",
         "logos-delivery-module": "logos-delivery-module",
         "logos-design-system": "logos-design-system",
+        "logos-evm-keystore-module": "logos-evm-keystore-module",
         "logos-liblogos": "logos-liblogos",
         "logos-libp2p-module": "logos-libp2p-module",
         "logos-module": "logos-module_279",

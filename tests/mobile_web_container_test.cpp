@@ -80,6 +80,7 @@ private:
     QTemporaryDir m_root;
     QString m_moduleDir;
     QString m_bareModuleDir;
+    QString m_coreModuleDir;
     QString m_runtimeDir;
     std::vector<std::shared_ptr<FakeWebView>> m_pages;
 
@@ -114,7 +115,9 @@ private:
     // eviction takes, and the only difference between the two directories.
     QString dirFor(const QString& module) const
     {
-        return module == QLatin1String("notes_ui") ? m_bareModuleDir : m_moduleDir;
+        if (module == QLatin1String("notes_ui")) return m_bareModuleDir;
+        if (module == QLatin1String("keystore_module")) return m_coreModuleDir;
+        return m_moduleDir;
     }
 
     LogosCore::WebModuleViewRequest requestFor(const QString& module) const
@@ -156,9 +159,11 @@ private slots:
         QVERIFY(m_root.isValid());
         m_moduleDir = QDir(m_root.path()).filePath("counter_ui");
         m_bareModuleDir = QDir(m_root.path()).filePath("notes_ui");
+        m_coreModuleDir = QDir(m_root.path()).filePath("keystore_module");
         m_runtimeDir = QDir(m_root.path()).filePath("logos-runtime");
         QDir().mkpath(m_moduleDir);
         QDir().mkpath(m_bareModuleDir);
+        QDir().mkpath(m_coreModuleDir);
         QDir().mkpath(m_runtimeDir);
 
         // A package as logos-module-builder emits one: two entry documents, and
@@ -174,6 +179,14 @@ private slots:
         writeFile(QDir(m_bareModuleDir).filePath("index.html"), "<!doctype html><body></body>");
         writeFile(QDir(m_bareModuleDir).filePath("manifest.json"),
                   R"({"name":"notes_ui","main":"index.html","logos_web_runtime":"qml"})");
+
+        // ...and a `core` module's `web` variant, which is the first kind whose
+        // page is NOT a user interface: a Worker, a wasm image and an empty
+        // body (logos-module-builder's buildWebModule.nix).
+        writeFile(QDir(m_coreModuleDir).filePath("index.html"), "<!doctype html><body></body>");
+        writeFile(QDir(m_coreModuleDir).filePath("manifest.json"),
+                  R"({"name":"keystore_module","main":"index.html","type":"core",
+                      "logos_web_runtime":"wasm"})");
     }
 
     void init()
@@ -209,13 +222,66 @@ private slots:
         QVERIFY(view != nullptr);
 
         BridgeReply reply;
-        QUrl url;
-        url.setScheme("logos");
-        url.setHost("module");
-        url.setPath("/index.html");
+        // The page's OWN origin, which is the module's -- see the next case.
+        QUrl url = m_pages[0]->loaded.resolved(QUrl("/index.html"));
         m_pages[0]->serve("GET", url, {}, [&reply](const BridgeReply& r) { reply = r; });
         QCOMPARE(reply.status, 200);
         QCOMPARE(reply.mimeType, QByteArray("text/html"));
+    }
+
+    // ONE ORIGIN PER MODULE. A `web` variant's durable store is IndexedDB and a
+    // browser keys IndexedDB by origin, so two modules served on one origin are
+    // two modules in one store -- able to read and clobber each other's state
+    // with nothing in either able to tell. The mobile containers have no
+    // per-page profile to separate them with (iOS shares one WKWebsiteDataStore,
+    // Android one WebView data directory); the origin is the lever they have.
+    void twoWebModulesAreServedOnTwoOrigins()
+    {
+        auto counter = load("counter_ui");
+        auto notes = load("notes_ui");
+        QVERIFY(counter != nullptr);
+        QVERIFY(notes != nullptr);
+        QCOMPARE(m_pages.size(), size_t(2));
+
+        const QString counterHost = m_pages[0]->loaded.host();
+        const QString notesHost = m_pages[1]->loaded.host();
+        QCOMPARE(counterHost, QString("counter-ui.module"));
+        QCOMPARE(notesHost, QString("notes-ui.module"));
+        QVERIFY(counterHost != notesHost);
+
+        // ...and each page's bridge answers on its own origin and NOT on the
+        // other's, so a document that got the host wrong is refused rather than
+        // served out of a stranger's package.
+        BridgeReply mine;
+        m_pages[0]->serve("GET", m_pages[0]->loaded.resolved(QUrl("/index.html")), {},
+                          [&mine](const BridgeReply& r) { mine = r; });
+        QCOMPARE(mine.status, 200);
+
+        BridgeReply theirs;
+        m_pages[0]->serve("GET", m_pages[1]->loaded.resolved(QUrl("/index.html")), {},
+                          [&theirs](const BridgeReply& r) { theirs = r; });
+        QCOMPARE(theirs.status, 404);
+    }
+
+    // A PAGE IS NOT A UI, and the first module for which the two differ is a
+    // `core` one: a `web` variant of it is a Worker, a wasm image and an empty
+    // body. It still gets a page -- that is where the module RUNS -- and a
+    // Shell that read the page as evidence of a user interface gave it a
+    // sidebar tile that opens onto nothing.
+    void aCoreModulesPageIsNotAUi()
+    {
+        auto keystore = load("keystore_module");
+        QVERIFY(keystore != nullptr);
+        auto* backend = MobileWebContainerBackend::instance();
+        QVERIFY(backend->hasView("keystore_module"));
+        QVERIFY(!backend->pageServesUi("keystore_module"));
+
+        // ...while a ui_qml package's page is, and so is one whose manifest
+        // predates the question.
+        auto counter = load("counter_ui");
+        auto notes = load("notes_ui");
+        QVERIFY(backend->pageServesUi("counter_ui"));
+        QVERIFY(backend->pageServesUi("notes_ui"));
     }
 
     void aDestroyedViewLeavesTheRegistry()
