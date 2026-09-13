@@ -31,6 +31,18 @@ struct ModuleDirectories {
     QString installModulesDir;
     QString installUiPluginsDir;
 
+    // Handed to package_manager.setKeyringDirectory: the publishers this device
+    // will accept a package from.
+    //
+    // NAMED rather than defaulted. lgx falls back to
+    // `$XDG_CONFIG_HOME|$HOME/.config/logos/trusted-keys`, a path derived from an
+    // environment variable a phone app does not set and cannot rely on; and the
+    // Shell's policy is `require`, so a keyring that landed anywhere but where
+    // addTrustedKey wrote refuses every install with a message about the PACKAGE.
+    // Beside the module directories, never inside one -- module discovery would
+    // walk a tree of keys as though it were a package.
+    QString keyringDir;
+
     // `appDataRoot` is QStandardPaths::AppDataLocation -- the app sandbox, and
     // on a phone the only place anything may be written (ADR 0003).
     //

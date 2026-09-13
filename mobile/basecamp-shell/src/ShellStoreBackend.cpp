@@ -71,8 +71,7 @@ QVariant ShellStoreBackend::call(const QString& moduleName, const QString& metho
     return client->invokeRemoteMethod(moduleName, method, args);
 }
 
-bool ShellStoreBackend::configure(const QString& userModulesDirectory,
-                                  const QString& userUiPluginsDirectory)
+bool ShellStoreBackend::configure(const basecamp::appmanager::ModuleDirectories& dirs)
 {
     // BOTH, and loaded rather than merely present: browsing needs the downloader
     // and availability needs the manager, and a shell with one of the two would
@@ -86,9 +85,14 @@ bool ShellStoreBackend::configure(const QString& userModulesDirectory,
         return false;
 
     call(kPackageManager, QStringLiteral("setUserModulesDirectory"),
-         {userModulesDirectory});
+         {dirs.installModulesDir});
     call(kPackageManager, QStringLiteral("setUserUiPluginsDirectory"),
-         {userUiPluginsDirectory});
+         {dirs.installUiPluginsDir});
+    // THE KEYRING, BEFORE THE POLICY. Unset, lgx falls back to a path under
+    // $XDG_CONFIG_HOME or $HOME -- an environment variable a phone app does not
+    // set and has no claim on -- and `require` then refuses every install while
+    // the anchor the user added sits in a directory nothing reads.
+    call(kPackageManager, QStringLiteral("setKeyringDirectory"), {dirs.keyringDir});
 
     // THE STORE SHELL'S POLICY, in two calls.
     //
@@ -102,6 +106,64 @@ bool ShellStoreBackend::configure(const QString& userModulesDirectory,
     // would grow an install control that could not work.
     call(kPackageManager, QStringLiteral("setInstallableVariants"),
          {QVariant(QStringList{kRuntimeInstallableVariant})});
+    return true;
+}
+
+bool ShellStoreBackend::addRepository(const QString& url, QString* error)
+{
+    if (!isLoaded(kPackageDownloader)) {
+        if (error)
+            *error = QStringLiteral("package_downloader is not in this build");
+        return false;
+    }
+    const QVariantMap result =
+        call(kPackageDownloader, QStringLiteral("addRepository"), {url}).toMap();
+    const QString why = result.value(QStringLiteral("error")).toString();
+    if (!result.value(QStringLiteral("success"), false).toBool()) {
+        // ALREADY THERE IS THE STATE THAT WAS ASKED FOR. The registry is
+        // persisted under the app's data directory, so the second launch of the
+        // same command hits this -- and reporting it as a failure would say the
+        // device is not pointed at a catalog it is in fact pointed at.
+        if (why.contains(QStringLiteral("already"), Qt::CaseInsensitive))
+            return true;
+        if (error)
+            *error = why.isEmpty() ? QStringLiteral("addRepository returned no answer") : why;
+        return false;
+    }
+    // AND THE RE-READ, which is not optional and is not the caller's to remember.
+    //
+    // The library resolves repository metadata ONCE per process and caches every
+    // index against it (`ensureMetadata`). The App Manager's first catalog
+    // refresh happens at startup, so by the time a repository is added the flag
+    // is already set -- and a repository whose metadata was never resolved has
+    // an empty `indexUrl`, which reads as "repository metadata declares no
+    // indexUrl" and contributes no rows at all. The catalog would come back
+    // looking exactly like a catalog that does not carry the package.
+    call(kPackageDownloader, QStringLiteral("refreshCatalog"));
+    return true;
+}
+
+bool ShellStoreBackend::trustSigner(const QString& name, const QString& did, QString* error)
+{
+    if (!isLoaded(kPackageManager)) {
+        if (error)
+            *error = QStringLiteral("package_manager is not in this build");
+        return false;
+    }
+    // displayName and url left empty: this is an anchor, and the only fields
+    // that decide anything are the name it is filed under and the DID a
+    // signature is verified against.
+    const QVariantMap result =
+        call(kPackageManager, QStringLiteral("addTrustedKey"),
+             {name, did, QString(), QString()})
+            .toMap();
+    if (!result.value(QStringLiteral("success"), false).toBool()) {
+        if (error) {
+            const QString why = result.value(QStringLiteral("error")).toString();
+            *error = why.isEmpty() ? QStringLiteral("addTrustedKey returned no answer") : why;
+        }
+        return false;
+    }
     return true;
 }
 

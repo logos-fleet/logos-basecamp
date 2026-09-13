@@ -76,6 +76,33 @@ private slots:
         for (const QString& dir : dirs.coreModulesDirs)
             QVERIFY(dir.startsWith(QStringLiteral("/data/app/")));
         QVERIFY(dirs.installUiPluginsDir.startsWith(QStringLiteral("/data/app/")));
+        QVERIFY(dirs.keyringDir.startsWith(QStringLiteral("/data/app/")));
+    }
+
+    // THE KEYRING IS NAMED, not defaulted. lgx falls back to
+    // `$XDG_CONFIG_HOME|$HOME/.config/logos/trusted-keys`, which on a phone is
+    // a path derived from an environment variable the app does not set -- and
+    // the Shell's signature policy is `require`, so a keyring that landed
+    // somewhere else would refuse every install with a message about the
+    // PACKAGE while the anchor the user added sat in another directory.
+    void theKeyringIsUnderTheAppsOwnTree()
+    {
+        const ModuleDirectories dirs = ModuleDirectories::under(QStringLiteral("/data/app"));
+        QVERIFY(!dirs.keyringDir.isEmpty());
+        QCOMPARE(QFileInfo(dirs.keyringDir).path(),
+                 QFileInfo(dirs.installModulesDir).path());
+    }
+
+    // ...and it is not a directory the core scans. A trusted-keys tree inside
+    // the modules directory would be walked by module discovery as though it
+    // were a package.
+    void theKeyringIsNotScannedForModules()
+    {
+        const ModuleDirectories dirs = ModuleDirectories::under(
+            QStringLiteral("/data/app"), QStringLiteral("/bundle/web-modules"));
+        QVERIFY(!dirs.coreModulesDirs.contains(dirs.keyringDir));
+        for (const QString& dir : dirs.coreModulesDirs)
+            QVERIFY(!dirs.keyringDir.startsWith(dir + QLatin1Char('/')));
     }
 };
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "appmanager/ModuleDirectories.h"
 #include "appmanager/StoreAppManager.h"
 
 #include <QObject>
@@ -34,15 +35,31 @@ public:
     // what the core has actually loaded. Neither is owned.
     ShellStoreBackend(LogosAPI* api, CoreModuleManager* modules);
 
-    // Point package_manager at the directories this shell installs into, and
-    // tell it that a Store shell installs `web` variants and nothing else. Must
-    // run after package_manager is loaded and before the first catalog refresh:
-    // without the variant declaration the module would answer availability from
-    // the NATIVE variant the loader accepts, and every native-only catalog entry
-    // would grow an install control.
+    // Point package_manager at the directories this shell installs into and the
+    // keyring it trusts from, and tell it that a Store shell installs `web`
+    // variants and nothing else. Must run after package_manager is loaded and
+    // before the first catalog refresh: without the variant declaration the
+    // module would answer availability from the NATIVE variant the loader
+    // accepts, and every native-only catalog entry would grow an install control.
     //
     // Returns false when package_manager is not loaded, which is not an error.
-    bool configure(const QString& userModulesDirectory, const QString& userUiPluginsDirectory);
+    bool configure(const basecamp::appmanager::ModuleDirectories& dirs);
+
+    // Add a repository (a `logos-repo.json` URL) to package_downloader and
+    // re-read the catalog. Already checked by CatalogSource: https, or http to
+    // loopback, and nothing else.
+    //
+    // `error` carries the module's own message. Adding a repository that is
+    // already there is SUCCESS: the registry persists across launches, so the
+    // second launch of the same command would otherwise report a failure for a
+    // device that is in exactly the state that was asked for.
+    bool addRepository(const QString& url, QString* error = nullptr);
+
+    // Anchor a publisher in this device's keyring, which is the only thing that
+    // makes a signed package installable under the Shell's `require` policy. An
+    // explicit act, never derived from what a repository says about itself: a
+    // downloaded claim establishes no trust anchor.
+    bool trustSigner(const QString& name, const QString& did, QString* error = nullptr);
 
     // Subscribe to capability_module's `consentRequired` and forward each payload
     // to `manager`. Returns false when capability_module is not loaded — in which

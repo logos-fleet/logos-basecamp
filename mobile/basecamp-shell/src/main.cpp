@@ -16,12 +16,14 @@
 // the catalog at build time. Nothing in this file names one.
 #include "BundledSetCoreRuntime.h"
 #include "BundledSetShellHost.h"
+#include "appmanager/CatalogSource.h"
 #include "appmanager/ModuleDirectories.h"
 #include "IShellHost.h"
 #include "IShellView.h"
 #include "NetworkSmokeRunner.h"
 #include "PlatformConsole.h"
 #include "ShellAppDriver.h"
+#include "ShellCatalogDriver.h"
 #include "ShellModulesDriver.h"
 #include "ShellSections.h"
 #include "SmokeRunner.h"
@@ -216,8 +218,7 @@ int main(int argc, char* argv[])
     // out here as `<data>/modules` and `<data>/ui-plugins`, which the core never
     // scanned: an install succeeded, reported a path, and the module never
     // appeared.
-    host.backend()->startAppManager(moduleDirs.installModulesDir,
-                                    moduleDirs.installUiPluginsDir);
+    host.backend()->startAppManager(moduleDirs);
 
     QMainWindow window;
     QWidget* shellWidget = shell->createShell(&host);
@@ -255,6 +256,17 @@ int main(int argc, char* argv[])
     // order a user meets them in -- open the app, then go look at Settings.
     auto* apps = new ShellAppDriver(&host, shellWidget, &app);
     QObject::connect(apps, &ShellAppDriver::log, &console);
+
+    // THE CATALOG, if this launch was pointed at one. It has work only when the
+    // command line named a repository (`--repository`, `--trust-signer`,
+    // `--install`), which is a developer's run against a local catalog release
+    // -- so it never appears in the path a cold-start measurement takes, and
+    // running it FIRST when it does appear keeps the install out of the middle
+    // of the chat bring-up it would otherwise be timed inside.
+    auto* catalog = new ShellCatalogDriver(
+        &host, shellWidget, basecamp::appmanager::CatalogSource::fromArguments(app.arguments()),
+        &app);
+    QObject::connect(catalog, &ShellCatalogDriver::log, &console);
     // NOT a third COLD START marker: this clock starts at the tile press, and
     // the press happens after the chat bring-up has spent a minute and a half
     // waiting for the group to commit. Timed from main() it would read as a
@@ -271,12 +283,25 @@ int main(int argc, char* argv[])
     // last check happened to end on. It is also what makes a screen recording
     // of the run worth anything -- the Modules tab's pass is three console
     // lines, and the app being on screen is the thing you would want to see.
-    auto backToTheApp = [&host, apps]() {
-        if (apps->hasWork())
+    auto backToTheApp = [&host, apps, catalog]() {
+        if (apps->hasWork() || catalog->hasWork())
             host.setCurrentSectionIndex(ShellSection::Workspace);
+        // AND THE LAST THING OF ALL, after every driver: opening a catalog
+        // row's links hands a URL to the platform, which puts a browser over
+        // the Shell and stops turning its event loop. A driver sequenced behind
+        // it would be waiting on a suspended process.
+        catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app, [network, driver, apps, backToTheApp]() {
+    QTimer::singleShot(0, &app, [network, driver, apps, catalog, backToTheApp]() {
+        // The catalog FIRST when there is one: the module it installs is what
+        // the Modules tab and the sidebar then have to account for, and a run
+        // pointed at a catalog is a developer's rather than a cold-start
+        // measurement.
+        if (catalog->hasWork()) {
+            catalog->configure();
+            catalog->run();
+        }
         if (network->hasWork()) {
             const bool ok = network->run();
             console(ok ? QStringLiteral("networking modules: PASS")

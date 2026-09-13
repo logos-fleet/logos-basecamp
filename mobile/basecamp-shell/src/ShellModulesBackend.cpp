@@ -78,11 +78,9 @@ QObject* ShellModulesBackend::appManagerObject() const
     return m_appManager;
 }
 
-void ShellModulesBackend::startAppManager(const QString& userModulesDirectory,
-                                          const QString& userUiPluginsDirectory)
+void ShellModulesBackend::startAppManager(const basecamp::appmanager::ModuleDirectories& dirs)
 {
-    const bool configured =
-        m_storeBackend->configure(userModulesDirectory, userUiPluginsDirectory);
+    const bool configured = m_storeBackend->configure(dirs);
     // Consent is independent of the catalog: capability_module is in every set
     // (nothing calls anything without it), so a shell with no package modules
     // still prompts for a Downloaded module installed by an earlier launch.
@@ -91,6 +89,57 @@ void ShellModulesBackend::startAppManager(const QString& userModulesDirectory,
                  .arg(configured ? QStringLiteral("ready") : QStringLiteral("not in this build"),
                       consent ? QStringLiteral("armed") : QStringLiteral("unavailable")));
     m_appManager->refreshCatalog();
+}
+
+bool ShellModulesBackend::trustSigner(const QString& name, const QString& did)
+{
+    QString error;
+    if (!m_storeBackend->trustSigner(name, did, &error)) {
+        emit log(QStringLiteral("app manager: will not trust '%1' (%2): %3")
+                     .arg(name, did, error));
+        return false;
+    }
+    // THE DID, IN THE LOG. A keyring entry is what decides whether a signature
+    // means anything, and "trusted X" without the string it was anchored under
+    // cannot be checked against the prompt that follows.
+    emit log(QStringLiteral("app manager: trusting signer '%1' (%2)").arg(name, did));
+    return true;
+}
+
+void ShellModulesBackend::installFromCatalog(const QString& packageName)
+{
+    // The gate runs to the signer prompt and stops there; nothing is installed
+    // behind it (appmanager/README.md).
+    m_appManager->beginInstall(packageName);
+
+    const QVariantMap prompt = m_appManager->signerPrompt();
+    if (prompt.isEmpty()) {
+        emit log(QStringLiteral("app manager: %1 did not reach the signer prompt: %2")
+                     .arg(packageName, m_appManager->lastError()));
+        return;
+    }
+    // WHAT A USER WOULD HAVE READ, before anything is approved. Name and DID
+    // together: the name is self-asserted by the publisher, the DID is what the
+    // keyring was checked against, and either alone is unverifiable.
+    emit log(QStringLiteral("app manager: signer prompt for %1 %2 -- %3 (%4), %5, policy %6, "
+                            "installable %7")
+                 .arg(prompt.value(QStringLiteral("name")).toString(),
+                      prompt.value(QStringLiteral("version")).toString(),
+                      prompt.value(QStringLiteral("signerName")).toString(),
+                      prompt.value(QStringLiteral("signerDid")).toString(),
+                      prompt.value(QStringLiteral("signatureStatus")).toString(),
+                      prompt.value(QStringLiteral("policy")).toString(),
+                      prompt.value(QStringLiteral("installable")).toBool()
+                          ? QStringLiteral("yes") : QStringLiteral("no"))
+                 + (prompt.value(QStringLiteral("trusted")).toBool()
+                        ? QStringLiteral(", trusted as '%1'")
+                              .arg(prompt.value(QStringLiteral("trustedAs")).toString())
+                        : QStringLiteral(", NOT in this device's keyring")));
+
+    m_appManager->approveSigner();
+    if (!m_appManager->lastError().isEmpty())
+        emit log(QStringLiteral("app manager: %1 was not installed: %2")
+                     .arg(packageName, m_appManager->lastError()));
 }
 
 void ShellModulesBackend::onModuleInstalled(const QString& packageName, const QString& path)
@@ -423,6 +472,21 @@ void ShellModulesBackend::respondToShellIntent(const QString&, bool, const QVari
 void ShellModulesBackend::refreshUiModules()   { }
 void ShellModulesBackend::refreshRepositories() { emit repositoriesChanged(); }
 void ShellModulesBackend::refreshAppCatalog()   { m_appManager->refreshCatalog(); }
-void ShellModulesBackend::addRepository(const QString&)        { emit log(notHere("repositories")); }
+void ShellModulesBackend::addRepository(const QString& url)
+{
+    // THE ONE REPOSITORY CALL A STORE SHELL IMPLEMENTS. The rest of the
+    // "Manage Repositories" surface is a desktop affordance this shell does not
+    // draw, but pointing the App Manager at a catalog is what makes it an App
+    // Manager at all -- and on a phone the only way to do it is from outside
+    // (CatalogSource), so a stub here would be a stub in the one path that
+    // matters.
+    QString error;
+    if (!m_storeBackend->addRepository(url, &error)) {
+        emit log(QStringLiteral("app manager: cannot add repository %1: %2").arg(url, error));
+        return;
+    }
+    emit log(QStringLiteral("app manager: repository %1 added").arg(url));
+    emit repositoriesChanged();
+}
 void ShellModulesBackend::removeRepository(const QString&)     { emit log(notHere("repositories")); }
 void ShellModulesBackend::setRepositoryEnabled(const QString&, bool) { emit log(notHere("repositories")); }
