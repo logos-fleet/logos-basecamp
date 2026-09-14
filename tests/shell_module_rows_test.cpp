@@ -261,6 +261,101 @@ private slots:
                  (QStringList{ QStringLiteral("chat_ui"), QStringLiteral("web_counter") }));
     }
 
+    // ── a module that is installed and NOT running (#123) ─────────────────
+    //
+    // A Downloaded module is loaded exactly once: by the install that brought
+    // it. On every LATER launch the core discovers it in the scanned directory
+    // and waits to be asked, and a Store shell's cold start deliberately does
+    // not ask -- a `web` module's page is 290 MB of QML runtime and seconds of
+    // it. So on the second launch the module has no page, and a rule that made
+    // the page the only evidence of a UI took the app off the sidebar: it was
+    // in the Modules tab, and where the user left it there was nothing.
+    //
+    // The package's own manifest is the evidence that does not need a page. It
+    // is on disk from the install, and its `type` is the SAME field the
+    // container reads to decide whether a page serves a UI
+    // (MobileWebModuleView's servesUiOf), so the two cannot disagree.
+
+    void anInstalledAppHasATileBeforeAnythingHasLoadedIt()
+    {
+        ModuleFacts facts = phone();
+        facts.known << QStringLiteral("web_counter");
+        // Not loaded, no page: this is a second launch.
+        facts.uiPackages.insert(QStringLiteral("web_counter"));
+
+        QCOMPARE(namesOf(basecamp::shell::launcherApps(facts)),
+                 (QStringList{ QStringLiteral("chat_ui"), QStringLiteral("web_counter") }));
+        const QVariantMap tile =
+            rowNamed(basecamp::shell::launcherApps(facts), QStringLiteral("web_counter"));
+        // ...and it says so: the tile is there, the module is not running, and
+        // pressing it is what brings it up.
+        QVERIFY(!tile.value(QStringLiteral("isLoaded")).toBool());
+    }
+
+    void thatTileIsOneTheHostMountsThroughTheContainer()
+    {
+        // The tile and the mount are one question (see below): a tile the host
+        // would refuse is a button that does nothing.
+        ModuleFacts facts = phone();
+        facts.known << QStringLiteral("web_counter");
+        facts.uiPackages.insert(QStringLiteral("web_counter"));
+
+        QVERIFY(basecamp::shell::isWebContainerApp(facts, QStringLiteral("web_counter")));
+    }
+
+    void anInstalledCoreModuleStillHasNoTile()
+    {
+        // A `core` module's `web` variant has a page too -- a wasm image needs
+        // a document -- and no user interface. Its manifest says `core`, so it
+        // is not in this set and never gets a tile.
+        ModuleFacts facts = phone();
+        facts.known << QStringLiteral("web_indexer");
+        facts.loaded << QStringLiteral("web_indexer");
+
+        QCOMPARE(namesOf(basecamp::shell::launcherApps(facts)),
+                 QStringList{ QStringLiteral("chat_ui") });
+        QVERIFY(!basecamp::shell::isWebContainerApp(facts, QStringLiteral("web_indexer")));
+    }
+
+    void anInstalledAppsRowSaysItIsAViewBeforeItRuns()
+    {
+        ModuleFacts facts = phone();
+        facts.known << QStringLiteral("web_counter");
+        facts.uiPackages.insert(QStringLiteral("web_counter"));
+
+        const QVariantMap row =
+            rowNamed(basecamp::shell::moduleRows(facts), QStringLiteral("web_counter"));
+        QCOMPARE(row.value(QStringLiteral("type")).toString(), QStringLiteral("ui_qml"));
+        QVERIFY(!row.value(QStringLiteral("isLoaded")).toBool());
+    }
+
+    void aShippedAppHasATileBeforeAnythingHasLoadedItEither()
+    {
+        // The app's own `web-modules` tree is not loaded at startup either, and
+        // it is the same rule: the manifest is beside the module in the image.
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("web_counter") };
+        facts.known << QStringLiteral("web_counter");
+        facts.uiPackages.insert(QStringLiteral("web_counter"));
+
+        QCOMPARE(namesOf(basecamp::shell::launcherApps(facts)),
+                 (QStringList{ QStringLiteral("chat_ui"), QStringLiteral("web_counter") }));
+    }
+
+    void aBundledViewModuleIsNeverTheContainersEvenIfItsPackageDeclaresAUi()
+    {
+        // A `ui_qml` member of the manifest is the HOST's to instantiate (ADR
+        // 0006). Its package declares a UI like any other, and a manifest entry
+        // is what keeps that from turning it into a page.
+        ModuleFacts facts = phone();
+        facts.uiPackages.insert(QStringLiteral("chat_ui"));
+        facts.known << QStringLiteral("chat_ui");
+
+        QVERIFY(!basecamp::shell::isWebContainerApp(facts, QStringLiteral("chat_ui")));
+        QCOMPARE(namesOf(basecamp::shell::launcherApps(facts)),
+                 QStringList{ QStringLiteral("chat_ui") });
+    }
+
     // ── the tile and the mount are the same question ──────────────────────
     //
     // The sidebar draws a tile, and pressing it sends the name to

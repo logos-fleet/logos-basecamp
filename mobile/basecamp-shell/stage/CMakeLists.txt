@@ -36,6 +36,8 @@ set(BASECAMP_MOBILE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 add_library(basecamp_shell_host STATIC
     ${SRC}/ShellModuleRows.cpp
     ${SRC}/ShellModuleRows.h
+    ${SRC}/InstalledPackages.cpp
+    ${SRC}/InstalledPackages.h
     ${SRC}/ShellModulesBackend.cpp
     ${SRC}/ShellModulesBackend.h
     ${SRC}/BundledSetShellHost.cpp
@@ -100,6 +102,7 @@ set_target_properties(basecamp_shell_host PROPERTIES EXPORT_NAME ShellHost)
 install(TARGETS basecamp_shell_host EXPORT BasecampShellHostTargets ARCHIVE DESTINATION lib)
 install(FILES
     ${SRC}/ShellModuleRows.h
+    ${SRC}/InstalledPackages.h
     ${SRC}/ShellModulesBackend.h
     ${SRC}/ShellStoreBackend.h
     ${SRC}/BundledSetShellHost.h

@@ -54,6 +54,7 @@ qt_add_executable(BasecampShell
     ${LOGOS_HOST_SOURCES}
     ${SMOKE_SRC}/ViewModuleRunner.cpp ${SMOKE_SRC}/ViewModuleRunner.h
     ${SHELL_SRC}/ShellModuleRows.cpp ${SHELL_SRC}/ShellModuleRows.h
+    ${SHELL_SRC}/InstalledPackages.cpp ${SHELL_SRC}/InstalledPackages.h
     ${SHELL_SRC}/ShellModulesBackend.cpp ${SHELL_SRC}/ShellModulesBackend.h
     ${SHELL_SRC}/BundledSetShellHost.cpp ${SHELL_SRC}/BundledSetShellHost.h
     ${SHELL_SRC}/WebAppSurface.cpp ${SHELL_SRC}/WebAppSurface.h
