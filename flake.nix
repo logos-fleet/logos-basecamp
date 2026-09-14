@@ -1458,16 +1458,43 @@
           mobile-bridge-test = import ./nix/mobile-bridge-test.nix {
             inherit pkgs src;
           };
-        } // pkgs.lib.optionalAttrs hasWebContainerTest {
-          web-container-test = import ./nix/web-container-test.nix {
-            inherit pkgs src;
-            liblogos = logosLiblogos;
-            logosCppSdk = logosSdk;
-            webVariant = webContainerFixture;
-            qmlRuntime = webContainerRuntime;
-            nativeModule = webContainerNativeModule;
-            capabilityModule = webContainerCapabilityModule;
-          };
+
+          # The Web container, end to end: a `ui_qml` module's `web` variant
+          # loaded through the real core.
+          #
+          # A SKIP THAT SAYS SO when a pin supplies fewer than all four of its
+          # inputs -- the shape logos-module-builder's web-view-variant uses for
+          # the same class of pin rollout. This check was ABSENT for a whole
+          # slice instead (logos-workspace#91), and an absent check can report
+          # nothing: `nix flake show` listed none on any system, and a green run
+          # looked exactly like one that had loaded a `web` variant for real.
+          web-container-test =
+            if hasWebContainerTest
+            then import ./nix/web-container-test.nix {
+              inherit pkgs src;
+              liblogos = logosLiblogos;
+              logosCppSdk = logosSdk;
+              webVariant = webContainerFixture;
+              qmlRuntime = webContainerRuntime;
+              nativeModule = webContainerNativeModule;
+              capabilityModule = webContainerCapabilityModule;
+            }
+            else pkgs.runCommand "web-container-test-skipped" { } ''
+              echo "SKIP: web-container-test — loading a \`ui_qml\` module's \`web\`"
+              echo "      variant through the real core needs all four of these"
+              echo "      packages.${system} outputs, and has:"
+              echo "        logos-module-builder    web-view-counter   ${pkgs.lib.boolToString (webContainerFixture != null)}"
+              echo "        this build's own        qml-runtime-wasm   ${pkgs.lib.boolToString (webContainerRuntime != null)}"
+              echo "        logos-module-builder    bare-greeter       ${pkgs.lib.boolToString (webContainerNativeModule != null)}"
+              echo "        logos-capability-module bare               ${pkgs.lib.boolToString (webContainerCapabilityModule != null)}"
+              echo "      web-view-counter exists only when logos-module-builder's own"
+              echo "      logos-nix, logos-protocol and logos-view-module-runtime pins"
+              echo "      all publish their wasm halves. Bump them, or run through the"
+              echo "      workspace flake, whose follows put ONE of each in the closure:"
+              echo "        ws test logos-basecamp --local logos-module-builder"
+              mkdir -p $out
+              echo skipped > $out/result
+            '';
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           bin-appimage = nix-bundle-appimage.lib.${system}.mkAppImage {
             drv = appDistributed;
@@ -1605,11 +1632,12 @@
         ios-runner-lint = self.packages.${system}.ios-runner-lint;
       } // pkgs.lib.optionalAttrs (self.packages.${system} ? mobile-bridge-test) {
         mobile-bridge-test = self.packages.${system}.mobile-bridge-test;
-      } // pkgs.lib.optionalAttrs (self.packages.${system} ? web-container-test) {
-        # The Web container, end to end. Absent only while this repo's lock
-        # predates the fixture it loads — see the binding in `packages`.
-        web-container-test = self.packages.${system}.web-container-test;
       } // pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isWindows) {
+        # The Web container, end to end. Present on every system the container
+        # exists on: it BUILDS and prints which input is missing rather than
+        # vanishing, because a check that is not there cannot report anything.
+        # See `web-container-test` in `packages`.
+        web-container-test = self.packages.${system}.web-container-test;
         link-gate = self.packages.${system}.link-gate;
         link-gate-negative = self.packages.${system}.link-gate-negative;
       } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
