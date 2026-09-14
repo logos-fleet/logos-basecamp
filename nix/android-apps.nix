@@ -35,10 +35,9 @@
   # directory on first launch -- see unpackAndroidWebAssets.
   webAssets,
   # logos-view-module-runtime's source tree. Headers only: the host needs
-  # LogosViewPlugin.h to cast the plugin it constructs. Nothing on Android
-  # constructs one yet -- the mobile catalog publishes no `ui_qml` variant for
-  # this platform -- but BundledSetShellHost is the same file on both phones
-  # and it mounts views, so it compiles against the same declaration.
+  # LogosViewPlugin.h to cast the plugin it constructs -- and on this platform
+  # it does construct one now, out of the `ui_qml` member's lib<stem>_view.so.
+  # BundledSetShellHost is the same file on both phones.
   viewRuntimeSrc,
   # nix/shell-ui-android.nix: the design system and main_ui as static archives,
   # plus the QML source roots qmlimportscanner has to walk to find the Qt QML
@@ -55,6 +54,25 @@ let
   # Qt plugin. Read off the SAME eval-time resolution the manifest was written
   # from -- nothing here globs the staged set.
   bundledSos = map (m: baseNameOf m.image) bundledSet.modules;
+
+  # ── the ONE view module, if the set carries one ─────────────────────────
+  # Same derivation as nix/ios-apps.nix, off the same eval-time resolution, and
+  # with the same refusal when a set carries more than one: the host renders a
+  # view module into a single QQuickWidget, and which one that is has to be a
+  # build's answer rather than a guess at runtime. Empty when the set has no
+  # `ui_qml` member -- the Shell then asks the manifest and shows no app tile,
+  # which is the honest state and not a failure.
+  #
+  # lib<stem>.so -> <stem>: the runner dlopens by stem and re-decorates.
+  viewModules = lib.filter (m: m.type == "ui_qml") bundledSet.modules;
+  stemOf = m: lib.removeSuffix ".so" (lib.removePrefix "lib" (baseNameOf m.image));
+  viewModuleName =
+    if viewModules == [ ] then ""
+    else if lib.length viewModules == 1 then stemOf (lib.head viewModules)
+    else throw ("logos-basecamp: the Android host renders ONE view module into "
+      + "its single QQuickWidget, and this Bundled set carries "
+      + lib.toString (lib.length viewModules) + ": "
+      + lib.concatMapStringsSep ", " (m: m.name) viewModules);
 
   # lib.getLib: nixpkgs' openssl, fmt and icu default to their bin or dev
   # output, and an APK built from those carries no .so at all -- mkQtAndroidApk
@@ -310,10 +328,10 @@ let
         + "${shellUi.packages.design-system}/lib/cmake/LogosDesignSystem")
       "-DBASECAMP_QML_SCAN_ROOTS=${lib.concatStringsSep ";" shellUi.qmlScanRoots}"
       "-DLOGOS_VIEW_RUNTIME_INCLUDE=${viewRuntimeSrc}/include"
-      # No `ui_qml` variant is published for Android, so no Bundled set here
-      # can carry a view module and the stem is empty by construction -- the
-      # host asks the manifest rather than assuming one is there.
-      "-DLOGOS_VIEW_MODULE_STEM="
+      # Which view image the runner opens, resolved out of the Bundled set the
+      # same way the iOS app resolves it. Empty when the set carries no `ui_qml`
+      # member -- the host asks the manifest rather than assuming one is there.
+      "-DLOGOS_VIEW_MODULE_STEM=${viewModuleName}"
       # The Web container's half of the app image, which the Shell ships now
       # too: a Store shell INSTALLS `web` variants and nothing else, so without
       # the QML runtime a module it installed from the catalog has nowhere to
