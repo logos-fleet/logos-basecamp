@@ -292,6 +292,7 @@ Item {
                                             + (rowItem && rowItem.name ? rowItem.name : "")
                                 Layout.fillWidth: true
                                 visible: rowItem && rowItem.isLoaded
+                                          && rowItem.statsMeasured
                                 text: rowItem
                                       ? Number(rowItem.cpu).toFixed(1) + "%  ·  "
                                         + Number(rowItem.memory).toFixed(1) + " MB"
@@ -318,9 +319,12 @@ Item {
                     }
                 }
 
-                // Stats only mean something for a running module; unloaded rows
-                // render an em dash so the column stays aligned without
-                // implying "0% CPU" is a measurement.
+                // Stats only mean something for a running module that somebody
+                // MEASURED. An unloaded row has no reading, and neither does a
+                // loaded one whose runtime could not account for it -- a module
+                // with no process of its own, where nothing looked (#86). Both
+                // render an em dash, so the column stays aligned without
+                // implying "0.0 MB" is a measurement.
                 Component {
                     id: cpuCellComponent
 
@@ -331,10 +335,11 @@ Item {
                         // pass on a table whose stats columns never drew.
                         objectName: "moduleInspector.cpu."
                                     + (rowItem && rowItem.name ? rowItem.name : "")
-                        text: (rowItem && rowItem.isLoaded)
-                              ? Number(rowItem.cpu).toFixed(1) + "%" : "—"
-                        color: (rowItem && rowItem.isLoaded) ? Theme.palette.text
-                                                            : Theme.palette.textMuted
+                        readonly property bool hasFigure:
+                            rowItem && rowItem.isLoaded && rowItem.statsMeasured
+                        text: hasFigure ? Number(rowItem.cpu).toFixed(1) + "%" : "—"
+                        color: hasFigure ? Theme.palette.text
+                                         : Theme.palette.textMuted
                         font.pixelSize: Theme.typography.primaryText
                         verticalAlignment: Text.AlignVCenter
                         elide: Text.ElideRight
@@ -347,10 +352,11 @@ Item {
                     LogosText {
                         objectName: "moduleInspector.memory."
                                     + (rowItem && rowItem.name ? rowItem.name : "")
-                        text: (rowItem && rowItem.isLoaded)
-                              ? Number(rowItem.memory).toFixed(1) + " MB" : "—"
-                        color: (rowItem && rowItem.isLoaded) ? Theme.palette.text
-                                                            : Theme.palette.textMuted
+                        readonly property bool hasFigure:
+                            rowItem && rowItem.isLoaded && rowItem.statsMeasured
+                        text: hasFigure ? Number(rowItem.memory).toFixed(1) + " MB" : "—"
+                        color: hasFigure ? Theme.palette.text
+                                         : Theme.palette.textMuted
                         font.pixelSize: Theme.typography.primaryText
                         verticalAlignment: Text.AlignVCenter
                         elide: Text.ElideRight

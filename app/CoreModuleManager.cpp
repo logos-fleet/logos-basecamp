@@ -1,5 +1,7 @@
 #include "CoreModuleManager.h"
 
+#include "ModuleStatsCells.h"
+
 
 #include <QDebug>
 #include <QJsonArray>
@@ -217,27 +219,23 @@ void CoreModuleManager::updateModuleStats()
             continue;
         }
 
+        // EVERY SPELLING A RUNTIME MIGHT USE, and the difference between a
+        // figure of zero and no figure at all — both in moduleStatsCells(),
+        // where they are testable without a runtime. Reading only the SDK
+        // facade's names here is what made every module on a phone report
+        // 0.0% / 0.0 MB: its Shell hands the core's own JSON through unrenamed
+        // (#86).
+        const basecamp::ModuleStatsCells cells = basecamp::moduleStatsCells(moduleObj);
+
         QVariantMap stats;
-        // Tolerate multiple field names across runtime versions. Older
-        // lib builds emit `cpu` / `memory` / `memory_MB`; newer ones
-        // emit `cpu_percent` / `memory_mb` — which the facade models as
-        // `cpuPercent` / `memoryMb` while still passing every raw key
-        // through, so the old spellings remain readable here. Take the
-        // first non-zero hit.
-        double cpu = moduleObj.value(QStringLiteral("cpuPercent")).toDouble();
-        if (cpu == 0) cpu = moduleObj.value(QStringLiteral("cpu")).toDouble();
-
-        double memory = moduleObj.value(QStringLiteral("memoryMb")).toDouble();
-        if (memory == 0) memory = moduleObj.value(QStringLiteral("memory")).toDouble();
-        if (memory == 0) memory = moduleObj.value(QStringLiteral("memory_MB")).toDouble();
-
         // "cpu"/"memory" as 1-decimal STRINGS is the QML-facing contract, and
         // it stops here: MainUIBackend::buildCoreModulesSnapshot copies these
-        // two keys straight through, ModuleInstanceModel exposes them as the
-        // cpu/memory roles, and both fall back to the literal "0.0". The
-        // facade's cpuPercent/memoryMb renaming must not leak past this line.
-        stats[QStringLiteral("cpu")] = QString::number(cpu, 'f', 1);
-        stats[QStringLiteral("memory")] = QString::number(memory, 'f', 1);
+        // keys straight through and ModuleInstanceModel exposes them as roles.
+        // They are EMPTY, not "0.0", when nothing was measured — `statsMeasured`
+        // is what the view reads to tell that from an idle module.
+        stats[QStringLiteral("cpu")] = cells.cpu;
+        stats[QStringLiteral("memory")] = cells.memory;
+        stats[QStringLiteral("statsMeasured")] = cells.measured;
         m_moduleStats[name] = stats;
     }
 

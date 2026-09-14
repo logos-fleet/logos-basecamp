@@ -266,14 +266,14 @@ QVariantList MainUIBackend::buildCoreModulesSnapshot() const
         // default.
         module["installType"] = m_packageCoordinator ? m_packageCoordinator->installType(name) : QString();
 
+        // A module the poll has no entry for is not idle — it has not been
+        // measured — and the "0.0" this used to substitute was the same false
+        // reading #86 is about. statsMeasured carries the distinction; the two
+        // figures stay empty rather than inventing one.
         const QVariantMap stats = m_coreModuleManager->moduleStats(name);
-        if (!stats.isEmpty()) {
-            module["cpu"] = stats["cpu"];
-            module["memory"] = stats["memory"];
-        } else {
-            module["cpu"] = "0.0";
-            module["memory"] = "0.0";
-        }
+        module["cpu"] = stats.value("cpu");
+        module["memory"] = stats.value("memory");
+        module["statsMeasured"] = stats.value("statsMeasured", false);
 
         modules.append(module);
     }

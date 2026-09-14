@@ -58,6 +58,9 @@ private:
         QString depBlockKind;
         double  cpu            = 0.0;
         double  memory         = 0.0;
+        // See StatsMeasuredRole: cpu/memory are zero both when a module is
+        // idle and when nothing measured it, and only this tells them apart.
+        bool    statsMeasured  = false;
 
         QString statusText() const;
     };

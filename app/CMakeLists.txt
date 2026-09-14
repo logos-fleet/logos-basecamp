@@ -352,6 +352,7 @@ set(PROJECT_SOURCES
     IntentBridgeAdapter.cpp
     UIPluginPresenter.cpp
     CoreModuleManager.cpp
+    ModuleStatsCells.cpp
     RecentlyClosedStore.cpp
     UIPluginManager.cpp
     PackageCoordinator.cpp
