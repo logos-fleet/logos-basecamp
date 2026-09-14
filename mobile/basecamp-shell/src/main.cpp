@@ -17,6 +17,7 @@
 #include "BundledSetCoreRuntime.h"
 #include "BundledSetShellHost.h"
 #include "appmanager/CatalogSource.h"
+#include "appmanager/ConsentScript.h"
 #include "appmanager/ModuleCallScript.h"
 #include "appmanager/ModuleDirectories.h"
 #include "IShellHost.h"
@@ -26,6 +27,7 @@
 #include "ShellAppDriver.h"
 #include "ShellCallDriver.h"
 #include "ShellCatalogDriver.h"
+#include "ShellConsentDriver.h"
 #include "ShellModulesDriver.h"
 #include "ShellWebAppDriver.h"
 #include "ShellSections.h"
@@ -288,6 +290,18 @@ int main(int argc, char* argv[])
     auto* calls = new ShellCallDriver(
         &core, basecamp::appmanager::ModuleCallScript::fromArguments(app.arguments()), &app);
     QObject::connect(calls, &ShellCallDriver::log, &console);
+
+    // THE 4.7.3 CONSENT PROMPT, ANSWERED. `--consent <caller>.<target>=deny,grant`
+    // on the launch that installs, `=expect-granted` on the next one -- the
+    // grant lives in capability_module's on-disk store and a second launch of
+    // this app is the only thing that reads it. Constructed HERE, before any
+    // driver runs, because it listens to the backend's console from this point
+    // on: the Downloaded module makes its first call while its page comes up,
+    // which is well before this driver's turn.
+    auto* consent = new ShellConsentDriver(
+        host.backend(), basecamp::appmanager::ConsentScript::fromArguments(app.arguments()),
+        &app);
+    QObject::connect(consent, &ShellConsentDriver::log, &console);
     // NOT a third COLD START marker: this clock starts at the tile press, and
     // the press happens after the chat bring-up has spent a minute and a half
     // waiting for the group to commit. Timed from main() it would read as a
@@ -315,7 +329,7 @@ int main(int argc, char* argv[])
         catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app, [network, driver, apps, webApps, catalog, calls,
+    QTimer::singleShot(0, &app, [network, driver, apps, webApps, catalog, calls, consent,
                                  finishOnTheApp]() {
         // The catalog FIRST when there is one: the module it installs is what
         // the Modules tab and the sidebar then have to account for, and a run
@@ -330,6 +344,11 @@ int main(int argc, char* argv[])
         // spends a minute and a half waiting for a group to commit and would
         // put that between a device and its answer.
         calls->run();
+        // AND THE CONSENT ANSWERS AFTER THEM. The pair being decided is usually
+        // the module the catalog just installed, and its first call is refused
+        // while the page is still coming up -- so this waits on a page that has
+        // already started rather than on one that has not.
+        consent->run();
         if (network->hasWork()) {
             const bool ok = network->run();
             console(ok ? QStringLiteral("networking modules: PASS")

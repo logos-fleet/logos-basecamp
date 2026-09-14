@@ -103,6 +103,47 @@ public:
     // it.
     void startAppManager(const basecamp::appmanager::ModuleDirectories& dirs);
 
+    // TELL capability_module WHERE EVERY MODULE CAME FROM.
+    //
+    // The 4.7.3 gate is a function of exactly this, and the Shell is the only
+    // thing that knows it: the core discovers a Downloaded module in a scanned
+    // directory in precisely the way it discovers a shipped one, and
+    // capability_module does not persist origins because an app image can change
+    // between launches. Undeclared, every module is `bundled` -- so every
+    // cross-module call is allowed and no prompt ever appears, which is what a
+    // Store shell looked like until this ran.
+    //
+    // Called at startup (a Downloaded module installed by an EARLIER launch is
+    // already on disk) and again for each new install, before the module is
+    // loaded and therefore before it can call anything.
+    //
+    // Returns how many origins capability_module accepted.
+    int declareModuleOrigins();
+
+    // Why capability_module refused a call between these two, in its own words.
+    // Empty when it is not in this build.
+    QVariantMap consentStatus(const QString& caller, const QString& target) const;
+
+    // Bring a module up if this device has it and it is not running yet.
+    //
+    // A Downloaded module is loaded by the install that brought it, and on every
+    // LATER launch by nothing at all: the core discovers it in a scanned
+    // directory and waits to be asked, and a Store shell's cold start
+    // deliberately does not ask (a `web` module's page and wasm image are
+    // seconds). So anything that wants to exercise an already-installed module
+    // on a second launch has to say so.
+    //
+    // False when this device does not have it -- which is not an error, it is
+    // the state of a device that never installed it.
+    bool ensureRunning(const QString& name);
+
+    // Record a decision for a pair that has no prompt on screen. The ordinary
+    // path is StoreAppManager::answerConsent, which pops the queue; this is for
+    // the case the queue has nothing to pop -- capability_module does not
+    // re-announce a pair it already decided, so a user changing a denial into a
+    // grant never produces a second dialog.
+    bool decideConsent(const QString& caller, const QString& target, bool granted);
+
     // Anchor a publisher in this device's keyring. NOT a QML affordance: it is
     // an explicit act a host performs on the user's behalf, and the only thing
     // that makes a signed package installable under the `require` policy.

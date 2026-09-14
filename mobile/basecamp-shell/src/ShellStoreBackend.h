@@ -5,6 +5,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QVariantMap>
 
 class CoreModuleManager;
 class LogosAPI;
@@ -86,6 +87,31 @@ public:
     // which case no cross-module call is being authorised at all and there is
     // nothing to consent to.
     bool subscribeToConsent(basecamp::appmanager::StoreAppManager* manager);
+
+    // TELL capability_module WHERE A MODULE CAME FROM, which is the fact the
+    // whole 4.7.3 gate is a function of.
+    //
+    // It is the HOST's to declare and nobody else's: a module cannot be asked
+    // where it came from (it would have every reason to lie), the core does not
+    // know (it discovers a Downloaded module in a directory exactly as it
+    // discovers a shipped one), and capability_module deliberately does not
+    // persist it -- the app image can change under a device between launches, so
+    // a remembered origin would outlive the fact. Undeclared, a module is
+    // `bundled`, which is the right default for the desktop and for every build
+    // that has never installed anything -- and which is also why forgetting to
+    // call this does not fail loudly: it silently turns the consent gate off.
+    //
+    // `origin` is "bundled" or "downloaded". Trusted-channel only, like
+    // decideConsent, and for the same reason: a module that could declare
+    // itself Bundled would be through the gate.
+    bool declareModuleOrigin(const QString& moduleName, const QString& origin);
+
+    // capability_module's own verdict on an ordered pair: { state, reason,
+    // callerOrigin, targetOrigin }, where `state` is not-required | unknown |
+    // pending | granted | denied. A plain query -- it decides nothing -- and the
+    // only way to report why a call was refused in the words of the module that
+    // refused it.
+    QVariantMap consentStatus(const QString& caller, const QString& target);
 
     // ── StoreAppManager::Backend ──
     bool hasCatalog() const override;

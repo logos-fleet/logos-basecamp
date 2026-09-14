@@ -94,7 +94,64 @@ void ShellModulesBackend::startAppManager(const basecamp::appmanager::ModuleDire
                  .arg(configured ? QStringLiteral("ready") : QStringLiteral("not in this build"),
                       authority ? QStringLiteral("up") : QStringLiteral("not in this build"),
                       consent ? QStringLiteral("armed") : QStringLiteral("unavailable")));
+    // WHERE EVERY MODULE CAME FROM, before anything can call anything. A
+    // Downloaded module installed by an earlier launch is already on disk and
+    // already discovered, so this launch's FIRST call from it must be gated --
+    // which is the whole of "grant persists across restarts".
+    declareModuleOrigins();
     m_appManager->refreshCatalog();
+}
+
+int ShellModulesBackend::declareModuleOrigins()
+{
+    const QStringList downloaded = downloadedModules();
+    int declared = 0;
+    // BOTH HALVES, not just the Downloaded one. capability_module's default is
+    // `bundled` and would agree, but a set the app image no longer carries can
+    // only be corrected by being told -- and an origin that is merely assumed
+    // is one nothing in a console can be checked against.
+    for (const QString& name : shippedModuleNames())
+        if (m_storeBackend->declareModuleOrigin(name, QStringLiteral("bundled")))
+            ++declared;
+    for (const QString& name : downloaded)
+        if (m_storeBackend->declareModuleOrigin(name, QStringLiteral("downloaded")))
+            ++declared;
+
+    emit log(QStringLiteral("app manager: %1 module origin(s) declared to "
+                            "capability_module; downloaded: %2")
+                 .arg(declared)
+                 .arg(downloaded.isEmpty() ? QStringLiteral("none")
+                                           : downloaded.join(QStringLiteral(", "))));
+    return declared;
+}
+
+QVariantMap ShellModulesBackend::consentStatus(const QString& caller,
+                                               const QString& target) const
+{
+    return m_storeBackend->consentStatus(caller, target);
+}
+
+bool ShellModulesBackend::ensureRunning(const QString& name)
+{
+    if (m_modules->loadedModules().contains(name))
+        return true;
+    if (!m_modules->knownModules().contains(name))
+        return false;
+    emit log(QStringLiteral("bringing up %1, which this device has and nothing has "
+                            "asked for yet").arg(name));
+    const bool loaded = m_modules->loadModule(name);
+    rebuildRows();
+    return loaded;
+}
+
+bool ShellModulesBackend::decideConsent(const QString& caller, const QString& target,
+                                        bool granted)
+{
+    const bool recorded = m_storeBackend->decideConsent(caller, target, granted);
+    if (!recorded)
+        emit log(QStringLiteral("app manager: could not record the decision about "
+                                "'%1' -> '%2'").arg(caller, target));
+    return recorded;
 }
 
 bool ShellModulesBackend::trustSigner(const QString& name, const QString& did)
@@ -162,6 +219,11 @@ void ShellModulesBackend::onModuleInstalled(const QString& packageName, const QS
                      .arg(packageName, QFileInfo(path).absolutePath()));
         return;
     }
+    // THE ORIGIN BEFORE THE LOAD, and the order is the whole of it: a `web`
+    // module starts calling out while it comes up, and an origin declared after
+    // that first call would let it through the 4.7.3 gate.
+    declareModuleOrigins();
+
     if (!m_modules->loadModule(packageName)) {
         emit log(QStringLiteral("app manager: %1 installed and discovered but "
                                 "would not load").arg(packageName));
