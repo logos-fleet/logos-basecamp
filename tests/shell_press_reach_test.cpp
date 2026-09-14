@@ -22,7 +22,7 @@
 // The second question is therefore where that point lands on the SCREEN.
 //
 // Run: nix build .#unit-tests -L
-#include "ShellSceneDriver.h"
+#include "basecamp-shell/src/ShellSceneDriver.h"
 
 #include <QtTest/QtTest>
 
