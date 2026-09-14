@@ -70,9 +70,6 @@ private:
     // and no install control is a criterion in its own right, and a catalog is
     // the only place it can be observed rather than unit-tested.
     void reportCatalog();
-    // Turn the event loop for `ms`, so what just happened is on screen long
-    // enough to be seen.
-    void settle(int ms);
     // Press the sidebar tile and wait for the page.
     bool openInstalledApp(const QString& packageName);
 

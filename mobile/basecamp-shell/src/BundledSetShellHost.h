@@ -87,14 +87,14 @@ private:
         ViewModuleRunner* runner = nullptr;   // owned by this
     };
 
-    ShellModulesBackend          m_backend;
-    IShellObserver*              m_observer = nullptr;
-    QHash<QString, Mounted>      m_mounted;
+    ShellModulesBackend             m_backend;
+    IShellObserver*                 m_observer = nullptr;
+    QHash<QString, Mounted>         m_mounted;
     // The placeholders, by module. Owned by the Shell once handed over, exactly
     // as a `ui_qml` widget is.
-    QHash<QString, WebAppSurface*> m_webSurfaces;
+    QHash<QString, WebAppSurface*>  m_webSurfaces;
     // The web module whose page is currently in front, so a placement that did
     // not change which app is up does not re-spend the live-runtime budget.
-    QString                      m_webVisible;
-    bool                         m_webSyncQueued = false;
+    QString                         m_webVisible;
+    bool                            m_webSyncQueued = false;
 };

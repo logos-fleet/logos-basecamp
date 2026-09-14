@@ -28,14 +28,6 @@ ShellWebAppDriver::ShellWebAppDriver(BundledSetShellHost* host, QWidget* shellWi
 {
 }
 
-void ShellWebAppDriver::settle(int ms)
-{
-    QElapsedTimer since;
-    since.start();
-    while (since.elapsed() < ms)
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-}
-
 QStringList ShellWebAppDriver::openWebApps() const
 {
     ShellModulesBackend* backend = m_host->backend();
@@ -47,16 +39,21 @@ QStringList ShellWebAppDriver::openWebApps() const
     return apps;
 }
 
+QStringList ShellWebAppDriver::shippedOutsideTheBundledSet() const
+{
+    ShellModulesBackend* backend = m_host->backend();
+    const QStringList bundled = backend->bundledSetNames();
+    QStringList tree;
+    for (const QString& name : backend->shippedModuleNames()) {
+        if (!bundled.contains(name)) tree.append(name);
+    }
+    return tree;
+}
+
 void ShellWebAppDriver::loadShippedWebModules()
 {
     ShellModulesBackend* backend = m_host->backend();
-    // WHAT THE IMAGE CARRIES BESIDE THE MANIFEST. shippedModuleNames() is the
-    // Bundled set plus the app's own `web-modules` tree; the set is already up,
-    // so the difference is the tree -- and the tree is what the Module Manager's
-    // Load button reaches.
-    const QStringList bundled = backend->bundledSetNames();
-    for (const QString& name : backend->shippedModuleNames()) {
-        if (bundled.contains(name)) continue;
+    for (const QString& name : shippedOutsideTheBundledSet()) {
         emit log(QStringLiteral("web app: loading the shipped `web` module %1").arg(name));
         backend->loadCoreModule(name);
     }
@@ -68,18 +65,13 @@ void ShellWebAppDriver::loadShippedWebModules()
 
 bool ShellWebAppDriver::hasWork() const
 {
-    ShellModulesBackend* backend = m_host->backend();
     if (!openWebApps().isEmpty()) return true;
-    const QStringList bundled = backend->bundledSetNames();
-    for (const QString& name : backend->shippedModuleNames()) {
-        if (!bundled.contains(name)) return true;
-    }
-    return !backend->downloadedModules().isEmpty();
+    if (!shippedOutsideTheBundledSet().isEmpty()) return true;
+    return !m_host->backend()->downloadedModules().isEmpty();
 }
 
 void ShellWebAppDriver::run()
 {
-    ShellModulesBackend* backend = m_host->backend();
     auto* web = basecamp::web::MobileWebContainerBackend::instance();
 
     if (openWebApps().isEmpty()) loadShippedWebModules();
@@ -107,7 +99,7 @@ void ShellWebAppDriver::run()
     WebAppSurface* surface = nullptr;
     while (sincePress.elapsed() < kMountBudgetMs) {
         surface = m_host->webSurface(app);
-        if (surface && surface->onScreen() && !surface->pageRect().isEmpty()) break;
+        if (surface && surface->onScreen()) break;   // i.e. it has a non-empty rect
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
     }
     if (!surface || !surface->onScreen()) {
@@ -170,7 +162,7 @@ void ShellWebAppDriver::run()
     // page behind the Shell.
     m_host->setCurrentSectionIndex(ShellSection::Settings);
     settle(600);
-    if (web->frontmostModule() != QString() || surface->onScreen()) {
+    if (!web->frontmostModule().isEmpty() || surface->onScreen()) {
         emit log(QStringLiteral("WRONG: the user navigated away from %1 and its page is "
                                 "still in front ('%2')").arg(app, web->frontmostModule()));
         return;

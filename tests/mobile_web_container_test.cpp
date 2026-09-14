@@ -534,9 +534,6 @@ private slots:
         QCOMPARE(backend->budget().visible(), QStringLiteral("counter_ui"));
     }
 
-    // The host's own cost, which is what slice 28's "memory returns to within a
-    // stated budget" is measured in. A platform that will not say answers -1;
-    // every platform this runs on says something.
     // ── #110: A PAGE GOES WHERE THE SHELL LEFT ROOM FOR IT ─────────────────
     //
     // A page is mounted at the window's size and brought forward when the user
@@ -622,6 +619,9 @@ private slots:
         QCOMPARE(m_pages[0]->geometry, QRect());
     }
 
+    // The host's own cost, which is what slice 28's "memory returns to within a
+    // stated budget" is measured in. A platform that will not say answers -1;
+    // every platform this runs on says something.
     void theAppCanWeighItself()
     {
         const qint64 bytes = basecamp::web::appResidentBytes();

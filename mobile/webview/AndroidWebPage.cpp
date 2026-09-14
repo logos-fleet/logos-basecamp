@@ -6,10 +6,10 @@
 #include <jni.h>
 
 #include <QCoreApplication>
-#include <QGuiApplication>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QFuture>
 #include <QDebug>
 #include <QDir>

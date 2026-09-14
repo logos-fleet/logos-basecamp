@@ -12,11 +12,11 @@ WebAppSurface::WebAppSurface(QString moduleName, QWidget* parent)
     // page inset to nothing is a page the user cannot see -- which reads
     // exactly like the module failing to come up.
     setMinimumSize(64, 64);
-    // NO BACKGROUND OF ITS OWN, and no translucency either. The page is a
-    // native view in front of Qt's whole surface, so what this widget draws is
-    // covered whenever the app is open -- but in the frames BEFORE the page
-    // comes forward it is not, and a hole punched through the window is a black
-    // rectangle rather than the Shell. Inheriting the workspace's own
+    // It sets NO background of its own and no translucency, deliberately. The
+    // page is a native view in front of Qt's whole surface, so what this widget
+    // draws is covered whenever the app is open -- but in the frames BEFORE the
+    // page comes forward it is not, and a hole punched through the window would
+    // be a black rectangle rather than the Shell. Inheriting the workspace's own
     // background is what makes those frames look like the Shell.
     watchAncestors();
 }

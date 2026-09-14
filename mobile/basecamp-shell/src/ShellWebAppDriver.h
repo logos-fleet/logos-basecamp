@@ -43,12 +43,16 @@ private:
     // The web modules the container has opened a UI page for -- i.e. the ones
     // the sidebar carries a tile for.
     QStringList openWebApps() const;
-    // Bring this build's own `web-modules` tree up, the way the Module Manager's
-    // Load button does. A shipped `web` module is discovered by the core exactly
-    // as an installed one is and is NOT loaded at startup, so a run that only
-    // looked at what was already open would have nothing to open.
+    // WHAT THE IMAGE CARRIES BESIDE THE MANIFEST: shippedModuleNames() is the
+    // Bundled set plus the app's own `web-modules` tree, and the set is already
+    // up -- so the difference is the tree, and the tree is what the Module
+    // Manager's Load button reaches.
+    QStringList shippedOutsideTheBundledSet() const;
+    // Bring that tree up, the way the Module Manager's Load button does. A
+    // shipped `web` module is discovered by the core exactly as an installed one
+    // is and is NOT loaded at startup, so a run that only looked at what was
+    // already open would have nothing to open.
     void loadShippedWebModules();
-    void settle(int ms);
 
     BundledSetShellHost* m_host;  // not owned
 };

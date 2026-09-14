@@ -368,8 +368,9 @@ PlatformPageFactory iosPlatformPageFactory()
         // rect gives the window back and restores the mask.
         page.setGeometry = [holder](const QRect& windowRect) {
             UIView* view = holder->view;
+            if (!view) return;
             UIView* superview = view.superview;
-            if (!view || !superview) return;
+            if (!superview) return;
             if (windowRect.isEmpty()) {
                 view.autoresizingMask =
                     UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;

@@ -2,9 +2,10 @@
 //
 // A simulator has no finger, so the presses are synthesised -- but only the
 // touch is. Everything after it is the real path: the Shell's own controls,
-// their MouseAreas, the signals they emit and the backend they land on. Two
-// drivers need exactly this and nothing else (ShellModulesDriver for the
-// Modules tab, ShellAppDriver for a Bundled app), and a second copy of
+// their MouseAreas, the signals they emit and the backend they land on. Every
+// driver needs exactly this and nothing else (ShellModulesDriver for the
+// Modules tab, ShellAppDriver for a Bundled app, ShellWebAppDriver for a `web`
+// one, ShellCatalogDriver for an installed package), and a second copy of
 // "settle, then press at the centre" would be a second set of timings to get
 // wrong -- every constant here was measured on a physical iPad Air (4th gen).
 //
@@ -67,6 +68,9 @@ protected:
     // creation is asynchronous -- the rows of a view that just became visible
     // do not exist in the same tick.
     QQuickItem* waitFor(const QString& objectName, int timeoutMs);
+    // Turn the event loop for `ms`, so what just happened is on screen long
+    // enough to be seen -- and so the work it queued actually runs.
+    void settle(int ms);
 
     QWidget* m_shell;  // not owned
 };

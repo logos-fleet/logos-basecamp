@@ -5,7 +5,6 @@
 #include "appmanager/StoreAppManager.h"
 
 #include <QCoreApplication>
-#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QQuickItem>
 
@@ -177,14 +176,6 @@ void ShellCatalogDriver::run()
         return;
     emit log(QStringLiteral("CATALOG INSTALL OK: %1 came from the catalog and is on screen")
                  .arg(name));
-}
-
-void ShellCatalogDriver::settle(int ms)
-{
-    QElapsedTimer since;
-    since.start();
-    while (since.elapsed() < ms)
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 }
 
 bool ShellCatalogDriver::openInstalledApp(const QString& packageName)

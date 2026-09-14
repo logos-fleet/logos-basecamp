@@ -8,6 +8,8 @@
 #include <QQuickWidget>
 #include <QTimer>
 
+#include <utility>
+
 BundledSetShellHost::BundledSetShellHost(BundledSetCoreRuntime* core)
     : m_backend(core)
 {
@@ -65,7 +67,7 @@ QQuickWidget* BundledSetShellHost::mountedView(const QString& name) const
 
 WebAppSurface* BundledSetShellHost::webSurface(const QString& name) const
 {
-    return m_webSurfaces.value(name, nullptr);
+    return m_webSurfaces.value(name);
 }
 
 void BundledSetShellHost::mountApp(const QString& name)
@@ -131,16 +133,19 @@ void BundledSetShellHost::unmountApp(const QString& name)
     // container's back.
     if (m_backend.isWebContainerApp(name)) {
         // The placeholder goes out of the Shell exactly as a `ui_qml` widget
-        // does -- ask first, then delete -- and syncWebSurfaces() then finds no
-        // web app on screen and puts every page behind the Shell again.
+        // does -- ask first, then delete -- and every page goes behind the Shell
+        // right here rather than on the next sync: the report below already says
+        // the app is off screen, and a caller that read the container in between
+        // would have been told otherwise.
         if (WebAppSurface* surface = m_webSurfaces.take(name)) {
             if (m_observer)
                 m_observer->onPluginWindowRemoveRequested(surface);
             surface->deleteLater();
         }
-        basecamp::web::MobileWebContainerBackend::instance()->hideAll();
+        auto* web = basecamp::web::MobileWebContainerBackend::instance();
+        web->hideAll();
         m_webVisible.clear();
-        basecamp::web::MobileWebContainerBackend::instance()->setContentRect(QRect());
+        web->setContentRect(QRect());
         if (m_backend.currentVisibleApp() == name)
             m_backend.setCurrentVisibleApp(QString());
         m_backend.report(QStringLiteral("web app %1 is off screen and still "
@@ -171,6 +176,7 @@ void BundledSetShellHost::unmountApp(const QString& name)
         m_backend.setCurrentVisibleApp(QString());
     m_backend.report(QStringLiteral("app %1 is unmounted").arg(name));
 }
+
 // ── #110: A WEB APP NAVIGATES LIKE EVERY OTHER APP ──────────────────────────
 //
 // The page is the platform's and is mounted at the WINDOW's size, so bringing it
@@ -188,7 +194,7 @@ void BundledSetShellHost::unmountApp(const QString& name)
 void BundledSetShellHost::mountWebApp(const QString& name)
 {
     auto* web = basecamp::web::MobileWebContainerBackend::instance();
-    if (WebAppSurface* already = m_webSurfaces.value(name, nullptr)) {
+    if (WebAppSurface* already = m_webSurfaces.value(name)) {
         m_backend.setCurrentVisibleApp(name);
         if (m_observer)
             m_observer->onPresentAppRequested(already);
@@ -198,9 +204,7 @@ void BundledSetShellHost::mountWebApp(const QString& name)
 
     auto* surface = new WebAppSurface(name);
     QObject::connect(surface, &WebAppSurface::placementChanged,
-                     &m_backend, [this](const QString&, const QRect&, bool) {
-                         queueWebSync();
-                     });
+                     &m_backend, [this] { queueWebSync(); });
     m_webSurfaces.insert(name, surface);
     m_backend.setCurrentVisibleApp(name);
 
@@ -234,8 +238,8 @@ void BundledSetShellHost::syncWebSurfaces()
     // Shell has hidden -- another tab raised, the user gone to Settings -- is
     // not it, and that is what makes "leave the app" a thing the Shell can say.
     WebAppSurface* front = nullptr;
-    for (WebAppSurface* surface : m_webSurfaces) {
-        if (surface && surface->onScreen()) { front = surface; break; }
+    for (WebAppSurface* surface : std::as_const(m_webSurfaces)) {
+        if (surface->onScreen()) { front = surface; break; }
     }
 
     if (!front) {

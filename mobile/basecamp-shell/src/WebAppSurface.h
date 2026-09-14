@@ -23,12 +23,11 @@
 // and doing it here would make this class know which phone it is on.
 #pragma once
 
+#include <QPointer>
 #include <QRect>
 #include <QString>
-#include <QWidget>
-
-#include <QPointer>
 #include <QVector>
+#include <QWidget>
 
 class WebAppSurface : public QWidget
 {
