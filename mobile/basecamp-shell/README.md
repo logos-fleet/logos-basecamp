@@ -384,19 +384,32 @@ The driver loads each module it names, waits for it to become reachable -- a
 
 ```bash
 xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
-  --call 'wallet_ui.createAccount(hunter2,main)'
-# [shell] CALL OK wallet_ui.createAccount(hunter2,main) -> {"ok":true,"pending":true}
-# [wallet_ui web] created 0x…
+  --call 'keystore_module.list_accounts'
+# [shell] CALL OK keystore_module.list_accounts -> {"accounts":["0x5a3a5A89…"],"ok":true,…}
 ```
 
-**Name a module that will actually answer.** A `--call` reaches its target as the
-HOST ANCHOR -- one undifferentiated credential covering the shells,
-`core_service` and every relayed CLI token -- and `keystore_module`'s gate admits
-it at no tier. So `keystore_module.list_accounts` answers (reading is ungated on
-purpose) and `keystore_module.create_unrelated_account` does not, however it is
-spelled: creating an account is Tier D and belongs to the configured custodian.
-Driving `wallet_ui` is how the driver reaches a gated method at all -- it is a
-plainly named module, and it takes the custodian role before it mutates.
+**Two things it cannot reach, and both are easier to hit than to diagnose.**
+
+A `--call` arrives at its target as the HOST ANCHOR -- one undifferentiated
+credential covering the shells, `core_service` and every relayed CLI token -- and
+`keystore_module`'s gate admits it at no tier. Reading is ungated on purpose, so
+`list_accounts` answers; every mutation is Tier D and belongs to the configured
+custodian, so `create_unrelated_account` answers `not authorized` however it is
+spelled.
+
+Driving the module that HOLDS that role is not a way round it. A `ui_qml`
+module's `.rep` SLOTs are its VIEW's contract, published to the page's QML rather
+than as a LogosAPI module surface, so the call is accepted and answers nothing.
+Measured on an iPad Air 13-inch simulator, with the page up and its contract
+already answered (`contract query answered: 30 method(s)`):
+
+```
+[shell] CALL OK wallet_ui.createAccount(hunter2,main) -> (no value)
+```
+
+No refusal, no error, and not one line on the page's console. `(no value)` is
+also what a `void` SLOT answers, which is why this is written down here rather
+than left to be re-measured.
 
 **Arguments are strings unless they say otherwise** -- `int:42`, `bool:true`,
 `json:{"chainId":1}`, and `str:` to be explicit. That is the opposite of what

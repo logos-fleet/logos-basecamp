@@ -25,16 +25,19 @@ struct ModuleCall {
 // was, until this, observable only through some OTHER module that happened to
 // call it.
 //
-//     --call wallet_ui.createAccount(hunter2,main)
 //     --call keystore_module.list_accounts
+//     --call keystore_module.has_address(0xAb..)
 //
-// AND THE MODULE IT NAMES MATTERS. A --call arrives at a module as the HOST
-// ANCHOR -- one undifferentiated credential covering the shells, `core_service`
-// and every relayed CLI token -- so a gated method refuses it however it is
-// spelled. `keystore_module.list_accounts` is ungated and answers; creating an
-// account is Tier D and belongs to the configured custodian, so the driver
-// drives `wallet_ui`, which is a plainly named module and takes that role
-// before it mutates.
+// AND WHAT IT CANNOT REACH, which is worth knowing before a run is built around
+// one. A --call arrives at a module as the HOST ANCHOR -- one undifferentiated
+// credential covering the shells, `core_service` and every relayed CLI token --
+// so a gated method refuses it however it is spelled. On keystore_module,
+// reading is ungated and every mutation is Tier D, admitted to the configured
+// custodian alone. Driving the module that HOLDS that role does not get round
+// it either: a `ui_qml` module's `.rep` SLOTs are its VIEW's contract, published
+// to the page's QML rather than as a LogosAPI module surface, so
+// `--call wallet_ui.createAccount(...)` is accepted, answered with no value, and
+// leaves nothing on the page's console.
 //
 // Repeatable, and run IN ORDER on one connection: "create a key, stop the app,
 // start it again and list" is the shape most persistence questions have, and
