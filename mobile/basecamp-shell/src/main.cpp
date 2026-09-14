@@ -319,7 +319,8 @@ int main(int argc, char* argv[])
         catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app, [network, driver, apps, catalog, calls, finishOnTheApp]() {
+    QTimer::singleShot(0, &app,
+                       [network, driver, apps, catalog, calls, consent, finishOnTheApp]() {
         // The catalog FIRST when there is one: the module it installs is what
         // the Modules tab and the sidebar then have to account for, and a run
         // pointed at a catalog is a developer's rather than a cold-start
