@@ -310,6 +310,152 @@ private slots:
         QCOMPARE(gate.error(), QStringLiteral("the signature on this package does not verify"));
     }
 
+    // ── THE `require` REFUSAL, WHICH IS WHAT A STORE SHELL IS FOR ───────────
+    //
+    // `ShellStoreBackend::configure` sets setSignaturePolicy("require"), and
+    // ADR 0008 fixes the anchor set: the local keyring, populated only by an
+    // explicit act. So the cell that decides whether the gate is ENFORCED or
+    // merely ASSUMED is "signed, valid, and anchored to nothing" — and until
+    // this test existed nothing in this repo drove it. The neighbouring test
+    // above is the desktop's `warn`, which INSTALLS.
+    void underRequireASignerTheKeyringDoesNotVouchForIsRefused()
+    {
+        FakeModules modules;
+        modules.signerAnswer = QVariantMap{
+            {QStringLiteral("name"), QStringLiteral("counter_ui")},
+            {QStringLiteral("version"), QStringLiteral("1.2.0")},
+            {QStringLiteral("signatureStatus"), QStringLiteral("signed")},
+            {QStringLiteral("signerName"), QStringLiteral("Acme Modules")},
+            {QStringLiteral("signerDid"), QStringLiteral("did:jwk:eyJjcnYiOiJFZDI1NTE5")},
+            {QStringLiteral("trusted"), false},
+            {QStringLiteral("trustedAs"), QString()},
+            {QStringLiteral("policy"), QStringLiteral("require")},
+            {QStringLiteral("installable"), false},
+            {QStringLiteral("reason"),
+             QStringLiteral("signed by a key your keyring does not vouch for")},
+        };
+        InstallGate gate(&modules);
+
+        QVERIFY(!gate.begin(installableRow()));
+
+        QCOMPARE(modules.calls.size(), 2);   // downloaded, asked, refused
+        QVERIFY(!modules.calls.contains(QStringLiteral("install:/tmp/counter_ui.lgx")));
+        QCOMPARE(gate.stage(), InstallGate::Stage::Refused);
+        QVERIFY(gate.error().contains(QStringLiteral("does not vouch")));
+        // No prompt: there is nothing to approve. A dialog whose only answer is
+        // no is not consent, it is a dead end with a button on it.
+        QVERIFY(gate.signerPrompt().isEmpty());
+    }
+
+    void aRefusedRequireVerdictCannotBeApprovedPastTheGate()
+    {
+        // The control on the test above. A gate that refused by REPORTING and
+        // then left the flow armed would install on the next tap of Install,
+        // which is the same defect as never having refused.
+        FakeModules modules;
+        modules.signerAnswer[QStringLiteral("installable")] = false;
+        modules.signerAnswer[QStringLiteral("trusted")] = false;
+        modules.signerAnswer[QStringLiteral("trustedAs")] = QString();
+        modules.signerAnswer[QStringLiteral("reason")] =
+            QStringLiteral("signed by a key your keyring does not vouch for");
+        InstallGate gate(&modules);
+
+        QVERIFY(!gate.begin(installableRow()));
+        QVERIFY(!gate.approve());
+
+        QCOMPARE(gate.stage(), InstallGate::Stage::Refused);
+        QVERIFY(!modules.calls.contains(QStringLiteral("install:/tmp/counter_ui.lgx")));
+        QVERIFY(gate.installedPath().isEmpty());
+    }
+
+    // THE DID HAS TO SURVIVE THE REFUSAL, and this is the "who anchors, on a
+    // phone" question (#103) stated as an assertion.
+    //
+    // Under `require` the ONLY way forward from this refusal is for the DID to
+    // enter this device's keyring. package_manager keeps the name and the DID in
+    // its answer for exactly that reason -- "hiding them would remove the only
+    // way forward" (logos-package-manager-module, test_signer_trust.cpp) -- and
+    // one layer down the library's own REQUIRE refusal names the DID in its
+    // error string. The gate threw both away: `refuse()` clears the prompt, and
+    // the Shell was left holding a sentence about a key it could not name.
+    void aRefusalUnderRequireStillNamesTheSignerItRefused()
+    {
+        FakeModules modules;
+        modules.signerAnswer[QStringLiteral("installable")] = false;
+        modules.signerAnswer[QStringLiteral("trusted")] = false;
+        modules.signerAnswer[QStringLiteral("trustedAs")] = QString();
+        modules.signerAnswer[QStringLiteral("reason")] =
+            QStringLiteral("signed by a key your keyring does not vouch for");
+        InstallGate gate(&modules);
+
+        QVERIFY(!gate.begin(installableRow()));
+
+        const QVariantMap refused = gate.refusedSigner();
+        QCOMPARE(refused.value(QStringLiteral("signerDid")).toString(),
+                 QStringLiteral("did:jwk:eyJjcnYiOiJFZDI1NTE5"));
+        QCOMPARE(refused.value(QStringLiteral("signerName")).toString(),
+                 QStringLiteral("Acme Modules"));
+        QCOMPARE(refused.value(QStringLiteral("name")).toString(),
+                 QStringLiteral("counter_ui"));
+        // ...and it is still NOT the prompt. Naming what was refused must not
+        // put an Install button back on screen.
+        QVERIFY(gate.signerPrompt().isEmpty());
+    }
+
+    void anUnsignedRefusalNamesNoSignerBecauseThereIsNone()
+    {
+        // The control that keeps `refusedSigner` honest: it reports what the
+        // verifier found, not a placeholder. An unsigned package has no DID to
+        // anchor, so there is nothing here for a trust affordance to offer.
+        FakeModules modules;
+        modules.signerAnswer = QVariantMap{
+            {QStringLiteral("name"), QStringLiteral("counter_ui")},
+            {QStringLiteral("signatureStatus"), QStringLiteral("unsigned")},
+            {QStringLiteral("installable"), false},
+            {QStringLiteral("reason"),
+             QStringLiteral("this package is unsigned and this build requires a signature")},
+        };
+        InstallGate gate(&modules);
+
+        QVERIFY(!gate.begin(installableRow()));
+        QVERIFY(gate.refusedSigner().isEmpty());
+    }
+
+    void arefusalBeforeTheSignerStepNamesNoSigner()
+    {
+        // Nothing was ever asked, so there is nothing to report. A gate that
+        // carried a stale signer from a previous row here would offer the user
+        // somebody else's DID to anchor.
+        FakeModules modules;
+        modules.downloadAnswer = QVariantMap{
+            {QStringLiteral("name"), QStringLiteral("counter_ui")},
+            {QStringLiteral("error"), QStringLiteral("index fetch failed")},
+        };
+        InstallGate gate(&modules);
+
+        QVERIFY(!gate.begin(installableRow()));
+        QVERIFY(gate.refusedSigner().isEmpty());
+    }
+
+    void aSecondBeginClearsTheFirstRefusedSigner()
+    {
+        FakeModules modules;
+        modules.signerAnswer[QStringLiteral("installable")] = false;
+        modules.signerAnswer[QStringLiteral("reason")] =
+            QStringLiteral("signed by a key your keyring does not vouch for");
+        InstallGate gate(&modules);
+        QVERIFY(!gate.begin(installableRow()));
+        QVERIFY(!gate.refusedSigner().isEmpty());
+
+        FakeModules fresh;
+        InstallGate ok(&fresh);
+        QVERIFY(ok.begin(installableRow()));
+        // ...and on the gate that refused, a successful second begin clears it.
+        modules.signerAnswer[QStringLiteral("installable")] = true;
+        QVERIFY(gate.begin(installableRow()));
+        QVERIFY(gate.refusedSigner().isEmpty());
+    }
+
     void anUntrustedButInstallableSignerStillPrompts()
     {
         // Under the desktop's `warn` policy a signature from an unknown publisher

@@ -78,6 +78,23 @@ void StoreAppManager::setLastError(const QString& error)
 void StoreAppManager::refuseWithGateError()
 {
     setLastError(m_gate.error());
+    // NAME THE DID WHEN THERE IS ONE. Under `require` the common refusal is
+    // "signed by a key your keyring does not vouch for", and the DID is the
+    // only actionable thing about it -- it is what would be anchored, and a
+    // phone has no `lgx keyring` to ask afterwards. `lastError` is the sentence
+    // a view shows; this is the line a developer reads off the console to know
+    // what to pass to --trust-signer.
+    const QVariantMap refused = m_gate.refusedSigner();
+    const QString did = refused.value(QStringLiteral("signerDid")).toString();
+    if (!did.isEmpty()) {
+        emit log(QStringLiteral("%1: refused — %2; signer %3 (%4)")
+                     .arg(refused.value(QStringLiteral("name")).toString().isEmpty()
+                              ? m_installing
+                              : refused.value(QStringLiteral("name")).toString(),
+                          m_gate.error(),
+                          refused.value(QStringLiteral("signerName")).toString(),
+                          did));
+    }
     emit signerPromptChanged();
 }
 
