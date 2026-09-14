@@ -539,7 +539,6 @@
           };
 
           target = bundledSetLib.variantForSystem.${system};
-          isAndroid = system == "aarch64-android";
           signingKey = { inherit (catalogTestKey) name jwk; };
 
           # One catalog entry per Bare module, and they are all the same shape:
@@ -723,7 +722,7 @@
               variants.${target} = chatUiPayload;
               inherit signingKey;
             };
-          } // nixpkgs.lib.optionalAttrs (!isAndroid) {
+
             # ── the two package modules (slice 29) ────────────────────────
             # What turns `ShellStoreBackend::hasCatalog()` from false into a
             # catalog: the App Manager browses through package_downloader and
@@ -731,16 +730,15 @@
             # carries them the only way a phone allows -- inside the app image,
             # at build time (ADR 0007).
             #
-            # iOS ONLY, and the refusal on the other side is the honest one.
-            # Both libraries reach a phone as STATIC archives (logos-package's
-            # lgx, logos-package-manager's lgpm, logos-package-downloader's lgpd
-            # with curl and OpenSSL folded in), which is what iOS wants anyway.
-            # The same libraries cross-compile for Android as SHARED objects,
-            # and a Bare module linking liblgx.so would need liblgx.so in the
-            # APK beside it -- a second, unbundled soname that the Android
-            # DT_NEEDED gate refuses by design. So `--bundle package_manager
-            # --target android-arm64` is refused BY NAME rather than half-built,
-            # which is the shape every "no variant for this target" answer has.
+            # BOTH PHONES, and on both for the same reason spelled differently.
+            # Each library reaches a phone as ONE STATIC ARCHIVE
+            # (logos-package's lgx, logos-package-manager's lgpm,
+            # logos-package-downloader's lgpd with curl and OpenSSL folded in):
+            # iOS loads no dynamic library of its own, and an Android APK may
+            # not carry the unbundled sonames a shared build would name -- the
+            # DT_NEEDED gate refuses them. Android was the later of the two
+            # (#99) because it also needed a Unicode backend the NDK has:
+            # lgx normalizes paths through utf8proc there, not ICU.
             package_manager = mkBareSpec {
               name = "package_manager";
               version = logos-package-manager-module.config.version;
