@@ -208,6 +208,30 @@ bool ShellStoreBackend::subscribeToConsent(basecamp::appmanager::StoreAppManager
     return m_consentSubscribed;
 }
 
+bool ShellStoreBackend::declareModuleOrigin(const QString& moduleName, const QString& origin)
+{
+    // LOADED, not merely present: this is a call, and the Native container
+    // brings a Bundled member up only when something asks for it.
+    if (!ensureLoaded(kCapabilityModule))
+        return false;
+    // The same trusted-channel credential decideConsent uses, and the same
+    // reason it is required: an origin a module could declare for itself is not
+    // a fact about the module.
+    const std::string trusted = logos::host::tokenFor("capability_module");
+    if (trusted.empty())
+        return false;
+    const QVariant result = call(kCapabilityModule, QStringLiteral("setModuleOrigin"),
+                                 {QString::fromStdString(trusted), moduleName, origin});
+    return result.toMap().value(QStringLiteral("success"), false).toBool();
+}
+
+QVariantMap ShellStoreBackend::consentStatus(const QString& caller, const QString& target)
+{
+    if (!ensureLoaded(kCapabilityModule))
+        return {};
+    return call(kCapabilityModule, QStringLiteral("consentStatus"), {caller, target}).toMap();
+}
+
 bool ShellStoreBackend::hasCatalog() const
 {
     // What configure() actually managed to bring up. Both, for the reason stated

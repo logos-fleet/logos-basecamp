@@ -48,6 +48,8 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/ShellAppDriver.h
     ${SRC}/ShellCatalogDriver.cpp
     ${SRC}/ShellCatalogDriver.h
+    ${SRC}/ShellConsentDriver.cpp
+    ${SRC}/ShellConsentDriver.h
     ${SRC}/ShellCallDriver.cpp
     ${SRC}/ShellCallDriver.h
     ${SRC}/ShellStoreBackend.cpp
@@ -58,6 +60,8 @@ add_library(basecamp_shell_host STATIC
     ${BASECAMP_MOBILE}/appmanager/CatalogSource.h
     ${BASECAMP_MOBILE}/appmanager/ConsentQueue.cpp
     ${BASECAMP_MOBILE}/appmanager/ConsentQueue.h
+    ${BASECAMP_MOBILE}/appmanager/ConsentScript.cpp
+    ${BASECAMP_MOBILE}/appmanager/ConsentScript.h
     ${BASECAMP_MOBILE}/appmanager/InstallGate.cpp
     ${BASECAMP_MOBILE}/appmanager/InstallGate.h
     ${BASECAMP_MOBILE}/appmanager/ModuleCallScript.cpp
@@ -97,6 +101,7 @@ install(FILES
     ${SRC}/ShellModulesDriver.h
     ${SRC}/ShellAppDriver.h
     ${SRC}/ShellCatalogDriver.h
+    ${SRC}/ShellConsentDriver.h
     ${SRC}/ShellCallDriver.h
     ${BASECAMP_APP}/ModuleInstanceModel.h
     ${BASECAMP_APP}/CoreModuleManager.h
@@ -111,6 +116,7 @@ install(FILES
     ${BASECAMP_MOBILE}/appmanager/CatalogEntry.h
     ${BASECAMP_MOBILE}/appmanager/CatalogSource.h
     ${BASECAMP_MOBILE}/appmanager/ConsentQueue.h
+    ${BASECAMP_MOBILE}/appmanager/ConsentScript.h
     ${BASECAMP_MOBILE}/appmanager/InstallGate.h
     ${BASECAMP_MOBILE}/appmanager/ModuleCallScript.h
     ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.h

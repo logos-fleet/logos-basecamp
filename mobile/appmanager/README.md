@@ -10,10 +10,14 @@ two prompts a store requires before either happens.
                     to anchor, the row to install -- and what it refuses
   InstallGate       the order an install happens in, and the three places it stops
   ConsentQueue      the 4.7.3 prompt queue: one dialog at a time, one per pair
+  ConsentScript     what a LAUNCH was asked to answer that prompt with, off the
+                    command line: deny, grant, dismiss, expect-granted
   StoreAppManager   the QML-facing object that owns the three
 
   ../basecamp-shell/src/ShellStoreBackend.cpp   the one seam, over the real modules
   ../basecamp-shell/src/ShellCatalogDriver.cpp  the run that exercises all of it
+  ../basecamp-shell/src/ShellConsentDriver.cpp  the consent half of that run,
+                                                across two launches
 ```
 
 Almost none of it is platform code, and none of it is a module. What a Store
@@ -101,6 +105,27 @@ That leaves the Shell holding what capability_module deliberately did not solve:
 - **A dismissal is not a denial.** A denial *persists* in capability_module, so
   recording "not now" as "never" would be permanent. `dismiss()` records nothing
   and lets the pair be announced again.
+
+### The origin is the host's to declare, and nothing else knows it
+
+The whole gate is a function of where each module came from, and capability_module
+is told rather than asked. It cannot ask the module (it has every reason to lie),
+the core does not know (a Downloaded module is discovered in a scanned directory
+exactly as a shipped one is), and capability_module deliberately does not persist
+it -- an app image can change under a device between launches, so a remembered
+origin would outlive the fact.
+
+So `ShellModulesBackend::declareModuleOrigins` calls `setModuleOrigin` for every
+module the app image carries and every module the user installed: at startup,
+because a module installed by an EARLIER launch is already on disk and its first
+call this launch must still be gated, and again before each new install is
+loaded, because a `web` module starts calling out while it comes up.
+
+**Forgetting it fails silently and open.** An undeclared module is `bundled`,
+which is the right default for the desktop and for every build that has never
+installed anything -- and which also means the gate simply never fires. A Store
+shell that never prompted looked exactly like one where nobody had installed
+anything.
 
 The answer goes back through `decideConsent`, authenticated with
 capability_module's own token — the trusted core channel, which the **host**

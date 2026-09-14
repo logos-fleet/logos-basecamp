@@ -304,6 +304,10 @@ src/ShellCatalogDriver.*    what the app does NOT ship: add a repository, read
                             the catalog, install a row and open it -- driven by
                             the command line, because the catalog a device is
                             pointed at is not a property of the build
+src/ShellConsentDriver.*    the 4.7.3 prompt, answered: deny, watch the
+                            Downloaded module's next call still fail, grant,
+                            watch it succeed -- and on a SECOND launch, that the
+                            grant was already there
 src/main.cpp                core up, shell up, drive, shut down cleanly
 stage/CMakeLists.txt        the pure half — one static archive, built by nix
 app/CMakeLists.txt          the impure half — the Xcode link, embed and sign
@@ -362,6 +366,58 @@ in; only a `ui_qml` one's page is a user interface. The package's declared
 `type` is what tells them apart (`MobileWebModuleView::servesUi`), and reading
 a page as evidence of a UI gave the first headless module a tile onto a blank
 document.
+
+## Answering the consent prompt
+
+```
+--consent <caller>.<target>=<step>[,<step>...]     repeatable
+```
+
+capability_module refuses a call between a Downloaded module and anything else
+until the user has decided (App Store guideline 4.7.3), announces
+`consentRequired`, and lets the caller's NEXT attempt carry the answer -- it
+cannot hold a dispatch thread open for as long as a person takes to read a
+dialog. The steps are the answers this launch gives:
+
+```
+deny             wait for the prompt, answer NO, and assert the caller's next
+                 attempt is refused with capability_module's own reason
+grant            record a grant and assert the next attempt succeeds. No prompt
+                 is waited for: a pair with a decision is never re-announced, so
+                 changing a denial into a grant is a decision, not a dialog
+dismiss          "not now" -- drop the prompt, record nothing, and assert the
+                 pair is still undecided
+expect-granted   assert the pair is ALREADY granted at startup, that no prompt
+                 appears, and that the call goes through
+```
+
+TWO LAUNCHES, because the last criterion is a store on disk and only a second
+launch of the app reads it:
+
+```bash
+# 1. install it, deny, then grant
+nix run --impure .#run-basecamp-shell-ios-sim -- \
+  --repository http://127.0.0.1:8099/logos-repo.json \
+  --trust-signer logos-catalog-test=did:jwk:... \
+  --install web_counter_b \
+  --consent web_counter_b.package_manager=deny,grant
+
+# 2. relaunch -- nothing installs, nothing is answered, and the call just works
+xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
+  --consent web_counter_b.package_manager=expect-granted
+```
+
+`web_counter_b`'s QML calls `package_manager.getInstalledPackages` and RETRIES
+while it is being refused (logos-module-builder's `web-view-counter` fixture),
+which is what makes a decision observable at all: the refusal, the denial and
+the grant are three different answers to the same call.
+
+**The origins are the Shell's to declare.** capability_module's gate is a
+function of where each module came from, it does not persist that (an app image
+can change between launches), and a module cannot be asked -- so
+`ShellModulesBackend::declareModuleOrigins` tells it, at startup and again
+before each newly installed module is loaded. Undeclared, every module is
+`bundled`, every call is allowed, and no prompt ever appears.
 
 ## Calling a module from the command line
 
