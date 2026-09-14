@@ -4,6 +4,7 @@
 #include "InstallEnums.h"
 #include "ShortcutBridge.h"
 #include "WorkspaceArea.h"
+#include "ShellWindowFloor.h"
 
 #include <QQuickWidget>
 #include <QQmlEngine>
@@ -351,8 +352,13 @@ void MainContainer::setupUi()
     // Set initial state — Apps section (workspace) visible by default.
     m_contentStack->setCurrentIndex(kAppsStackIndex);
 
-    // Set reasonable minimum size
-    setMinimumSize(800, 600);
+    // Set reasonable minimum size -- but only as far as the screen can hold
+    // it. A minimum is a request to a window manager, and a phone has none:
+    // Qt honours a floor larger than the display by letting the layout
+    // OVERFLOW it, which is how the Modules tab's Load/Unload control ended up
+    // ~300 pt off the right edge of an iPhone 16 Pro while the Settings pane
+    // itself still "contained" it (logos-workspace#87).
+    setMinimumSize(basecamp::shellWindowFloorForThisScreen(QSize(800, 600)));
 }
 
 void MainContainer::resizeEvent(QResizeEvent* event)

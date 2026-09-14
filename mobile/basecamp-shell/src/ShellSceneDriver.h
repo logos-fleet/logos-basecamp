@@ -15,6 +15,8 @@
 
 #include <QObject>
 #include <QPointF>
+#include <QRectF>
+#include <QSizeF>
 #include <QString>
 
 #include <functional>
@@ -22,6 +24,28 @@
 class QQuickItem;
 class QQuickWidget;
 class QWidget;
+
+namespace basecamp::shell {
+
+// Whether a synthesised press is one a FINGER could have made. Two questions,
+// and the second is not implied by the first:
+//
+//   1. does the control's own surface show `inSurface`? (a row scrolled out of
+//      its table, logos-workspace#84)
+//   2. does the screen show where that lands, `onScreen`?
+//
+// (2) exists because a Qt layout handed less room than its minimum does not
+// shrink, it OVERFLOWS: on the iPhone 16 Pro the Shell laid itself out 784 pt
+// wide on a 402-pt screen, so the Modules row's toggle was well inside its own
+// 704-pt pane and ~300 pt past the edge of the phone (logos-workspace#87). A
+// driver that asks only (1) presses it by coordinate -- which is the one thing
+// a person cannot do -- and reports the tab green.
+//
+// An empty `screen` (nothing to ask) leaves (1) as the whole answer.
+bool pressIsReachable(const QPointF& inSurface, const QSizeF& surface,
+                      const QPointF& onScreen, const QRectF& screen);
+
+} // namespace basecamp::shell
 
 class ShellSceneDriver : public QObject
 {

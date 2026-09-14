@@ -268,13 +268,25 @@ adds the column set up and pins the number to it.
 
 Wider than both, the desktop layout is untouched.
 
-So `tap()` no longer works around an off-screen control — a control the
-viewport does not contain is a layout regression and the run says so:
+So `tap()` no longer works around an off-screen control — a control a finger
+could not reach is a layout regression and the run says so:
 
 ```
-WRONG: 'moduleRow.loadToggle.bare_counter' is at (1000, 327), outside the
-704x763 viewport -- no touch can reach it on this screen
+WRONG: 'moduleRow.loadToggle.bare_counter' is at (630, 354) of a 704x763 view,
+at (714, 445) on a 402x874 screen -- no touch can reach it on this screen
 ```
+
+Two rectangles, and the second is not implied by the first (`pressIsReachable`).
+The pane containing the control proves nothing about the phone containing the
+pane: a Qt layout handed less room than its minimum does not shrink, it
+overflows. The iPhone 16 Pro is where that mattered — `MainContainer` asked for
+a desktop's 800×600 floor, so the Shell laid itself out 784 pt wide on a 402-pt
+screen, the Settings pane inside it was 704 pt wide, and the toggle sat
+comfortably inside its own pane and ~300 pt past the edge of the display. The
+driver pressed it by coordinate (the one thing a person cannot do) and reported
+the tab green. `shellWindowFloor()` caps that floor at the screen now, and the
+second rectangle is what keeps the verdict honest if anything else ever
+overflows (logos-workspace#87).
 
 The one thing it does scroll is the section strip, which is a horizontal
 scroller by design and which a finger would swipe (`scrollIntoView`).
@@ -295,9 +307,13 @@ where each press went, so a future miss is diagnosable from the log:
 
 `tests/qml/tst_SettingsMobileLayout.qml` (in `nix build .#qml-tests`, seconds,
 no Mac) is the same assertion without a device: it builds the real
-`SettingsView` at 402×874, 928×1326 and 1440×900, checks each row's toggle is
-inside the window, and then presses it — an off-screen control gets no click
-and the signal spy stays at zero.
+`SettingsView` at 306×834, 724×1140, 928×1326 and 1440×900, checks each row's
+toggle is inside the window, and then presses it — an off-screen control gets
+no click and the signal spy stays at zero. Those are PANE sizes, not screen
+sizes: `MainContainer` spends 96 px of the width on the sidebar and its insets
+and about 40 of the height on the tab bar before a Settings view sees any of
+it, so an iPhone 16 Pro's 402×874 arrives there as 306×834 and an iPad Air 13's
+1024×1366 as 928×1326.
 
 ## Layout
 
