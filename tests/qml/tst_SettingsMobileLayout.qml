@@ -32,16 +32,19 @@ TestCase {
             name: "bare_counter"; label: "Bare Counter"; statusText: "Not loaded"
             description: "A counter with no UI"; version: "1.0.0"
             isLoaded: false; isMainUi: false; cpu: 0.0; memory: 0.0
+            statsMeasured: false
         }
         ListElement {
             name: "view_counter"; label: "View Counter"; statusText: "Loaded"
             description: "A counter with a view"; version: "1.0.0"
             isLoaded: true; isMainUi: false; cpu: 1.5; memory: 12.5
+            statsMeasured: true
         }
         ListElement {
             name: "main_ui"; label: "Basecamp Shell"; statusText: "Loaded"
             description: "This app"; version: "1.0.0"
             isLoaded: true; isMainUi: true; cpu: 3.0; memory: 40.0
+            statsMeasured: true
         }
     }
 
@@ -52,6 +55,7 @@ TestCase {
             name: "counter_ui"; label: "Counter"; statusText: "Not loaded"
             description: "Counter's interface"; version: "1.0.0"
             isLoaded: false; isMainUi: false; cpu: 0.0; memory: 0.0; iconPath: ""
+            statsMeasured: false
         }
     }
 

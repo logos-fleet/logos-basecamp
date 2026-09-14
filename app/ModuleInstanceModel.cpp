@@ -50,6 +50,7 @@ QVariant ModuleInstanceModel::data(const QModelIndex& index, int role) const
     case StatusTextRole:      return r.statusText();
     case CpuRole:             return r.cpu;
     case MemoryRole:          return r.memory;
+    case StatsMeasuredRole:   return r.statsMeasured;
     }
     return {};
 }
@@ -71,6 +72,7 @@ QHash<int, QByteArray> ModuleInstanceModel::roleNames() const
         {StatusTextRole,      "statusText"},
         {CpuRole,             "cpu"},
         {MemoryRole,          "memory"},
+        {StatsMeasuredRole,   "statsMeasured"},
     };
 }
 
@@ -99,6 +101,10 @@ ModuleInstanceModel::Row ModuleInstanceModel::toRow(const QVariantMap& m)
     ok = false;
     const double mem = m.value(QStringLiteral("memory")).toDouble(&ok);
     r.memory = ok ? mem : 0.0;
+    // Absent means "this snapshot has no opinion", which is what a builder that
+    // predates the flag produces — and the honest reading of a row whose
+    // figures are a coerced zero is that nothing measured it.
+    r.statsMeasured = m.value(QStringLiteral("statsMeasured")).toBool();
     return r;
 }
 
@@ -127,6 +133,7 @@ QList<int> ModuleInstanceModel::diffRoles(const Row& a, const Row& b)
     }
     if (a.cpu    != b.cpu)    roles.append(CpuRole);
     if (a.memory != b.memory) roles.append(MemoryRole);
+    if (a.statsMeasured != b.statsMeasured) roles.append(StatsMeasuredRole);
     return roles;
 }
 

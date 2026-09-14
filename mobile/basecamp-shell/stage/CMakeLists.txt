@@ -74,6 +74,8 @@ add_library(basecamp_shell_host STATIC
     ${BASECAMP_APP}/ModuleInstanceModel.h
     ${BASECAMP_APP}/CoreModuleManager.cpp
     ${BASECAMP_APP}/CoreModuleManager.h
+    ${BASECAMP_APP}/ModuleStatsCells.cpp
+    ${BASECAMP_APP}/ModuleStatsCells.h
 )
 
 target_include_directories(basecamp_shell_host PUBLIC

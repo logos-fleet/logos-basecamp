@@ -76,7 +76,13 @@ struct ModuleInstanceRoles {
         IsMainUiRole,
         HasMissingDepsRole,
         StatusTextRole,        // derived: Main UI / Missing deps / Loaded / Not loaded
-        CpuRole,               // core modules only; 0 when unknown
-        MemoryRole,            // core modules only; 0 when unknown
+        CpuRole,               // core modules only; 0 when unmeasured
+        MemoryRole,            // core modules only; 0 when unmeasured
+        // Whether cpu/memory are a READING at all. A module with no process
+        // and a container that cannot account for it is not idle — nobody
+        // looked — and a row that draws 0.0 MB for it is claiming a
+        // measurement that was never made (#86). False makes the cells show
+        // the same em dash an unloaded row gets.
+        StatsMeasuredRole,
     };
 };

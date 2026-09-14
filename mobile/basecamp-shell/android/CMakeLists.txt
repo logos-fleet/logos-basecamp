@@ -71,7 +71,8 @@ qt_add_executable(BasecampShell
     ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.cpp ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.h
     ${BASECAMP_MOBILE}/appmanager/StoreAppManager.cpp ${BASECAMP_MOBILE}/appmanager/StoreAppManager.h
     ${BASECAMP_APP}/ModuleInstanceModel.cpp ${BASECAMP_APP}/ModuleInstanceModel.h
-    ${BASECAMP_APP}/CoreModuleManager.cpp ${BASECAMP_APP}/CoreModuleManager.h)
+    ${BASECAMP_APP}/CoreModuleManager.cpp ${BASECAMP_APP}/CoreModuleManager.h
+    ${BASECAMP_APP}/ModuleStatsCells.cpp ${BASECAMP_APP}/ModuleStatsCells.h)
 
 include(${SMOKE_CMAKE}/LogosSmokeRoots.cmake)
 logos_smoke_add_include_roots(BasecampShell PRIVATE "${LOGOS_INCLUDE_ROOTS}")
