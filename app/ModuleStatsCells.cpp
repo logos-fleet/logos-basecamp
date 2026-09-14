@@ -14,7 +14,7 @@ namespace {
 // idle fell straight through every spelling and ended up at zero by accident
 // rather than by measurement. It also meant a runtime spelling it `cpu_percent`
 // was indistinguishable from one reporting nothing.
-QString figure(const QVariantMap& entry, const QStringList& keys, bool& measured)
+QString figure(const QVariantMap& entry, const QStringList& keys)
 {
     for (const QString& key : keys) {
         const QVariant value = entry.value(key);
@@ -27,7 +27,6 @@ QString figure(const QVariantMap& entry, const QStringList& keys, bool& measured
         const double number = value.toDouble(&ok);
         if (!ok)
             continue;
-        measured = true;
         return QString::number(number, 'f', 1);
     }
     return {};
@@ -43,14 +42,16 @@ ModuleStatsCells moduleStatsCells(const QVariantMap& entry)
     cells.cpu = figure(entry,
                        {QStringLiteral("cpuPercent"),
                         QStringLiteral("cpu_percent"),
-                        QStringLiteral("cpu")},
-                       cells.measured);
+                        QStringLiteral("cpu")});
     cells.memory = figure(entry,
                           {QStringLiteral("memoryMb"),
                            QStringLiteral("memory_mb"),
                            QStringLiteral("memory"),
-                           QStringLiteral("memory_MB")},
-                          cells.measured);
+                           QStringLiteral("memory_MB")});
+    // A reported figure is never the empty string — QString::number gives at
+    // least "0.0" — so an empty cell is exactly a figure nobody reported, and
+    // one of the two is enough to call the row measured.
+    cells.measured = !cells.cpu.isEmpty() || !cells.memory.isEmpty();
     return cells;
 }
 

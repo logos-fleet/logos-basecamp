@@ -131,6 +131,7 @@ void ShellModulesDriver::run()
     // too -- the two fold into one line inside the module cell. Asking only
     // for the desktop pair would report "no stats cells" for a table that is
     // showing its stats perfectly well.
+    //
     // WHICH ROWS OWE A FIGURE, which used to be "at least one of them" and is
     // now stated per row -- both halves of that were wrong.
     //
@@ -176,6 +177,7 @@ void ShellModulesDriver::run()
         // The folded line is hidden on a row with no measurement to show -- an
         // unloaded one, or a loaded one nothing could account for -- so only a
         // row that owes a figure owes it here.
+        //
         // WHAT IS ON SCREEN, not what the binding computed. The folded line's
         // text is evaluated whether or not the line is shown, so reporting it
         // unconditionally printed "0.0%  ·  0.0 MB" for rows that were
