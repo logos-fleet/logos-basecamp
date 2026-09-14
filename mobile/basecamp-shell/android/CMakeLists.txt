@@ -43,11 +43,12 @@ logos_mobile_host_sources(LOGOS_HOST_SOURCES)
 # binds one and drives the other, so a mobile copy of either would be a second
 # definition of what a row is and of what "load" means.
 #
-# ViewModuleRunner is here because BundledSetShellHost mounts one, not because
-# this platform has a view module to mount: the mobile catalog publishes no
-# `ui_qml` variant for Android, so no Bundled set built here carries one and
-# the Shell's app launcher comes up empty. The day a view .so exists, this is
-# the file that opens it.
+# ViewModuleRunner is here because BundledSetShellHost mounts one -- and now it
+# has one to mount on this platform too: logos-module-builder publishes an
+# Android `view` image (a plain lib<stem>_view.so naming the app's Qt in
+# DT_NEEDED), so a Bundled set built here can carry a `ui_qml` member and the
+# Shell's app launcher shows its tile. Same file on both phones, which is the
+# point.
 qt_add_executable(BasecampShell
     ${SHELL_SRC}/main.cpp
     ${LOGOS_HOST_SOURCES}
@@ -86,9 +87,10 @@ if(NOT LOGOS_VIEW_RUNTIME_INCLUDE)
 endif()
 target_include_directories(BasecampShell PRIVATE ${LOGOS_VIEW_RUNTIME_INCLUDE})
 
-# Which image the view runner opens, as the module's stem. Empty on Android
-# for the reason above -- a set here cannot carry a view module -- and the
-# runner asks the manifest rather than assuming one is there.
+# Which image the view runner opens, as the module's stem -- resolved by nix out
+# of the Bundled set, exactly as on iOS. Still empty when the set carries no
+# `ui_qml` member at all, and the Shell asks the manifest rather than assuming
+# one is there.
 target_compile_definitions(BasecampShell
     PRIVATE LOGOS_VIEW_MODULE_STEM="${LOGOS_VIEW_MODULE_STEM}")
 

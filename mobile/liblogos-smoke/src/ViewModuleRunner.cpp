@@ -52,9 +52,25 @@ constexpr unsigned kSupportedViewAbi = 1;
 #  error "LOGOS_VIEW_MODULE_STEM must be defined by the build (see stage/CMakeLists.txt)"
 #endif
 
+// WHERE THE IMAGE SITS, RELATIVE TO THE DIRECTORY THE LOGOS CODE LOADED FROM.
+// The two platforms put a module image in the one place their loader will open
+// it from, and they are not the same place or the same shape:
+//
+//   iOS      <App>.app/Frameworks/<stem>.framework/<stem> -- a flat embedded
+//            framework bundle, which is the only form an iOS app may carry a
+//            dynamic library in, written by Xcode's "Embed Frameworks" phase.
+//   Android  <nativeLibraryDir>/lib<stem>.so -- flat, beside liblogos_core.so
+//            and the app's other libraries. An APK carries only files matching
+//            lib*.so (androiddeployqt drops anything else), and since API 29
+//            the native library directory is the only place dlopen() may load
+//            from at all. Same naming rule the Bundled Bare modules follow.
 QString viewImageSuffix(const QString& stem)
 {
+#ifdef Q_OS_ANDROID
+    return QStringLiteral("/lib%1.so").arg(stem);
+#else
     return QStringLiteral("/Frameworks/%1.framework/%1").arg(stem);
+#endif
 }
 
 // Same question, same answer, as BundledModuleRunner: the directory the Logos
@@ -161,7 +177,8 @@ bool ViewModuleRunner::run(QQuickWidget* surface)
     }
     emit log(QStringLiteral("view image: %1").arg(imagePath));
     if (!QFileInfo::exists(imagePath)) {
-        emit log(QStringLiteral("view module: no framework at that path (embed step did not run?)"));
+        emit log(QStringLiteral("view module: no image at that path "
+                                "(the Bundled set did not stage it?)"));
         return false;
     }
 
