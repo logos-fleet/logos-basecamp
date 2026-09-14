@@ -722,7 +722,7 @@
               variants.${target} = chatUiPayload;
               inherit signingKey;
             };
-          } // {
+
             # ── the two package modules (slice 29) ────────────────────────
             # What turns `ShellStoreBackend::hasCatalog()` from false into a
             # catalog: the App Manager browses through package_downloader and
