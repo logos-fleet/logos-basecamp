@@ -8,8 +8,15 @@
 // can reach the core is the app, and the only way into the app is its
 // arguments.
 //
-//   --call keystore_module.new_account(hunter2)
 //   --call keystore_module.list_accounts
+//   --call keystore_module.has_address(0xAb..)
+//
+// READS, on a keystore. A --call arrives as the host anchor, which no tier of
+// that module's gate admits, so every mutation answers "not authorized" here;
+// reading is ungated and answers properly. And driving the module that holds the
+// custodian role is not a way round it -- a `ui_qml` module's `.rep` SLOTs are
+// its view's contract, not a LogosAPI surface, so `--call wallet_ui.createAccount`
+// comes back with no value and never reaches the page.
 //
 // WHAT IT PROVES THAT NOTHING ELSE HERE CAN. Run twice across an app restart it
 // is a persistence test: a `web` module's store lives in its page, the page dies
