@@ -52,6 +52,48 @@ QString knownStepWords()
     return words.join(QStringLiteral(", "));
 }
 
+// ONE `<caller>.<target>=<steps>`, or the sentence saying why it is not one.
+// The refusal is the other half of the answer, never a silent drop: a phone's
+// whole diagnostic surface is one console.
+bool parsePlan(const QString& spec, ConsentScript::Plan* plan, QString* refusal)
+{
+    const int eq = spec.indexOf(QLatin1Char('='));
+    if (eq <= 0 || eq == spec.size() - 1) {
+        *refusal = QStringLiteral("%1: expected <caller>.<target>=<steps>").arg(spec);
+        return false;
+    }
+
+    // The pair. A module name is a registry identifier and carries no dot, so
+    // the FIRST one separates the two -- and a head with none of them names one
+    // module, which is not a pair and cannot be consented to.
+    const QString head = spec.left(eq);
+    const int dot = head.indexOf(QLatin1Char('.'));
+    if (dot <= 0 || dot == head.size() - 1) {
+        *refusal = QStringLiteral("%1: expected <caller>.<target> before '='").arg(spec);
+        return false;
+    }
+
+    plan->source = spec;
+    plan->caller = head.left(dot);
+    plan->target = head.mid(dot + 1);
+
+    // AN UNKNOWN WORD TAKES THE WHOLE PLAN WITH IT. Half a script is worse than
+    // none: "deny,grnat" would otherwise deny and then quietly never grant, and
+    // the run would report a refusal a grant was supposed to clear.
+    const QStringList words = spec.mid(eq + 1).split(QLatin1Char(','));
+    for (const QString& word : words) {
+        const QString wanted = word.trimmed();
+        ConsentScript::Step step{};
+        if (!parseStep(wanted, &step)) {
+            *refusal = QStringLiteral("%1: '%2' is not a consent step (%3)")
+                           .arg(spec, wanted, knownStepWords());
+            return false;
+        }
+        plan->steps << step;
+    }
+    return true;
+}
+
 } // namespace
 
 QString ConsentScript::stepName(Step step)
@@ -76,44 +118,12 @@ ConsentScript ConsentScript::fromArguments(const QStringList& args)
             continue;
         }
 
-        const int eq = spec.indexOf(QLatin1Char('='));
-        if (eq <= 0 || eq == spec.size() - 1) {
-            out.m_refusals << QStringLiteral("%1: expected <caller>.<target>=<steps>").arg(spec);
-            continue;
-        }
-
-        // The pair. A module name is a registry identifier and carries no dot,
-        // so the FIRST one separates the two -- and a head with none of them
-        // names one module, which is not a pair and cannot be consented to.
-        const QString head = spec.left(eq);
-        const int dot = head.indexOf(QLatin1Char('.'));
-        if (dot <= 0 || dot == head.size() - 1) {
-            out.m_refusals << QStringLiteral("%1: expected <caller>.<target> before '='").arg(spec);
-            continue;
-        }
-
         Plan plan;
-        plan.source = spec;
-        plan.caller = head.left(dot);
-        plan.target = head.mid(dot + 1);
-
-        bool refused = false;
-        const QStringList words = spec.mid(eq + 1).split(QLatin1Char(','));
-        for (const QString& word : words) {
-            Step step{};
-            if (!parseStep(word.trimmed(), &step)) {
-                out.m_refusals
-                    << QStringLiteral("%1: '%2' is not a consent step (%3)")
-                           .arg(spec, word.trimmed(), knownStepWords());
-                refused = true;
-                break;
-            }
-            plan.steps << step;
-        }
-        if (refused || plan.steps.isEmpty())
-            continue;
-
-        out.m_plans << plan;
+        QString refusal;
+        if (parsePlan(spec, &plan, &refusal))
+            out.m_plans << plan;
+        else
+            out.m_refusals << refusal;
     }
 
     return out;

@@ -71,10 +71,10 @@ private:
     using Plan = basecamp::appmanager::ConsentScript::Plan;
     using Step = basecamp::appmanager::ConsentScript::Step;
 
-    // Turn the loop for `ms`, or until `done` answers true. Returns what `done`
-    // last answered. Pumping rather than sleeping is the whole job: the page
-    // being watched runs on THIS thread, so a driver that blocked would be
-    // waiting for something it was itself preventing.
+    // Turn the loop for `ms`, or until `done` answers true -- which is what is
+    // returned, false meaning the time ran out. Pumping rather than sleeping is
+    // the whole job: the page being watched runs on THIS thread, so a driver
+    // that blocked would be waiting for something it was itself preventing.
     bool pumpUntil(int ms, const std::function<bool()>& done);
 
     // The prompt on screen for this pair, or an invalid map. Waits.

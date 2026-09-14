@@ -65,6 +65,14 @@ CallAnswer readAnswer(const QString& payload)
     return answer;
 }
 
+// Whether the dialog on screen is the one this plan is about. Asked by the wait
+// and again by `grant`, which answers a prompt only when there is one.
+bool promptIsFor(const QVariantMap& prompt, const ConsentScript::Plan& plan)
+{
+    return prompt.value(QStringLiteral("caller")).toString() == plan.caller
+        && prompt.value(QStringLiteral("target")).toString() == plan.target;
+}
+
 // The pair, as every console line in here names it.
 QString pairName(const ConsentScript::Plan& plan)
 {
@@ -96,13 +104,12 @@ bool ShellConsentDriver::pumpUntil(int ms, const std::function<bool()>& done)
 {
     QElapsedTimer since;
     since.start();
-    for (;;) {
-        if (done())
-            return true;
+    while (!done()) {
         if (since.elapsed() >= ms)
-            return done();
+            return false;
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
     }
+    return true;
 }
 
 QVariantMap ShellConsentDriver::awaitPrompt(const Plan& plan, int ms)
@@ -111,12 +118,10 @@ QVariantMap ShellConsentDriver::awaitPrompt(const Plan& plan, int ms)
     QVariantMap found;
     pumpUntil(ms, [&]() {
         const QVariantMap p = manager->consentPrompt();
-        if (p.value(QStringLiteral("caller")).toString() == plan.caller
-            && p.value(QStringLiteral("target")).toString() == plan.target) {
-            found = p;
-            return true;
-        }
-        return false;
+        if (!promptIsFor(p, plan))
+            return false;
+        found = p;
+        return true;
     });
     return found;
 }
@@ -267,10 +272,7 @@ bool ShellConsentDriver::runGrant(const Plan& plan)
     // rather than being left holding a question that has been answered behind
     // its back.
     const int before = int(m_lines.size());
-    const QVariantMap prompt = manager->consentPrompt();
-    const bool onScreen =
-        prompt.value(QStringLiteral("caller")).toString() == plan.caller
-        && prompt.value(QStringLiteral("target")).toString() == plan.target;
+    const bool onScreen = promptIsFor(manager->consentPrompt(), plan);
     if (onScreen)
         manager->answerConsent(true);
     else if (!m_backend->decideConsent(plan.caller, plan.target, true)) {
