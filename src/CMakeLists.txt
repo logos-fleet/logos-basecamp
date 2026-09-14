@@ -44,6 +44,8 @@ set(SOURCES
     MainContainer.cpp
     WorkspaceArea.h
     WorkspaceArea.cpp
+    ShellWindowFloor.h
+    ShellWindowFloor.cpp
     ShortcutBridge.h
     ShortcutBridge.cpp
     ${BASECAMP_INTERFACES}/IShellHost.h

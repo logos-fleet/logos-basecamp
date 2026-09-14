@@ -9,6 +9,7 @@
 #include <QVariant>
 #include <QQuickItem>
 #include <QQuickWidget>
+#include <QScreen>
 #include <QUrl>
 #include <QWidget>
 
@@ -52,7 +53,30 @@ void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
         walkItems(child, visit);
 }
 
+
+// The display `w` is on, in the global coordinates mapToGlobal() answers in.
+// geometry() rather than availableGeometry(): a point under a notch or a dock
+// is still a point a finger reaches, and the question here is reachability,
+// not politeness.
+QRectF screenRect(const QWidget* w)
+{
+    const QScreen* screen = w ? w->screen() : nullptr;
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    return screen ? QRectF(screen->geometry()) : QRectF();
+}
+
 } // namespace
+
+bool pressIsReachable(const QPointF& inSurface, const QSizeF& surface,
+                      const QPointF& onScreen, const QRectF& screen)
+{
+    if (!QRectF(QPointF(0, 0), surface).contains(inSurface))
+        return false;
+    if (screen.isEmpty())
+        return true;
+    return screen.contains(onScreen);
+}
 
 ShellSceneDriver::ShellSceneDriver(QWidget* shellWidget, QObject* parent)
     : QObject(parent)
@@ -205,22 +229,31 @@ bool ShellSceneDriver::tap(QQuickItem* item)
     // layout has stopped moving it there.
     const QPointF centre = settledCentre(item);
 
-    // ...but only if the scene actually shows that point. Qt delivers a press
-    // by COORDINATE, so a point outside the viewport is not "a press on a
-    // scrolled-away button", it is a press on whatever is at that coordinate
-    // -- which is silence, and looks exactly like a button that does nothing.
+    // ...but only if a FINGER could have landed there. Qt delivers a press by
+    // COORDINATE, so a point the display does not show is not "a press on a
+    // control that is out of the way", it is a press on whatever is at that
+    // coordinate -- which is silence, and looks exactly like a button that
+    // does nothing.
     //
     // Reported, not worked around: the Settings views collapse to the row and
     // its action on a narrow screen (logos-workspace#84), so a control that
-    // the viewport does not contain is a layout regression, and a driver that
-    // activated it by hand instead would keep this verdict green while nobody
-    // could load a module at all. That is what it used to do.
-    if (!QRectF(QPointF(0, 0), QSizeF(surface->size())).contains(centre)) {
-        emit log(QStringLiteral("WRONG: '%1' is at (%2, %3), outside the %4x%5 viewport "
+    // cannot be reached is a layout regression, and a driver that activated it
+    // by hand instead would keep this verdict green while nobody could load a
+    // module at all. That is what it used to do.
+    //
+    // BOTH rectangles, because the pane containing the control proves nothing
+    // about the phone containing the pane -- see pressIsReachable().
+    const QPointF global = surface->mapToGlobal(centre);
+    const QRectF screen = screenRect(surface);
+    if (!pressIsReachable(centre, QSizeF(surface->size()), global, screen)) {
+        emit log(QStringLiteral("WRONG: '%1' is at (%2, %3) of a %4x%5 view, "
+                                "at (%6, %7) on a %8x%9 screen "
                                 "-- no touch can reach it on this screen")
                      .arg(item->objectName())
                      .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
-                     .arg(surface->width()).arg(surface->height()));
+                     .arg(surface->width()).arg(surface->height())
+                     .arg(global.x(), 0, 'f', 0).arg(global.y(), 0, 'f', 0)
+                     .arg(screen.width(), 0, 'f', 0).arg(screen.height(), 0, 'f', 0));
         return false;
     }
 
@@ -229,7 +262,6 @@ bool ShellSceneDriver::tap(QQuickItem* item)
                  .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
                  .arg(surface->width()).arg(surface->height()));
 
-    const QPointF global = surface->mapToGlobal(centre);
     QMouseEvent press(QEvent::MouseButtonPress, centre, global,
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QMouseEvent release(QEvent::MouseButtonRelease, centre, global,
@@ -246,4 +278,3 @@ bool ShellSceneDriver::tap(QQuickItem* item)
     QCoreApplication::processEvents(QEventLoop::AllEvents, kAfterReleaseMs);
     return true;
 }
-

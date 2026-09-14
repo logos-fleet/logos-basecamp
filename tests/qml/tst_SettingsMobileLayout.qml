@@ -79,9 +79,17 @@ TestCase {
     // ever collapses is caught too. The 724 is a physical iPad Air (4th gen):
     // it is the one that found the first threshold wrong, because its pane is
     // exactly the desktop columns' minimum total and the row overflowed anyway.
+    //
+    // THE PANE, NOT THE SCREEN. MainContainer spends 96 px of the width on the
+    // sidebar and its insets and about 40 of the height on the tab bar before
+    // a Settings view sees any of it -- 1024x1366 of iPad Air 13 arrives here
+    // as 928x1326, and 820x1180 of iPad Air 4 as 724x1140. The iPhone entry
+    // used to be the SCREEN's 402x874, which is 96 px more than the view ever
+    // gets; it read as the most generous handset case rather than the real
+    // one. 402-96 = 306 (logos-workspace#87).
     function viewport_data() {
         return [
-            { tag: "iphone-16-pro",        width: 402,  height: 874  },
+            { tag: "iphone-16-pro",        width: 306,  height: 834  },
             { tag: "ipad-air-13-portrait", width: 928,  height: 1326 },
             { tag: "ipad-air-4-portrait",  width: 724,  height: 1140 },
             { tag: "desktop",              width: 1440, height: 900  },
@@ -211,7 +219,7 @@ TestCase {
     // above by some other means (a narrower button, a scrolled viewport).
     function test_mobile_widths_collapse_to_the_row_and_its_action_data() {
         return [
-            { tag: "iphone-16-pro",        width: 402, height: 874  },
+            { tag: "iphone-16-pro",        width: 306, height: 834  },
             { tag: "ipad-air-13-portrait", width: 928, height: 1326 },
         ];
     }
@@ -271,7 +279,7 @@ TestCase {
     // Status column on the desktop and folds into the module cell when
     // compact, so a collapse that dropped it would blind that check.
     function test_the_compact_row_keeps_its_status_handle() {
-        var host = hostComp.createObject(null, { width: 402, height: 874 });
+        var host = hostComp.createObject(null, { width: 306, height: 834 });
         waitForRendering(host.contentItem);
         openSection(host, "module_inspector", "moduleInspectorView",
                     "moduleInspector.table");
