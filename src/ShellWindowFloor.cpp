@@ -7,7 +7,9 @@ namespace basecamp {
 
 QSize shellWindowFloor(const QSize& desired, const QSize& screen)
 {
-    if (!screen.isValid() || screen.isEmpty())
+    // isEmpty() is `w < 1 || h < 1`, so it covers the invalid sizes too --
+    // a default-constructed QSize is (-1, -1), and both mean "no screen".
+    if (screen.isEmpty())
         return desired;
     return desired.boundedTo(screen);
 }

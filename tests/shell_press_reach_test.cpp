@@ -26,6 +26,8 @@
 
 #include <QtTest/QtTest>
 
+using basecamp::shell::pressIsReachable;
+
 class ShellPressReachTest : public QObject {
     Q_OBJECT
 

@@ -53,7 +53,6 @@ void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
         walkItems(child, visit);
 }
 
-
 // The display `w` is on, in the global coordinates mapToGlobal() answers in.
 // geometry() rather than availableGeometry(): a point under a notch or a dock
 // is still a point a finger reaches, and the question here is reachability,
@@ -68,6 +67,8 @@ QRectF screenRect(const QWidget* w)
 
 } // namespace
 
+namespace basecamp::shell {
+
 bool pressIsReachable(const QPointF& inSurface, const QSizeF& surface,
                       const QPointF& onScreen, const QRectF& screen)
 {
@@ -77,6 +78,8 @@ bool pressIsReachable(const QPointF& inSurface, const QSizeF& surface,
         return true;
     return screen.contains(onScreen);
 }
+
+} // namespace basecamp::shell
 
 ShellSceneDriver::ShellSceneDriver(QWidget* shellWidget, QObject* parent)
     : QObject(parent)
@@ -245,7 +248,7 @@ bool ShellSceneDriver::tap(QQuickItem* item)
     // about the phone containing the pane -- see pressIsReachable().
     const QPointF global = surface->mapToGlobal(centre);
     const QRectF screen = screenRect(surface);
-    if (!pressIsReachable(centre, QSizeF(surface->size()), global, screen)) {
+    if (!basecamp::shell::pressIsReachable(centre, QSizeF(surface->size()), global, screen)) {
         emit log(QStringLiteral("WRONG: '%1' is at (%2, %3) of a %4x%5 view, "
                                 "at (%6, %7) on a %8x%9 screen "
                                 "-- no touch can reach it on this screen")

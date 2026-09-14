@@ -25,6 +25,8 @@ class QQuickItem;
 class QQuickWidget;
 class QWidget;
 
+namespace basecamp::shell {
+
 // Whether a synthesised press is one a FINGER could have made. Two questions,
 // and the second is not implied by the first:
 //
@@ -42,6 +44,8 @@ class QWidget;
 // An empty `screen` (nothing to ask) leaves (1) as the whole answer.
 bool pressIsReachable(const QPointF& inSurface, const QSizeF& surface,
                       const QPointF& onScreen, const QRectF& screen);
+
+} // namespace basecamp::shell
 
 class ShellSceneDriver : public QObject
 {
