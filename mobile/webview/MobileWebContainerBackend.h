@@ -5,6 +5,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QRect>
 #include <QString>
 #include <QStringList>
 
@@ -148,6 +149,35 @@ public:
     // -- a hidden webview is throttled and a background module needs its timers.
     void hideAll();
 
+    // WHERE A PAGE IS ALLOWED TO BE, in the host window's coordinates and in Qt
+    // logical pixels. Applies to every page this container holds, now and
+    // later.
+    //
+    // THIS IS THE ANSWER TO #110. A page is mounted at the WINDOW's size, so a
+    // page brought forward covers the host's own chrome -- on a phone that is
+    // the sidebar, the navigation bar and the app's own close button, and a
+    // user who opened a web app could not leave it again. The Shell docks a
+    // placeholder for a web app exactly as it docks a `ui_qml` widget and
+    // publishes the rect the workspace gave it; the page is inset to that rect
+    // and the chrome stays outside it, so both kinds of app have one navigation
+    // model.
+    //
+    // EMPTY MEANS THE WHOLE WINDOW, which is where a page starts and what it
+    // goes back to when no app is docked. It is not "hide": a page that is not
+    // in front is not seen whatever its rect, and hideAll() is still the
+    // z-order half.
+    void setContentRect(const QRect& windowRect);
+    const QRect& contentRect() const { return m_contentRect; }
+
+    // WHOSE PAGE IS IN FRONT OF THE HOST'S OWN SURFACE, or empty when none is.
+    //
+    // NOT budget().visible(), which is the books: hideAll() takes every page off
+    // screen and deliberately does not touch them, so the budget still names the
+    // last module the user looked at. This is the surface, and it is what a host
+    // asserts on when it has to show that leaving an app really put the Shell
+    // back (#110).
+    const QString& frontmostModule() const { return m_frontmost; }
+
     const LiveRuntimeBudget& budget() const { return m_budget; }
 
     // WHAT THE APP WEIGHS RIGHT NOW, as one log line. show() prints it, and the
@@ -195,6 +225,8 @@ private:
 
     QHash<QString, MobileWebModuleView*> m_views;
     LiveRuntimeBudget m_budget;
+    QRect m_contentRect;
+    QString m_frontmost;
     PlatformPageFactory m_platform;
     bool m_shimInDocument = false;
     WebOrigin m_origin;

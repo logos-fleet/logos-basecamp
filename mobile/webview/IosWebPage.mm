@@ -354,6 +354,33 @@ PlatformPageFactory iosPlatformPageFactory()
             if (front) [superview bringSubviewToFront:view];
             else [superview sendSubviewToBack:view];
         };
+        // WHERE THE SHELL LEFT ROOM FOR IT (#110). A page mounted at the
+        // window's size covers the Shell's own navigation the moment it comes
+        // forward, and the user is then inside an app with no way out. The
+        // Shell docks a placeholder for a web app and publishes the rect its
+        // workspace gave it; this is that rect becoming a frame.
+        //
+        // UIKIT POINTS ARE QT'S LOGICAL PIXELS ON iOS -- the scale factor lives
+        // in the window's contentScaleFactor, not in its bounds -- so the rect
+        // crosses unconverted. The autoresizing mask goes with it: a frame the
+        // host is driving must not also be driven by the superview's resizing,
+        // or a rotation would stretch the page back over the chrome. An empty
+        // rect gives the window back and restores the mask.
+        page.setGeometry = [holder](const QRect& windowRect) {
+            UIView* view = holder->view;
+            if (!view) return;
+            UIView* superview = view.superview;
+            if (!superview) return;
+            if (windowRect.isEmpty()) {
+                view.autoresizingMask =
+                    UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                view.frame = superview.bounds;
+                return;
+            }
+            view.autoresizingMask = UIViewAutoresizingNone;
+            view.frame = CGRectMake(windowRect.x(), windowRect.y(),
+                                    windowRect.width(), windowRect.height());
+        };
         page.isAlive = [holder]() -> bool { return holder->view != nil; };
         // ONE SCRIPT IN THE PAGE, and what it says it says through the page's
         // own console -- which the bridge already carries back. On the main

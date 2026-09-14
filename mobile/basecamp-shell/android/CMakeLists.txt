@@ -55,9 +55,11 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/ShellModuleRows.cpp ${SHELL_SRC}/ShellModuleRows.h
     ${SHELL_SRC}/ShellModulesBackend.cpp ${SHELL_SRC}/ShellModulesBackend.h
     ${SHELL_SRC}/BundledSetShellHost.cpp ${SHELL_SRC}/BundledSetShellHost.h
+    ${SHELL_SRC}/WebAppSurface.cpp ${SHELL_SRC}/WebAppSurface.h
     ${SHELL_SRC}/ShellSceneDriver.cpp ${SHELL_SRC}/ShellSceneDriver.h
     ${SHELL_SRC}/ShellModulesDriver.cpp ${SHELL_SRC}/ShellModulesDriver.h
     ${SHELL_SRC}/ShellAppDriver.cpp ${SHELL_SRC}/ShellAppDriver.h
+    ${SHELL_SRC}/ShellWebAppDriver.cpp ${SHELL_SRC}/ShellWebAppDriver.h
     ${SHELL_SRC}/ShellCatalogDriver.cpp ${SHELL_SRC}/ShellCatalogDriver.h
     ${SHELL_SRC}/ShellCallDriver.cpp ${SHELL_SRC}/ShellCallDriver.h
     ${SHELL_SRC}/ShellStoreBackend.cpp ${SHELL_SRC}/ShellStoreBackend.h

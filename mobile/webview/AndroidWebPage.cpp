@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QFuture>
 #include <QDebug>
 #include <QDir>
@@ -324,6 +325,30 @@ PlatformPageFactory androidPlatformPageFactory()
             QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
                 [held, front]() {
                     held.callMethod<void>("setFrontmost", "(Z)V", jboolean(front));
+                }).waitForFinished();
+        };
+        // WHERE THE SHELL LEFT ROOM FOR IT (#110). A page added to the
+        // Activity's content view fills it, so a page brought forward covers the
+        // Shell's own navigation and the user cannot leave the app again. The
+        // Shell docks a placeholder for a web app and publishes the rect its
+        // workspace gave it.
+        //
+        // DEVICE PIXELS, converted here: an Android View's coordinates are
+        // physical and Qt's are logical, which is the one thing the two phones
+        // disagree about (iOS points ARE Qt's logical pixels). The container
+        // stays in Qt's units so it does not have to know which phone it is on.
+        // An empty rect gives the content view back.
+        platform.setGeometry = [page](const QRect& windowRect) {
+            if (!page->isValid()) return;
+            const qreal scale = qApp ? qApp->devicePixelRatio() : 1.0;
+            const QRect px(qRound(windowRect.x() * scale), qRound(windowRect.y() * scale),
+                           qRound(windowRect.width() * scale),
+                           qRound(windowRect.height() * scale));
+            QJniObject held = *page;
+            QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
+                [held, px]() {
+                    held.callMethod<void>("setGeometry", "(IIII)V", jint(px.x()), jint(px.y()),
+                                          jint(px.width()), jint(px.height()));
                 }).waitForFinished();
         };
         return platform;
