@@ -90,6 +90,24 @@ void ShellModulesDriver::run()
     }
     emit log(QStringLiteral("SHELL MODULES TAB LISTS WHAT THE APP HAS"));
 
+    // Every check below reads a row off its own status badge rather than off
+    // the backend: what the user sees is the claim, and a model that moved
+    // without the view following is the failure they are looking for. Re-found
+    // on each reading, because a delegate is free to be rebuilt under us.
+    const auto modelRow = [this](const QString& name) -> QObject* {
+        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
+        return badge ? badge->property("row").value<QObject*>() : nullptr;
+    };
+    // A view module is mounted by the host rather than run by the core (ADR
+    // 0006), so its row says nothing about the Native container.
+    const auto isViewRow = [](QObject* row) {
+        return row && row->property("type").toString() == QLatin1String("ui_qml");
+    };
+    const auto isLoaded = [&modelRow](const QString& name) {
+        QObject* row = modelRow(name);
+        return row && row->property("isLoaded").toBool();
+    };
+
     // ── 2b. every row came in with the app image ──
     // A Store shell may not gain a native module at runtime (ADR 0003), so
     // "the app contains no Downloaded module" is not a thing to hope for --
@@ -103,8 +121,7 @@ void ShellModulesDriver::run()
         // and is the one thing this column exists to tell apart.
         if (downloaded.contains(name))
             continue;
-        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
-        QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
+        QObject* row = modelRow(name);
         const QString installType = row ? row->property("installType").toString()
                                         : QStringLiteral("<no row>");
         if (installType != QLatin1String("embedded"))
@@ -150,12 +167,9 @@ void ShellModulesDriver::run()
     QStringList missingFigure;
     int loadedCoreRows = 0;
     for (const QString& name : rows) {
-        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
-        QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
+        QObject* row = modelRow(name);
         const bool loaded = row && row->property("isLoaded").toBool();
-        const bool isView = row
-            && row->property("type").toString() == QLatin1String("ui_qml");
-        const bool owesAFigure = loaded && !isView;
+        const bool owesAFigure = loaded && !isViewRow(row);
         if (owesAFigure)
             ++loadedCoreRows;
 
@@ -208,49 +222,64 @@ void ShellModulesDriver::run()
                  : QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS "
                                   "(no core module is loaded, so every row is an em dash)"));
 
-    // ── 3. one row's own Load/Unload button, twice ──
-    // The first row that the core is actually in charge of: a view module's
-    // toggle is a no-op by design (ADR 0006) and driving it would prove
-    // nothing about the Native container.
-    QQuickItem* toggle = nullptr;
-    QString driven;
+    // ── 3. every row's own Load/Unload button, twice ──
+    //
+    // EVERY row the CORE is in charge of, not just the first one with a usable
+    // toggle — and only those. A view module is mounted by the host rather than
+    // run by the core (ADR 0006), so its row says nothing about the Native
+    // container; it is skipped here for the same reason it is exempt from the
+    // stats check above.
+    //
+    // One row used to be enough, because the property under test was the
+    // SHELL's wiring — the button, the MouseArea, the backend call — and one
+    // press proves that as well as three do. #96 is what made it a property of
+    // the MODULES: unloading a Bare module whose language core owns threads is
+    // a different operation from unloading one that does not, and the two that
+    // do here (chat_module's Rust runtime, delivery_module's nim scheduler) are
+    // never the first row. A run that stopped at the first usable toggle said
+    // nothing at all about the case that killed the Android process.
+    QStringList driven;
+    QStringList wrong;
     for (const QString& name : rows) {
-        QQuickItem* candidate =
+        QObject* row = modelRow(name);
+        if (!row || isViewRow(row))
+            continue;
+
+        QQuickItem* toggle =
             waitFor(QStringLiteral("moduleRow.loadToggle.%1").arg(name), 3000);
-        if (candidate && candidate->isEnabled() && candidate->isVisible()) {
-            toggle = candidate;
-            driven = name;
-            break;
-        }
+        if (!toggle || !toggle->isEnabled() || !toggle->isVisible())
+            continue;
+
+        const bool before = isLoaded(name);
+        if (!tap(toggle)) return;
+        QQuickItem* afterFirstToggle =
+            waitFor(QStringLiteral("moduleRow.loadToggle.%1").arg(name), 3000);
+        const bool afterFirst = isLoaded(name);
+        if (!afterFirstToggle || !tap(afterFirstToggle)) return;
+        const bool afterSecond = isLoaded(name);
+
+        emit log(QStringLiteral("drive modules: %1 %2 -> %3 -> %4")
+                     .arg(name)
+                     .arg(before ? QStringLiteral("loaded") : QStringLiteral("not loaded"))
+                     .arg(afterFirst ? QStringLiteral("loaded") : QStringLiteral("not loaded"))
+                     .arg(afterSecond ? QStringLiteral("loaded") : QStringLiteral("not loaded")));
+
+        if (before != afterFirst && afterFirst != afterSecond && before == afterSecond)
+            driven << name;
+        else
+            wrong << name;
     }
-    if (!toggle) {
+
+    if (driven.isEmpty() && wrong.isEmpty()) {
         dumpNames(QStringLiteral("no row in the Modules tab has a usable toggle"));
         return;
     }
-
-    // The row's own badge, not the backend: what the user sees is the claim,
-    // and a model that moved without the view following is the failure this is
-    // looking for.
-    const auto isLoaded = [this, &driven]() -> bool {
-        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(driven));
-        QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
-        return row && row->property("isLoaded").toBool();
-    };
-
-    const bool before = isLoaded();
-    if (!tap(toggle)) return;
-    QQuickItem* afterFirstToggle =
-        waitFor(QStringLiteral("moduleRow.loadToggle.%1").arg(driven), 3000);
-    const bool afterFirst = isLoaded();
-    if (!afterFirstToggle || !tap(afterFirstToggle)) return;
-    const bool afterSecond = isLoaded();
-
-    emit log(QStringLiteral("drive modules: %1 %2 -> %3 -> %4")
-                 .arg(driven)
-                 .arg(before ? QStringLiteral("loaded") : QStringLiteral("not loaded"))
-                 .arg(afterFirst ? QStringLiteral("loaded") : QStringLiteral("not loaded"))
-                 .arg(afterSecond ? QStringLiteral("loaded") : QStringLiteral("not loaded")));
-    emit log(before != afterFirst && afterFirst != afterSecond && before == afterSecond
-                 ? QStringLiteral("SHELL MODULES TAB ROUND TRIP OK")
-                 : QStringLiteral("WRONG: the row's toggle did not round-trip"));
+    // NAMED, not counted. "the round trip is OK" over four rows and over one
+    // look identical in a console log, and which modules were actually unloaded
+    // is the whole of what #96 is about.
+    emit log(wrong.isEmpty()
+                 ? QStringLiteral("SHELL MODULES TAB ROUND TRIP OK (%1)")
+                       .arg(driven.join(QStringLiteral(", ")))
+                 : QStringLiteral("WRONG: the toggle did not round-trip for: %1")
+                       .arg(wrong.join(QStringLiteral(", "))));
 }
