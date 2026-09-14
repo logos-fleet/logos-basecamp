@@ -70,8 +70,13 @@ run reads the verdicts off the console:
 [shell]   bare_counter loaded in 6 ms
 [shell] unload bare_counter
 [shell] drive modules: bare_counter not loaded -> loaded -> not loaded
-[shell] SHELL MODULES TAB ROUND TRIP OK
+[shell] SHELL MODULES TAB ROUND TRIP OK (bare_counter)
 ```
+
+Every row the CORE is in charge of is driven, not just the first — a view
+module is mounted by the host rather than run by the core (ADR 0006), so its
+row is skipped. The names are printed rather than a count because which modules
+were actually unloaded is the whole of what #96 was about.
 
 The rows are counted off the **scene**, not off the model: each row's status
 badge carries its module's name, so a filter proxy that dropped a row or a
@@ -171,16 +176,23 @@ bring-up, and both cold-start numbers. On an SM-G990B the Shell is on screen
 in ~900 ms and chat is usable in ~2.8 s, against ~300–400 ms and ~1.5–2.4 s on
 the iPads — the gap is the phone, not the platform code.
 
-### Unloading a threaded Bare module kills the Android process
+### Unloading a threaded Bare module used to kill the Android process
 
-Driving the Modules tab's Load/Unload on `chat_module` takes the app down with
+Driving the Modules tab's Load/Unload on `chat_module` took the app down with
 no tombstone and no `am_kill`, right after `In-process module stopped`. The
-container does the careful thing (`InProcContainer::terminate` asks the module
-to unload, stops the dispatch thread, then `dlclose`s), and on iOS `dlclose`
-of a framework does not actually unmap — so the same sequence is survivable
-there and fatal here, where bionic really unmaps an image whose Rust runtime
-still has threads in it. It is not the Shell's: the probe never unloads, which
-is why nothing saw it until there was a Modules tab on this platform.
+container did the careful thing (`InProcContainer::terminate` asks the module
+to unload, stops the dispatch thread, then closed the image), and on iOS
+`dlclose` of a framework does not actually unmap — so the same sequence was
+survivable there and fatal here, where bionic really unmaps an image whose Rust
+runtime still has threads in it. It was never the Shell's: the probe never
+unloads, which is why nothing saw it until there was a Modules tab on this
+platform.
+
+Fixed in logos-liblogos (#96): an image a module has RUN in is never unmapped,
+on any platform — see `closeBareModule` for why the host cannot know whether a
+module's language core still has threads up. The Modules driver here rounds
+every core row's toggle now, not just the first one, because the first usable
+toggle in this set is never one of the two modules that own threads.
 
 ## The app, opened from the sidebar
 
