@@ -131,6 +131,36 @@ QVariantMap webRow()
                       QStringLiteral("https://logos.test/m/counter_ui"));
 }
 
+// package_manager's two refusing verdicts: nothing signed the package at all,
+// and signed by a publisher no anchor in this device's keyring validates. The
+// second is the case a Store shell's `require` policy exists to produce.
+QVariantMap unsignedVerdict()
+{
+    return QVariantMap{
+        {QStringLiteral("signatureStatus"), QStringLiteral("unsigned")},
+        {QStringLiteral("installable"), false},
+        {QStringLiteral("reason"),
+         QStringLiteral("this package is unsigned and this build requires a signature")},
+    };
+}
+
+QVariantMap unanchoredSignerVerdict()
+{
+    return QVariantMap{
+        {QStringLiteral("name"), QStringLiteral("counter_ui")},
+        {QStringLiteral("version"), QStringLiteral("1.2.0")},
+        {QStringLiteral("signatureStatus"), QStringLiteral("signed")},
+        {QStringLiteral("signerName"), QStringLiteral("Acme Modules")},
+        {QStringLiteral("signerDid"), QStringLiteral("did:jwk:acme")},
+        {QStringLiteral("trusted"), false},
+        {QStringLiteral("trustedAs"), QString()},
+        {QStringLiteral("policy"), QStringLiteral("require")},
+        {QStringLiteral("installable"), false},
+        {QStringLiteral("reason"),
+         QStringLiteral("signed by a key your keyring does not vouch for")},
+    };
+}
+
 QVariantMap nativeOnlyRow()
 {
     return catalogRow(QStringLiteral("desktop_only"), false,
@@ -362,12 +392,7 @@ private slots:
     {
         FakeBackend backend;
         backend.catalog = QVariantList{webRow()};
-        backend.signerAnswer = QVariantMap{
-            {QStringLiteral("signatureStatus"), QStringLiteral("unsigned")},
-            {QStringLiteral("installable"), false},
-            {QStringLiteral("reason"),
-             QStringLiteral("this package is unsigned and this build requires a signature")},
-        };
+        backend.signerAnswer = unsignedVerdict();
         StoreAppManager m(&backend);
         m.refreshCatalog();
 
@@ -376,6 +401,70 @@ private slots:
         QVERIFY(m.signerPrompt().isEmpty());
         QCOMPARE(m.lastError(),
                  QStringLiteral("this package is unsigned and this build requires a signature"));
+    }
+
+    // THE `require` REFUSAL, AND THE ONE THING IT HAS TO SAY.
+    //
+    // This is the cell a Store shell exists for: signed, valid, and anchored to
+    // nothing (ADR 0008). The refusal is correct -- but the ONLY way forward
+    // from it is for that DID to enter this device's keyring, and a message
+    // that does not name the DID leaves nobody able to take that step. The
+    // Shell's log is where a developer reads what to pass to --trust-signer,
+    // and a device has no `lgx keyring` to ask instead.
+    void aSignerNoAnchorValidatesIsRefusedAndTheDidIsStillNamed()
+    {
+        FakeBackend backend;
+        backend.catalog = QVariantList{webRow()};
+        backend.signerAnswer = unanchoredSignerVerdict();
+        StoreAppManager m(&backend);
+        m.refreshCatalog();
+        QSignalSpy logSpy(&m, &StoreAppManager::log);
+        backend.calls.clear();
+
+        m.beginInstall(QStringLiteral("counter_ui"));
+
+        // Refused, and nothing installed.
+        QVERIFY(!backend.calls.contains(QStringLiteral("install:/tmp/counter_ui.lgx")));
+        QVERIFY(m.signerPrompt().isEmpty());
+        QCOMPARE(m.lastError(),
+                 QStringLiteral("signed by a key your keyring does not vouch for"));
+
+        // ...and the DID survived, both as data a view can render and in the log.
+        QCOMPARE(m.refusedSigner().value(QStringLiteral("signerDid")).toString(),
+                 QStringLiteral("did:jwk:acme"));
+        QString logged;
+        for (const auto& call : logSpy)
+            logged += call.at(0).toString() + QLatin1Char('\n');
+        QVERIFY2(logged.contains(QStringLiteral("did:jwk:acme")),
+                 qPrintable(QStringLiteral("the refusal did not name the DID; logged: ") + logged));
+    }
+
+    void anUnsignedRefusalHasNoDidToName()
+    {
+        // The control. `refusedSigner` reports what the verifier found, and an
+        // unsigned package has no publisher to offer for anchoring.
+        FakeBackend backend;
+        backend.catalog = QVariantList{webRow()};
+        backend.signerAnswer = unsignedVerdict();
+        StoreAppManager m(&backend);
+        m.refreshCatalog();
+
+        m.beginInstall(QStringLiteral("counter_ui"));
+
+        QVERIFY(m.refusedSigner().isEmpty());
+    }
+
+    void anInstallThatSucceedsLeavesNoRefusedSignerBehind()
+    {
+        FakeBackend backend;
+        backend.catalog = QVariantList{webRow()};
+        StoreAppManager m(&backend);
+        m.refreshCatalog();
+
+        m.beginInstall(QStringLiteral("counter_ui"));
+        m.approveSigner();
+
+        QVERIFY(m.refusedSigner().isEmpty());
     }
 
     // ── consent ─────────────────────────────────────────────────────────────

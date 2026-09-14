@@ -117,6 +117,14 @@ QQuickWidget* ShellSceneDriver::surfaceOf(QQuickItem* item) const
     return nullptr;
 }
 
+void ShellSceneDriver::settle(int ms)
+{
+    QElapsedTimer since;
+    since.start();
+    while (since.elapsed() < ms)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+}
+
 QQuickItem* ShellSceneDriver::waitFor(const QString& objectName, int timeoutMs)
 {
     QElapsedTimer t;

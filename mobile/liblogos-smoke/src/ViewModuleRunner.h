@@ -10,10 +10,14 @@
 // the property bindings, the slot calls — is unchanged, which is the point:
 // one Main.qml, two hosts.
 //
-//   the image     <App>.app/Frameworks/<name>_view.framework/<name>_view,
+//   the image     iOS: <App>.app/Frameworks/<name>_view.framework/<name>_view,
 //                 embedded by Xcode with Code Sign On Copy, Qt and LogosAPI
-//                 bound upward into the app (ADR 0006, logos-module-builder's
-//                 `view` output).
+//                 bound upward into the app (ADR 0006).
+//                 Android: <nativeLibraryDir>/lib<name>_view.so, which names
+//                 the app's Qt and its Logos host images in DT_NEEDED instead
+//                 -- there is no export trie to force there, and no need for
+//                 one. Both are logos-module-builder's `view` output, and
+//                 everything below this line is the same file on both.
 //   the edge      six C functions, reached by dlsym and nothing else; there is
 //                 no plugin directory on a phone to scan.
 //   the QML       inside the image's own qrc, so the engine loads it out of
@@ -76,7 +80,7 @@ public:
     explicit ViewModuleRunner(QString stem, QObject* parent = nullptr);
     ~ViewModuleRunner() override;
 
-    // dlopen the framework, construct the plugin, publish its typed source on
+    // dlopen the image, construct the plugin, publish its typed source on
     // an in-process node, acquire the replica and load the module's QML from
     // the image's qrc into `surface`'s engine. Says why through log() on
     // every failure.
@@ -84,9 +88,9 @@ public:
     // Must run after logos_core_start().
     bool run(QQuickWidget* surface);
 
-    // Where the framework with this stem is, resolved from the running process
-    // rather than guessed — see BundledModuleRunner::bundledImagePath() for
-    // why dladdr and not applicationDirPath().
+    // Where the image with this stem is, resolved from the running process
+    // rather than guessed — see BundledSetCoreRuntime::imageDirFromRunningImage()
+    // for why dladdr and not applicationDirPath().
     static QString viewImagePathFor(const QString& stem);
 
     // The replica the QML is bound to, for a driver that wants to read the

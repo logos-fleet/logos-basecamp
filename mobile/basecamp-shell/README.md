@@ -293,13 +293,20 @@ and the signal spy stays at zero.
 src/ShellModulesBackend.*   the QML-facing `backend`
 src/ShellStoreBackend.*     the App Manager's one seam, over the real modules
 src/BundledSetShellHost.*   IShellHost over it
+src/WebAppSurface.*         the placeholder a `web` app is DOCKED as, so the
+                            Shell's chrome ends up beside its page rather than
+                            under it (#110)
 src/ShellSceneDriver.*      finding, settling and pressing in the Shell's
-                            rendered scenes -- shared by the three drivers below
+                            rendered scenes -- shared by the four drivers below
 src/ShellModulesDriver.*    the acceptance pass: open the tab, check the rows,
                             their install type and their stats, press the
                             toggle twice
 src/ShellAppDriver.*        the other half: press the sidebar tile and check
                             the app's OWN handles are on screen
+src/ShellWebAppDriver.*     the same for a `web` app, plus the step that check
+                            could never make: LEAVE it again. The page is inset
+                            to the workspace, navigating away puts the Shell
+                            back, and closing the app leaves the module running
 src/ShellCatalogDriver.*    what the app does NOT ship: add a repository, read
                             the catalog, install a row and open it -- driven by
                             the command line, because the catalog a device is

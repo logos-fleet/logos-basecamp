@@ -15,6 +15,7 @@
 class BundledSetCoreRuntime;
 class QQuickWidget;
 class ViewModuleRunner;
+class WebAppSurface;
 
 class BundledSetShellHost : public IShellHost
 {
@@ -46,6 +47,12 @@ public:
     // returned true.
     QQuickWidget* mountedView(const QString& name) const;
 
+    // The placeholder a WEB app is docked as, or nullptr. There is no widget to
+    // return for one -- its UI is a platform page -- so this is the next best
+    // thing a driver can assert on: the hole the Shell left for the page, and
+    // where the Shell put it. See WebAppSurface.h.
+    WebAppSurface* webSurface(const QString& name) const;
+
 private:
     // Bring a `ui_qml` member of the Bundled set up and hand its widget to the
     // Shell: dlopen the framework, instantiate the backend in THIS process,
@@ -60,12 +67,34 @@ private:
     void mountApp(const QString& name);
     void unmountApp(const QString& name);
 
+    // Dock a placeholder for a web app and follow it. A `web` module has no
+    // widget, so the Shell had nothing to dock and its page was raised over the
+    // whole window -- which covered the Shell's own navigation and left the
+    // user inside an app with no way out (#110). The placeholder is what makes
+    // a web app navigate like every other one: same dock, same tab, same close
+    // button, and the page inset to the hole the workspace left.
+    void mountWebApp(const QString& name);
+
+    // ONE PLACE DECIDES WHICH PAGE IS UP, on the turn after the Shell has laid
+    // out. Deferred because a tab switch shows the incoming placeholder before
+    // it hides the outgoing one, and a host that answered each event as it
+    // arrived would send the page it had just raised straight back down.
+    void syncWebSurfaces();
+    void queueWebSync();
+
     struct Mounted {
         QQuickWidget*     widget = nullptr;   // owned by the Shell once handed over
         ViewModuleRunner* runner = nullptr;   // owned by this
     };
 
-    ShellModulesBackend      m_backend;
-    IShellObserver*          m_observer = nullptr;
-    QHash<QString, Mounted>  m_mounted;
+    ShellModulesBackend             m_backend;
+    IShellObserver*                 m_observer = nullptr;
+    QHash<QString, Mounted>         m_mounted;
+    // The placeholders, by module. Owned by the Shell once handed over, exactly
+    // as a `ui_qml` widget is.
+    QHash<QString, WebAppSurface*>  m_webSurfaces;
+    // The web module whose page is currently in front, so a placement that did
+    // not change which app is up does not re-spend the live-runtime budget.
+    QString                         m_webVisible;
+    bool                            m_webSyncQueued = false;
 };

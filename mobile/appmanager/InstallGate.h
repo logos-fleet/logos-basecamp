@@ -92,6 +92,23 @@ public:
     // the name tells the user nothing they can verify.
     QVariantMap signerPrompt() const { return m_prompt; }
 
+    // WHO WAS REFUSED, when the refusal came from the signer step and the
+    // package carried a signer at all. Empty otherwise -- including for an
+    // unsigned package, which has no DID, and for a refusal that happened
+    // before signerTrust was ever asked.
+    //
+    // This exists because of the Store shell's `require` policy (ADR 0008). The
+    // ONLY way forward from "signed by a key your keyring does not vouch for"
+    // is for that DID to enter this device's keyring, and the DID is the thing
+    // the user would have to be shown to get there. `signerPrompt()` cannot
+    // carry it: that map is the Install-or-Cancel dialog, and putting an
+    // un-installable package behind it is the one thing signerTrust exists to
+    // prevent. So the refusal keeps the IDENTITY and drops the AFFORDANCE.
+    //
+    // Keys: name, version, signatureStatus, signerName, signerDid -- the
+    // package_manager answer's identity half, verbatim, minus the verdict.
+    QVariantMap refusedSigner() const { return m_refusedSigner; }
+
     // The user trusts this signer: install. Returns true when the package is
     // installed. Refuses if nothing is awaiting a decision.
     bool approve();
@@ -112,6 +129,7 @@ private:
     QString  m_lgxPath;
     QString  m_installedPath;
     QVariantMap m_prompt;
+    QVariantMap m_refusedSigner;
     CatalogEntry m_entry;
 };
 

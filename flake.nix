@@ -566,8 +566,14 @@
             };
           };
 
+          # `legacyPackages.<buildSystem>.mobile`, not `packages.<system>`, for
+          # exactly the reason mkBareSpec gives: a cross derivation's `system`
+          # is its BUILD platform, and the Android leg has to be the one this
+          # machine can realise. The iOS keys answer the same either way.
+          viewOf = module: module.legacyPackages.${androidBuildSystem}.mobile.${system}.view;
+
           viewPayload = catalogLib.mkVariantPayload {
-            drv = viewCounter.packages.${system}.view;
+            drv = viewOf viewCounter;
             stem = "view_counter_view";
             inherit target;
             # The QML the host renders comes out of the framework's qrc (ADR
@@ -582,7 +588,7 @@
           # travels inside the framework's qrc; the entry document is shipped
           # beside the image for the same reason view_counter's is.
           chatUiPayload = catalogLib.mkVariantPayload {
-            drv = logos-chat-ui.packages.${system}.view;
+            drv = viewOf logos-chat-ui;
             stem = "chat_ui_view";
             inherit target;
             extraFiles."qml/ChatView.qml" = "${logos-chat-ui}/src/qml/ChatView.qml";
@@ -659,39 +665,15 @@
               description = "Proxyable, fail-closed Ethereum JSON-RPC client";
               module = logos-evm-eth-rpc-module;
             };
-          } // nixpkgs.lib.optionalAttrs (!isAndroid) {
-            # ── the two package modules (slice 29) ────────────────────────
-            # What turns `ShellStoreBackend::hasCatalog()` from false into a
-            # catalog: the App Manager browses through package_downloader and
-            # judges availability through package_manager, and a Store shell
-            # carries them the only way a phone allows -- inside the app image,
-            # at build time (ADR 0007).
-            #
-            # iOS ONLY, and the refusal on the other side is the honest one.
-            # Both libraries reach a phone as STATIC archives (logos-package's
-            # lgx, logos-package-manager's lgpm, logos-package-downloader's lgpd
-            # with curl and OpenSSL folded in), which is what iOS wants anyway.
-            # The same libraries cross-compile for Android as SHARED objects,
-            # and a Bare module linking liblgx.so would need liblgx.so in the
-            # APK beside it -- a second, unbundled soname that the Android
-            # DT_NEEDED gate refuses by design. So `--bundle package_manager
-            # --target android-arm64` is refused BY NAME rather than half-built,
-            # which is the same answer `--bundle view_counter` gets there.
-            package_manager = mkBareSpec {
-              name = "package_manager";
-              version = logos-package-manager-module.config.version;
-              category = "management";
-              description = "Plugin manager for the Logos system";
-              module = logos-package-manager-module;
-            };
-            package_downloader = mkBareSpec {
-              name = "package_downloader";
-              version = logos-package-downloader-module.config.version;
-              category = "management";
-              description = "Online package catalog and download service";
-              module = logos-package-downloader-module;
-            };
 
+            # ── the apps (slices 22 and 27) ──────────────────────────────
+            # BOTH PHONES NOW. A `ui_qml` member used to be iOS-only here,
+            # because logos-module-builder published a `view` output for the
+            # iOS keys alone -- so `--bundle chat_ui --target android-arm64`
+            # was refused by name and the Android Shell's sidebar came up with
+            # no app tile at all. The builder now publishes the Android shape
+            # too (a plain lib<stem>_view.so naming the app's Qt in DT_NEEDED),
+            # and `viewOf` above reaches whichever the target wants.
             view_counter = {
               name = "view_counter";
               version = "1.0.0";
@@ -741,6 +723,38 @@
               variants.${target} = chatUiPayload;
               inherit signingKey;
             };
+          } // nixpkgs.lib.optionalAttrs (!isAndroid) {
+            # ── the two package modules (slice 29) ────────────────────────
+            # What turns `ShellStoreBackend::hasCatalog()` from false into a
+            # catalog: the App Manager browses through package_downloader and
+            # judges availability through package_manager, and a Store shell
+            # carries them the only way a phone allows -- inside the app image,
+            # at build time (ADR 0007).
+            #
+            # iOS ONLY, and the refusal on the other side is the honest one.
+            # Both libraries reach a phone as STATIC archives (logos-package's
+            # lgx, logos-package-manager's lgpm, logos-package-downloader's lgpd
+            # with curl and OpenSSL folded in), which is what iOS wants anyway.
+            # The same libraries cross-compile for Android as SHARED objects,
+            # and a Bare module linking liblgx.so would need liblgx.so in the
+            # APK beside it -- a second, unbundled soname that the Android
+            # DT_NEEDED gate refuses by design. So `--bundle package_manager
+            # --target android-arm64` is refused BY NAME rather than half-built,
+            # which is the shape every "no variant for this target" answer has.
+            package_manager = mkBareSpec {
+              name = "package_manager";
+              version = logos-package-manager-module.config.version;
+              category = "management";
+              description = "Plugin manager for the Logos system";
+              module = logos-package-manager-module;
+            };
+            package_downloader = mkBareSpec {
+              name = "package_downloader";
+              version = logos-package-downloader-module.config.version;
+              category = "management";
+              description = "Online package catalog and download service";
+              module = logos-package-downloader-module;
+            };
           };
 
           drvs = nixpkgs.lib.mapAttrs (_: catalogLib.mkPackage) specs;
@@ -753,17 +767,13 @@
             packages = nixpkgs.lib.mapAttrsToList
               (n: spec: { inherit spec; drv = drvs.${n}; }) specs;
           };
-          # On iOS ONE name is enough: view_counter's own declared
+          # ONE name is enough, on both phones: view_counter's own declared
           # dependencies resolve the rest, so the set comes out as
-          # view_counter -> bare_counter -> capability_module.
-          #
-          # Android's Qt is shared objects, so a ui_qml module there is a
-          # different artifact that logos-module-builder does not publish yet.
-          # The two core members are named directly instead, and
-          # `--bundle view_counter --target android-arm64` is exactly the case
-          # the set must refuse by name rather than half-build.
-          defaultApps =
-            if isAndroid then [ "capability_module" "bare_counter" ] else [ "view_counter" ];
+          # view_counter -> bare_counter -> capability_module. Android used to
+          # name the two core members directly, because the catalog published
+          # no `ui_qml` variant there at all and the default set would not have
+          # resolved; it does now.
+          defaultApps = [ "view_counter" ];
         };
 
       mobileBundledSetFor = { system, androidBuildSystem }:

@@ -282,8 +282,13 @@ QVariantList ShellModulesBackend::snapshot() const
         QVariantMap row = value.toMap();
         const QVariantMap stats =
             m_modules->moduleStats(row.value(QStringLiteral("name")).toString());
-        row[QStringLiteral("cpu")] = stats.value(QStringLiteral("cpu"), 0.0);
-        row[QStringLiteral("memory")] = stats.value(QStringLiteral("memory"), 0.0);
+        row[QStringLiteral("cpu")] = stats.value(QStringLiteral("cpu"));
+        row[QStringLiteral("memory")] = stats.value(QStringLiteral("memory"));
+        // Whether those two are a READING. A Bundled module has no process of
+        // its own, so before the Native container learned to measure one it had
+        // nothing to report and the row drew 0.0% / 0.0 MB anyway (#86).
+        row[QStringLiteral("statsMeasured")] =
+            stats.value(QStringLiteral("statsMeasured"), false);
         value = row;
     }
     return rows;

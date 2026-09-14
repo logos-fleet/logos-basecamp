@@ -131,12 +131,33 @@ void ShellModulesDriver::run()
     // too -- the two fold into one line inside the module cell. Asking only
     // for the desktop pair would report "no stats cells" for a table that is
     // showing its stats perfectly well.
+    //
+    // WHICH ROWS OWE A FIGURE, which used to be "at least one of them" and is
+    // now stated per row -- both halves of that were wrong.
+    //
+    // A set whose members all start UNLOADED owes none: every row renders the
+    // em dash it is supposed to, and demanding one anyway aborted this drive
+    // before step 3, so such a run silently never pressed a toggle
+    // (logos-workspace#86).
+    //
+    // And "at least one" was too weak for what #86 was actually about. Every
+    // Bundled module is loaded into the host's own process, so all of them
+    // reported the same zero; one row with a figure was enough to pass while
+    // the rest showed 0.0 MB. So each LOADED CORE row owes its own figure now.
+    // A view module is exempt: it is mounted by the host rather than run by the
+    // core (ADR 0006), and the core has no stats for something it never loaded.
     QStringList stats;
-    bool sawFigure = false;
+    QStringList missingFigure;
+    int loadedCoreRows = 0;
     for (const QString& name : rows) {
         QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
         QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
         const bool loaded = row && row->property("isLoaded").toBool();
+        const bool isView = row
+            && row->property("type").toString() == QLatin1String("ui_qml");
+        const bool owesAFigure = loaded && !isView;
+        if (owesAFigure)
+            ++loadedCoreRows;
 
         QQuickItem* cpu = find(QStringLiteral("moduleInspector.cpu.%1").arg(name));
         QQuickItem* memory = find(QStringLiteral("moduleInspector.memory.%1").arg(name));
@@ -145,33 +166,47 @@ void ShellModulesDriver::run()
             const QString cpuText = cpu->property("text").toString();
             const QString memoryText = memory->property("text").toString();
             stats << QStringLiteral("%1 %2/%3").arg(name, cpuText, memoryText);
-            if (memoryText.endsWith(QLatin1String(" MB")))
-                sawFigure = true;
+            if (owesAFigure && !memoryText.endsWith(QLatin1String(" MB")))
+                missingFigure << name;
             continue;
         }
         if (!folded) {
             emit log(QStringLiteral("WRONG: %1 has no stats cells in the table").arg(name));
             return;
         }
-        // The folded line is hidden on an unloaded row by design -- there is
-        // no measurement to show -- so only a LOADED one owes a figure here.
-        const QString foldedText = folded->property("text").toString();
+        // The folded line is hidden on a row with no measurement to show -- an
+        // unloaded one, or a loaded one nothing could account for -- so only a
+        // row that owes a figure owes it here.
+        //
+        // WHAT IS ON SCREEN, not what the binding computed. The folded line's
+        // text is evaluated whether or not the line is shown, so reporting it
+        // unconditionally printed "0.0%  ·  0.0 MB" for rows that were
+        // rendering nothing at all -- which is the exact string this issue is
+        // about, from a row that was innocent of it.
+        const QString foldedText = folded->isVisible()
+            ? folded->property("text").toString()
+            : QString();
         stats << QStringLiteral("%1 %2").arg(
-            name, foldedText.isEmpty() ? QStringLiteral("(not loaded)") : foldedText);
-        if (loaded && !folded->isVisible()) {
+            name, foldedText.isEmpty() ? QStringLiteral("(no figure shown)") : foldedText);
+        if (owesAFigure && !folded->isVisible()) {
             emit log(QStringLiteral("WRONG: %1 is loaded and its stats line is not on screen")
                          .arg(name));
             return;
         }
-        if (loaded && foldedText.contains(QLatin1String(" MB")))
-            sawFigure = true;
+        if (owesAFigure && !foldedText.contains(QLatin1String(" MB")))
+            missingFigure << name;
     }
     emit log(QStringLiteral("modules tab stats: %1").arg(stats.join(QStringLiteral(", "))));
-    if (!sawFigure) {
-        emit log(QStringLiteral("WRONG: no row in the Modules tab shows a memory figure"));
+    if (!missingFigure.isEmpty()) {
+        emit log(QStringLiteral("WRONG: loaded row(s) with no memory figure: %1")
+                     .arg(missingFigure.join(QStringLiteral(", "))));
         return;
     }
-    emit log(QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS"));
+    emit log(loadedCoreRows > 0
+                 ? QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS (%1 loaded row(s), "
+                                  "each with a figure)").arg(loadedCoreRows)
+                 : QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS "
+                                  "(no core module is loaded, so every row is an em dash)"));
 
     // ── 3. one row's own Load/Unload button, twice ──
     // The first row that the core is actually in charge of: a view module's

@@ -29,6 +29,7 @@
 #include "ShellCatalogDriver.h"
 #include "ShellConsentDriver.h"
 #include "ShellModulesDriver.h"
+#include "ShellWebAppDriver.h"
 #include "ShellSections.h"
 #include "SmokeRunner.h"
 #include "web/LogosWebPaths.h"
@@ -261,6 +262,15 @@ int main(int argc, char* argv[])
     auto* apps = new ShellAppDriver(&host, shellWidget, &app);
     QObject::connect(apps, &ShellAppDriver::log, &console);
 
+    // AND THE WEB APP, opened and LEFT AGAIN. A `web` module's UI is a platform
+    // page rather than a widget, and the tile-press check above is satisfied by
+    // a page that covers the Shell whole -- which is how a user ended up inside
+    // an app with no way out (#110). This one asserts the other half: the page
+    // is inset to the workspace, the chrome around it is live, and leaving the
+    // app really puts the Shell back.
+    auto* webApps = new ShellWebAppDriver(&host, shellWidget, &app);
+    QObject::connect(webApps, &ShellWebAppDriver::log, &console);
+
     // THE CATALOG, if this launch was pointed at one. It has work only when the
     // command line named a repository (`--repository`, `--trust-signer`,
     // `--install`), which is a developer's run against a local catalog release
@@ -319,8 +329,8 @@ int main(int argc, char* argv[])
         catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app,
-                       [network, driver, apps, catalog, calls, consent, finishOnTheApp]() {
+    QTimer::singleShot(0, &app, [network, driver, apps, webApps, catalog, calls, consent,
+                                 finishOnTheApp]() {
         // The catalog FIRST when there is one: the module it installs is what
         // the Modules tab and the sidebar then have to account for, and a run
         // pointed at a catalog is a developer's rather than a cold-start
@@ -351,6 +361,7 @@ int main(int argc, char* argv[])
             // local-network prompt on a device) with the group exchange
             // perfectly fine.
             apps->run(network->madeConversation());
+            if (webApps->hasWork()) webApps->run();
             driver->run();
             finishOnTheApp();
         } else {
@@ -358,8 +369,9 @@ int main(int argc, char* argv[])
             // Nothing ran ahead of it, so the tab needs its own settle: a QML
             // item has no geometry until the scene has painted, and a press
             // at the centre of a zero-sized button lands on nothing.
-            QTimer::singleShot(2500, driver, [driver, apps, finishOnTheApp]() {
+            QTimer::singleShot(2500, driver, [driver, apps, webApps, finishOnTheApp]() {
                 apps->run();
+                if (webApps->hasWork()) webApps->run();
                 driver->run();
                 finishOnTheApp();
             });

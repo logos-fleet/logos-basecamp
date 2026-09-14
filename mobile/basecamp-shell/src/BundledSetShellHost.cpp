@@ -2,9 +2,13 @@
 
 #include "ShellSections.h"
 #include "ViewModuleRunner.h"
+#include "WebAppSurface.h"
 #include "webview/MobileWebContainerBackend.h"
 
 #include <QQuickWidget>
+#include <QTimer>
+
+#include <utility>
 
 BundledSetShellHost::BundledSetShellHost(BundledSetCoreRuntime* core)
     : m_backend(core)
@@ -35,6 +39,10 @@ BundledSetShellHost::~BundledSetShellHost()
     for (const Mounted& mounted : m_mounted)
         delete mounted.runner;
     m_mounted.clear();
+    // The placeholders are the Shell's for the same reason the widgets are: each
+    // was handed over through onPluginWindowRequested. Forgetting them is all
+    // this side has to do.
+    m_webSurfaces.clear();
 }
 
 QObject* BundledSetShellHost::backendObject() { return &m_backend; }
@@ -57,6 +65,11 @@ QQuickWidget* BundledSetShellHost::mountedView(const QString& name) const
     return m_mounted.value(name).widget;
 }
 
+WebAppSurface* BundledSetShellHost::webSurface(const QString& name) const
+{
+    return m_webSurfaces.value(name);
+}
+
 void BundledSetShellHost::mountApp(const QString& name)
 {
     const auto already = m_mounted.constFind(name);
@@ -75,13 +88,9 @@ void BundledSetShellHost::mountApp(const QString& name)
     // and there is no widget to hand the observer
     // (webview/MobileWebContainerBackend.h).
     //
-    // show() is also what spends the live-runtime budget: it is the sentence
-    // "the user is looking at this module", and the container answers it by
-    // giving some other module's page up.
+    // WHICH IS WHY IT GETS A PLACEHOLDER. See mountWebApp.
     if (m_backend.isWebContainerApp(name)) {
-        basecamp::web::MobileWebContainerBackend::instance()->show(name);
-        m_backend.setCurrentVisibleApp(name);
-        m_backend.report(QStringLiteral("web app %1 is on screen").arg(name));
+        mountWebApp(name);
         return;
     }
     if (!m_backend.isViewModule(name)) {
@@ -123,7 +132,20 @@ void BundledSetShellHost::unmountApp(const QString& name)
     // page simply stops covering the Shell. Nothing is destroyed behind the
     // container's back.
     if (m_backend.isWebContainerApp(name)) {
-        basecamp::web::MobileWebContainerBackend::instance()->hideAll();
+        // The placeholder goes out of the Shell exactly as a `ui_qml` widget
+        // does -- ask first, then delete -- and every page goes behind the Shell
+        // right here rather than on the next sync: the report below already says
+        // the app is off screen, and a caller that read the container in between
+        // would have been told otherwise.
+        if (WebAppSurface* surface = m_webSurfaces.take(name)) {
+            if (m_observer)
+                m_observer->onPluginWindowRemoveRequested(surface);
+            surface->deleteLater();
+        }
+        auto* web = basecamp::web::MobileWebContainerBackend::instance();
+        web->hideAll();
+        m_webVisible.clear();
+        web->setContentRect(QRect());
         if (m_backend.currentVisibleApp() == name)
             m_backend.setCurrentVisibleApp(QString());
         m_backend.report(QStringLiteral("web app %1 is off screen and still "
@@ -154,6 +176,94 @@ void BundledSetShellHost::unmountApp(const QString& name)
         m_backend.setCurrentVisibleApp(QString());
     m_backend.report(QStringLiteral("app %1 is unmounted").arg(name));
 }
+
+// ── #110: A WEB APP NAVIGATES LIKE EVERY OTHER APP ──────────────────────────
+//
+// The page is the platform's and is mounted at the WINDOW's size, so bringing it
+// forward used to cover the Shell whole: no sidebar, no tab bar, no close
+// button, and no way back out of the app once it was open. Nothing was wrong
+// with the page -- there was simply nothing left on screen to press.
+//
+// So a web app is DOCKED, like a `ui_qml` one. What goes into the dock is a
+// placeholder with no pixels in it (WebAppSurface), and the Shell draws the same
+// chrome around it that it draws around any app: a tab with a close button, the
+// sidebar beside it, the navigation above. The placeholder then says where the
+// workspace put it and the page is inset to exactly that rect -- so the chrome
+// is beside the page rather than under it, and closing the tab reaches
+// unloadUiModule() through the path every other app already uses.
+void BundledSetShellHost::mountWebApp(const QString& name)
+{
+    auto* web = basecamp::web::MobileWebContainerBackend::instance();
+    if (WebAppSurface* already = m_webSurfaces.value(name)) {
+        m_backend.setCurrentVisibleApp(name);
+        if (m_observer)
+            m_observer->onPresentAppRequested(already);
+        queueWebSync();
+        return;
+    }
+
+    auto* surface = new WebAppSurface(name);
+    QObject::connect(surface, &WebAppSurface::placementChanged,
+                     &m_backend, [this] { queueWebSync(); });
+    m_webSurfaces.insert(name, surface);
+    m_backend.setCurrentVisibleApp(name);
+
+    // The page comes forward NOW rather than on the sync, so the module the user
+    // pressed is up in the same frame it always was; the sync that follows only
+    // decides where it sits. A Shell that never docks the placeholder -- a host
+    // with no observer, which is every driver that builds this class alone --
+    // then behaves exactly as it did before.
+    web->show(name);
+    m_webVisible = name;
+    if (m_observer)
+        m_observer->onPluginWindowRequested(surface, name);
+    queueWebSync();
+    m_backend.report(QStringLiteral("web app %1 is on screen").arg(name));
+}
+
+void BundledSetShellHost::queueWebSync()
+{
+    if (m_webSyncQueued) return;
+    m_webSyncQueued = true;
+    QTimer::singleShot(0, &m_backend, [this] { syncWebSurfaces(); });
+}
+
+void BundledSetShellHost::syncWebSurfaces()
+{
+    m_webSyncQueued = false;
+    auto* web = basecamp::web::MobileWebContainerBackend::instance();
+
+    // THE ONE THAT IS ACTUALLY ON SCREEN. At most one can be: a dock raises one
+    // tab, and the budget keeps one runtime alive anyway. A placeholder the
+    // Shell has hidden -- another tab raised, the user gone to Settings -- is
+    // not it, and that is what makes "leave the app" a thing the Shell can say.
+    WebAppSurface* front = nullptr;
+    for (WebAppSurface* surface : std::as_const(m_webSurfaces)) {
+        if (surface->onScreen()) { front = surface; break; }
+    }
+
+    if (!front) {
+        // Z-ORDER FIRST, then the rect. The other order leaves a page briefly
+        // occupying the whole window in front of the Shell, which is the defect
+        // itself for the length of a frame.
+        if (!m_webVisible.isEmpty()) {
+            web->hideAll();
+            m_webVisible.clear();
+            m_backend.report(QStringLiteral("no web app is on screen; the Shell has the "
+                                            "window back"));
+        }
+        web->setContentRect(QRect());
+        return;
+    }
+
+    web->setContentRect(front->pageRect());
+    if (m_webVisible != front->moduleName()) {
+        web->show(front->moduleName());
+        m_webVisible = front->moduleName();
+        m_backend.setCurrentVisibleApp(front->moduleName());
+    }
+}
+
 void BundledSetShellHost::setCurrentVisibleApp(const QString& name)
 {
     m_backend.setCurrentVisibleApp(name);

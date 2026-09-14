@@ -4,6 +4,7 @@
 
 #include <web_module_view.h>   // LogosCore::WebModuleView — liblogos' seam
 
+#include <QRect>
 #include <QString>
 #include <QUrl>
 
@@ -58,6 +59,25 @@ struct PlatformPage {
     // a desktop test drives) leaves it unset, and the backend then only keeps
     // the books.
     std::function<void(bool front)> setFrontmost;
+    // WHERE THIS PAGE'S PIXELS GO, in the HOST WINDOW's coordinates and in Qt
+    // logical pixels. An EMPTY rect means the whole window, which is what a
+    // page is mounted at and what it keeps until someone says otherwise.
+    //
+    // Both phones mount a page at the window's size, so a page that is merely
+    // brought forward covers the host's own chrome -- and a user who opened an
+    // app on a phone then cannot leave it again (#110). The Shell answers by
+    // docking a placeholder for a web app exactly as it docks a `ui_qml`
+    // widget and publishing the rect the workspace gave it; this is where that
+    // rect lands.
+    //
+    // Qt logical pixels because that is what the Shell measures in, and the
+    // conversion is the platform's: UIKit points ARE Qt's logical pixels, and
+    // an Android view's are device pixels. Converting here would make the
+    // container know which phone it is on.
+    //
+    // Optional, like setFrontmost: a platform with nothing to position leaves
+    // it unset and the page stays where it was mounted.
+    std::function<void(const QRect& windowRect)> setGeometry;
     // RUN ONE SCRIPT IN THE PAGE. Fire and forget: what the script has to say
     // it says through the page's own console, which the bridge already carries
     // back (`[webView evaluateJavaScript:...]`, `WebView.evaluateJavascript`).
@@ -143,6 +163,15 @@ public:
     // Bring this page in front of the host's own surface, or send it back.
     // A no-op on a platform whose page does not implement it.
     void setFrontmost(bool front);
+
+    // Put this page inside the host's content area rather than over the whole
+    // window (#110). Remembered rather than merely forwarded: an eviction
+    // destroys the platform page and builds a second one from the same
+    // ingredients, and a rect that lived only in the platform half would be
+    // forgotten exactly once -- the module the user came back to would come
+    // back covering the Shell. Empty gives the window back.
+    void setGeometry(const QRect& windowRect);
+    const QRect& geometry() const { return m_geometry; }
 
     // ── the live-runtime budget's other half ───────────────────────────────
     //
@@ -240,6 +269,8 @@ private:
     QString m_uiEntry;
     QString m_headlessEntry;
     bool m_hasUi = true;
+    // Empty until the host says otherwise, which is "the whole window".
+    QRect m_geometry;
     // A page torn down on purpose must not be reported as a page that died.
     // Same reason as the destructor's m_announced, at a smaller scale.
     bool m_swapping = false;

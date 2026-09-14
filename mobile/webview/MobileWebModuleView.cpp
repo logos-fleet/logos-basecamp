@@ -187,6 +187,10 @@ bool MobileWebModuleView::openPage(const QString& entryFile)
     };
 
     m_page = m_platform(pageRequest);
+    // THE PLACE THE HOST ALREADY NAMED. openPage() runs again on every swap, so
+    // this is what keeps a backgrounded module's UI inside the Shell's content
+    // area when it comes back (see setGeometry).
+    if (m_page.setGeometry && !m_geometry.isEmpty()) m_page.setGeometry(m_geometry);
     return bool(m_page.destroy);
 }
 
@@ -289,6 +293,12 @@ void* MobileWebModuleView::nativeHandle() const
 void MobileWebModuleView::setFrontmost(bool front)
 {
     if (m_page.setFrontmost) m_page.setFrontmost(front);
+}
+
+void MobileWebModuleView::setGeometry(const QRect& windowRect)
+{
+    m_geometry = windowRect;
+    if (m_page.setGeometry) m_page.setGeometry(m_geometry);
 }
 
 void MobileWebModuleView::setOnDestroyed(std::function<void()> callback)

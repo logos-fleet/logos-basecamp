@@ -76,6 +76,16 @@ Item {
         return "moduleInspector.status." + (name || "")
     }
 
+    // Whether a row's cpu/memory are a READING. Both are zero for a module
+    // that is idle AND for one nobody measured — a module with no process of
+    // its own, whose container could not account for it (#86) — so a row that
+    // drew "0.0 MB" for the second would be claiming a measurement nobody
+    // made. One definition, because all three stats cells (the desktop pair
+    // and the compact folded line) have to agree on it.
+    function hasFigure(rowItem) {
+        return !!(rowItem && rowItem.isLoaded && rowItem.statsMeasured)
+    }
+
     // Open a specific module's Interface screen (methods + events) by name.
     // Equivalent to clicking that module's "Interface" button — exposed for UI
     // automation/tests, which can't disambiguate the per-row buttons by their
@@ -291,7 +301,7 @@ Item {
                                 objectName: "moduleInspector.stats."
                                             + (rowItem && rowItem.name ? rowItem.name : "")
                                 Layout.fillWidth: true
-                                visible: rowItem && rowItem.isLoaded
+                                visible: root.hasFigure(rowItem)
                                 text: rowItem
                                       ? Number(rowItem.cpu).toFixed(1) + "%  ·  "
                                         + Number(rowItem.memory).toFixed(1) + " MB"
@@ -318,9 +328,9 @@ Item {
                     }
                 }
 
-                // Stats only mean something for a running module; unloaded rows
-                // render an em dash so the column stays aligned without
-                // implying "0% CPU" is a measurement.
+                // A row with no reading (see root.hasFigure) renders an em
+                // dash, so the column stays aligned without implying "0.0 MB"
+                // is a measurement.
                 Component {
                     id: cpuCellComponent
 
@@ -331,10 +341,10 @@ Item {
                         // pass on a table whose stats columns never drew.
                         objectName: "moduleInspector.cpu."
                                     + (rowItem && rowItem.name ? rowItem.name : "")
-                        text: (rowItem && rowItem.isLoaded)
-                              ? Number(rowItem.cpu).toFixed(1) + "%" : "—"
-                        color: (rowItem && rowItem.isLoaded) ? Theme.palette.text
-                                                            : Theme.palette.textMuted
+                        readonly property bool hasFigure: root.hasFigure(rowItem)
+                        text: hasFigure ? Number(rowItem.cpu).toFixed(1) + "%" : "—"
+                        color: hasFigure ? Theme.palette.text
+                                         : Theme.palette.textMuted
                         font.pixelSize: Theme.typography.primaryText
                         verticalAlignment: Text.AlignVCenter
                         elide: Text.ElideRight
@@ -347,10 +357,10 @@ Item {
                     LogosText {
                         objectName: "moduleInspector.memory."
                                     + (rowItem && rowItem.name ? rowItem.name : "")
-                        text: (rowItem && rowItem.isLoaded)
-                              ? Number(rowItem.memory).toFixed(1) + " MB" : "—"
-                        color: (rowItem && rowItem.isLoaded) ? Theme.palette.text
-                                                            : Theme.palette.textMuted
+                        readonly property bool hasFigure: root.hasFigure(rowItem)
+                        text: hasFigure ? Number(rowItem.memory).toFixed(1) + " MB" : "—"
+                        color: hasFigure ? Theme.palette.text
+                                         : Theme.palette.textMuted
                         font.pixelSize: Theme.typography.primaryText
                         verticalAlignment: Text.AlignVCenter
                         elide: Text.ElideRight

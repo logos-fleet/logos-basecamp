@@ -100,6 +100,13 @@ bool ShellStoreBackend::configure(const basecamp::appmanager::ModuleDirectories&
     // arriving after review: an unsigned package, or one signed by a publisher
     // this device's keyring does not know, is not installed at all. The desktop
     // default is `warn`.
+    //
+    // That keyring is the ONLY anchor set, and on a phone the only thing that
+    // enters it is `--trust-signer` (logos-workspace ADR 0008). No shipped
+    // vendor anchor, and no tap-to-trust in the prompt yet -- so a Store shell
+    // in a user's hands browses, downloads, verifies, and REFUSES. The refusal
+    // is the feature; `InstallGate::refusedSigner()` is what makes it
+    // actionable, by keeping the DID a refusal would otherwise drop.
     call(kPackageManager, QStringLiteral("setSignaturePolicy"), {QStringLiteral("require")});
     // And `web` only. Without this, availability would be answered from the
     // NATIVE variant the loader accepts and every native-only catalog entry

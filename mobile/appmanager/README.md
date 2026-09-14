@@ -172,6 +172,24 @@ exactly the failure the field's name invites. logos-package-downloader parses it
 and consults it for nothing, deliberately; the only anchor is the local keyring,
 and `--trust-signer` is the explicit act that enters one.
 
+**Nothing else enters that keyring, and that is the milestone-1 answer to "who
+anchors, on a phone" — logos-workspace ADR 0008.** No shipped vendor anchor: a
+Store build that carried one would silently authorise every first-party-signed
+package on every device, and the only candidate key in this repo is a committed
+fixture whose private half is in the tree. No tap-to-trust in the signer prompt
+yet either — that is the destination, but a Trust button on a phone with no
+out-of-band way to check a DID is trust-on-first-use with the verification
+removed. So a Store shell in a user's hands browses the catalog, downloads,
+verifies, computes the prompt, and *refuses*. **That refusal is the feature**,
+not a gap.
+
+Because `--trust-signer` is the only route in, a refusal has to say which DID it
+refused: it is the one actionable thing in the message and a device has no
+`lgx keyring` to ask afterwards. `InstallGate::refusedSigner()` carries the
+signer's name and DID out of the refusal, and `StoreAppManager` logs them;
+`signerPrompt()` stays empty, because identity survives a refusal and the
+Install button does not.
+
 **The keyring is a named directory** (`ModuleDirectories::keyringDir`), not lgx's
 default. That default is derived from `$XDG_CONFIG_HOME` or `$HOME` — variables a
 phone app does not set and has no claim on — and under the `require` policy a
