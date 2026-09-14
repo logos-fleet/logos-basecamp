@@ -176,9 +176,16 @@ void ShellModulesDriver::run()
         // The folded line is hidden on a row with no measurement to show -- an
         // unloaded one, or a loaded one nothing could account for -- so only a
         // row that owes a figure owes it here.
-        const QString foldedText = folded->property("text").toString();
+        // WHAT IS ON SCREEN, not what the binding computed. The folded line's
+        // text is evaluated whether or not the line is shown, so reporting it
+        // unconditionally printed "0.0%  ·  0.0 MB" for rows that were
+        // rendering nothing at all -- which is the exact string this issue is
+        // about, from a row that was innocent of it.
+        const QString foldedText = folded->isVisible()
+            ? folded->property("text").toString()
+            : QString();
         stats << QStringLiteral("%1 %2").arg(
-            name, foldedText.isEmpty() ? QStringLiteral("(no figure)") : foldedText);
+            name, foldedText.isEmpty() ? QStringLiteral("(no figure shown)") : foldedText);
         if (owesAFigure && !folded->isVisible()) {
             emit log(QStringLiteral("WRONG: %1 is loaded and its stats line is not on screen")
                          .arg(name));
