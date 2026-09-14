@@ -26,8 +26,10 @@ public:
                        QObject* parent = nullptr);
 
     // Opens Settings -> Module Inspector, checks the rows against the Bundled
-    // set, and presses one row's Load/Unload twice. Runs after the first frame:
-    // a QML item has no geometry before one, so there is no button to press.
+    // set, and presses Load/Unload twice on every row the core is in charge of
+    // -- every one of them, because the modules that own threads of their own
+    // are never the first (#96). Runs after the first frame: a QML item has no
+    // geometry before one, so there is no button to press.
     void run();
 
 private:

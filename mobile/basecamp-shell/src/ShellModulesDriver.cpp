@@ -90,6 +90,24 @@ void ShellModulesDriver::run()
     }
     emit log(QStringLiteral("SHELL MODULES TAB LISTS WHAT THE APP HAS"));
 
+    // Every check below reads a row off its own status badge rather than off
+    // the backend: what the user sees is the claim, and a model that moved
+    // without the view following is the failure they are looking for. Re-found
+    // on each reading, because a delegate is free to be rebuilt under us.
+    const auto modelRow = [this](const QString& name) -> QObject* {
+        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
+        return badge ? badge->property("row").value<QObject*>() : nullptr;
+    };
+    // A view module is mounted by the host rather than run by the core (ADR
+    // 0006), so its row says nothing about the Native container.
+    const auto isViewRow = [](QObject* row) {
+        return row && row->property("type").toString() == QLatin1String("ui_qml");
+    };
+    const auto isLoaded = [&modelRow](const QString& name) {
+        QObject* row = modelRow(name);
+        return row && row->property("isLoaded").toBool();
+    };
+
     // ── 2b. every row came in with the app image ──
     // A Store shell may not gain a native module at runtime (ADR 0003), so
     // "the app contains no Downloaded module" is not a thing to hope for --
@@ -103,8 +121,7 @@ void ShellModulesDriver::run()
         // and is the one thing this column exists to tell apart.
         if (downloaded.contains(name))
             continue;
-        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
-        QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
+        QObject* row = modelRow(name);
         const QString installType = row ? row->property("installType").toString()
                                         : QStringLiteral("<no row>");
         if (installType != QLatin1String("embedded"))
@@ -150,12 +167,9 @@ void ShellModulesDriver::run()
     QStringList missingFigure;
     int loadedCoreRows = 0;
     for (const QString& name : rows) {
-        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
-        QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
+        QObject* row = modelRow(name);
         const bool loaded = row && row->property("isLoaded").toBool();
-        const bool isView = row
-            && row->property("type").toString() == QLatin1String("ui_qml");
-        const bool owesAFigure = loaded && !isView;
+        const bool owesAFigure = loaded && !isViewRow(row);
         if (owesAFigure)
             ++loadedCoreRows;
 
@@ -227,12 +241,8 @@ void ShellModulesDriver::run()
     QStringList driven;
     QStringList wrong;
     for (const QString& name : rows) {
-        // The row's own badge, not the backend: what the user sees is the
-        // claim, and a model that moved without the view following is the
-        // failure this is looking for.
-        QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
-        QObject* row = badge ? badge->property("row").value<QObject*>() : nullptr;
-        if (!row || row->property("type").toString() == QLatin1String("ui_qml"))
+        QObject* row = modelRow(name);
+        if (!row || isViewRow(row))
             continue;
 
         QQuickItem* toggle =
@@ -240,20 +250,13 @@ void ShellModulesDriver::run()
         if (!toggle || !toggle->isEnabled() || !toggle->isVisible())
             continue;
 
-        const auto isLoaded = [this, &name]() -> bool {
-            QQuickItem* statusBadge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
-            QObject* statusRow =
-                statusBadge ? statusBadge->property("row").value<QObject*>() : nullptr;
-            return statusRow && statusRow->property("isLoaded").toBool();
-        };
-
-        const bool before = isLoaded();
+        const bool before = isLoaded(name);
         if (!tap(toggle)) return;
         QQuickItem* afterFirstToggle =
             waitFor(QStringLiteral("moduleRow.loadToggle.%1").arg(name), 3000);
-        const bool afterFirst = isLoaded();
+        const bool afterFirst = isLoaded(name);
         if (!afterFirstToggle || !tap(afterFirstToggle)) return;
-        const bool afterSecond = isLoaded();
+        const bool afterSecond = isLoaded(name);
 
         emit log(QStringLiteral("drive modules: %1 %2 -> %3 -> %4")
                      .arg(name)
