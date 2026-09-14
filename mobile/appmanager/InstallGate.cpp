@@ -2,6 +2,28 @@
 
 namespace basecamp::appmanager {
 
+namespace {
+
+// The identity half of a package_manager signer verdict, verbatim, minus the
+// verdict. Empty when the verdict carries no DID: that is the unsigned case,
+// and an unsigned package has no signer to anchor.
+QVariantMap signerIdentityOf(const QVariantMap& verdict)
+{
+    if (verdict.value(QStringLiteral("signerDid")).toString().isEmpty())
+        return {};
+
+    QVariantMap identity;
+    for (const auto& key : {QStringLiteral("name"), QStringLiteral("version"),
+                            QStringLiteral("signatureStatus"), QStringLiteral("signerName"),
+                            QStringLiteral("signerDid")}) {
+        if (verdict.contains(key))
+            identity.insert(key, verdict.value(key));
+    }
+    return identity;
+}
+
+}  // namespace
+
 InstallGate::InstallGate(Modules* modules)
     : m_modules(modules)
 {
@@ -12,6 +34,10 @@ void InstallGate::refuse(const QString& why)
     m_stage = Stage::Refused;
     m_error = why;
     m_prompt.clear();
+    // Cleared here, and re-set by the ONE caller that has a signer to report.
+    // Clearing by default is what keeps a previous row's DID from being offered
+    // as the thing to anchor for this one.
+    m_refusedSigner.clear();
 }
 
 bool InstallGate::begin(const CatalogEntry& entry)
@@ -21,6 +47,7 @@ bool InstallGate::begin(const CatalogEntry& entry)
     m_prompt.clear();
     m_lgxPath.clear();
     m_installedPath.clear();
+    m_refusedSigner.clear();
     m_entry = entry;
 
     if (!m_modules) {
@@ -74,10 +101,21 @@ bool InstallGate::begin(const CatalogEntry& entry)
     // one thing signerTrust exists to prevent.
     m_prompt = m_modules->signerTrust(m_lgxPath);
     if (!m_prompt.value(QStringLiteral("installable"), false).toBool()) {
-        const QString why = m_prompt.value(QStringLiteral("reason")).toString();
+        // Taken before refusing, because refuse() clears m_prompt.
+        const QVariantMap verdict = m_prompt;
+        const QString why = verdict.value(QStringLiteral("reason")).toString();
         refuse(why.isEmpty()
                    ? QStringLiteral("'%1' cannot be installed as signed").arg(entry.name)
                    : why);
+        // THE IDENTITY SURVIVES THE REFUSAL; the Install button does not.
+        //
+        // Under the Store shell's `require` policy this branch is where a
+        // package signed by a publisher no anchor validates ends up, and the
+        // only way forward from there is for that DID to enter the keyring
+        // (ADR 0008). A refusal that named nothing left the Shell holding a
+        // sentence about a key it could not repeat -- the library one layer
+        // down names the DID in its own error for exactly this reason.
+        m_refusedSigner = signerIdentityOf(verdict);
         return false;
     }
 

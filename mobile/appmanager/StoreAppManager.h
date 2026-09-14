@@ -45,6 +45,13 @@ class StoreAppManager : public QObject {
 
     // The signer-trust prompt. Empty unless one is on screen.
     Q_PROPERTY(QVariantMap signerPrompt READ signerPrompt NOTIFY signerPromptChanged)
+    // WHO the last refusal refused, when it had a signer to name. Empty
+    // otherwise. Never a prompt: this is identity without an Install button,
+    // for the case the Store shell's `require` policy exists to produce (ADR
+    // 0008), where the DID is the only way forward and `lastError` is a
+    // sentence that cannot carry it. Changes with `signerPrompt`, which is why
+    // it shares the signal -- the two are the two halves of one verdict.
+    Q_PROPERTY(QVariantMap refusedSigner READ refusedSigner NOTIFY signerPromptChanged)
     // The per-module consent prompt (guideline 4.7.3). Empty unless one is on
     // screen; otherwise { caller, target, callerOrigin, targetOrigin, question }.
     Q_PROPERTY(QVariantMap consentPrompt READ consentPrompt NOTIFY consentPromptChanged)
@@ -85,6 +92,7 @@ public:
     QVariantList catalogEntries() const;
     QString catalogUnavailableReason() const { return m_catalogUnavailable; }
     QVariantMap signerPrompt() const { return m_gate.signerPrompt(); }
+    QVariantMap refusedSigner() const { return m_gate.refusedSigner(); }
     QVariantMap consentPrompt() const;
     int pendingConsentCount() const { return m_consents.pendingCount(); }
     QString lastError() const { return m_lastError; }
