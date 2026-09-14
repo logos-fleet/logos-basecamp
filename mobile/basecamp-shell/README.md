@@ -384,9 +384,19 @@ The driver loads each module it names, waits for it to become reachable -- a
 
 ```bash
 xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
-  --call 'keystore_module.new_account(hunter2)'
-# [shell] CALL OK keystore_module.new_account(hunter2) -> {"address":"0x…","ok":true}
+  --call 'wallet_ui.createAccount(hunter2,main)'
+# [shell] CALL OK wallet_ui.createAccount(hunter2,main) -> {"ok":true,"pending":true}
+# [wallet_ui web] created 0x…
 ```
+
+**Name a module that will actually answer.** A `--call` reaches its target as the
+HOST ANCHOR -- one undifferentiated credential covering the shells,
+`core_service` and every relayed CLI token -- and `keystore_module`'s gate admits
+it at no tier. So `keystore_module.list_accounts` answers (reading is ungated on
+purpose) and `keystore_module.create_unrelated_account` does not, however it is
+spelled: creating an account is Tier D and belongs to the configured custodian.
+Driving `wallet_ui` is how the driver reaches a gated method at all -- it is a
+plainly named module, and it takes the custodian role before it mutates.
 
 **Arguments are strings unless they say otherwise** -- `int:42`, `bool:true`,
 `json:{"chainId":1}`, and `str:` to be explicit. That is the opposite of what

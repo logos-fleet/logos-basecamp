@@ -8,8 +8,13 @@
 // can reach the core is the app, and the only way into the app is its
 // arguments.
 //
-//   --call keystore_module.new_account(hunter2)
+//   --call wallet_ui.createAccount(hunter2,main)
 //   --call keystore_module.list_accounts
+//
+// The write goes through a MODULE that holds the role, not straight at the
+// keystore: a --call arrives as the host anchor, which no tier of the keystore's
+// gate admits, so `create_unrelated_account` would answer "not authorized" here.
+// Reading is ungated, so the second launch asks the keystore directly.
 //
 // WHAT IT PROVES THAT NOTHING ELSE HERE CAN. Run twice across an app restart it
 // is a persistence test: a `web` module's store lives in its page, the page dies

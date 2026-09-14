@@ -25,9 +25,16 @@ struct ModuleCall {
 // was, until this, observable only through some OTHER module that happened to
 // call it.
 //
-//     --call keystore_module.new_account(hunter2)
+//     --call wallet_ui.createAccount(hunter2,main)
 //     --call keystore_module.list_accounts
-//     --call keystore_module.unlock(0xAb..,hunter2)
+//
+// AND THE MODULE IT NAMES MATTERS. A --call arrives at a module as the HOST
+// ANCHOR -- one undifferentiated credential covering the shells, `core_service`
+// and every relayed CLI token -- so a gated method refuses it however it is
+// spelled. `keystore_module.list_accounts` is ungated and answers; creating an
+// account is Tier D and belongs to the configured custodian, so the driver
+// drives `wallet_ui`, which is a plainly named module and takes that role
+// before it mutates.
 //
 // Repeatable, and run IN ORDER on one connection: "create a key, stop the app,
 // start it again and list" is the shape most persistence questions have, and
