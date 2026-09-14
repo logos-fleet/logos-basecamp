@@ -88,6 +88,12 @@ MobileWebModuleView* MobileWebContainerBackend::createView(
         }, Qt::QueuedConnection);
     });
 
+    // WHERE THE HOST ALREADY SAID PAGES GO. A module is loaded whenever the core
+    // discovers or the user installs one, which is not an order the Shell picks
+    // -- so a page opened after the workspace was measured has to be told, and a
+    // page opened before it is told by setContentRect().
+    if (!m_contentRect.isEmpty()) view->setGeometry(m_contentRect);
+
     m_views.insert(name, view);
     // The view is the CONTAINER's, so the container's destruction is what takes
     // the entry out: anything else would leave the registry naming a page that
@@ -102,6 +108,8 @@ void MobileWebContainerBackend::forget(const QString& moduleName)
 {
     if (!m_views.remove(moduleName)) return;
     m_budget.forget(moduleName);
+    // A page that no longer exists is not in front of anything.
+    if (m_frontmost == moduleName) m_frontmost.clear();
     emit viewClosed(moduleName);
 }
 
@@ -113,6 +121,8 @@ void MobileWebContainerBackend::install(const QString& runtimeDir,
 {
     m_platform = std::move(platform);
     m_budget = budget;
+    // A fresh install is a fresh host: the window it measured is not this one's.
+    m_contentRect = QRect();
     m_shimInDocument = shimInDocument;
     m_origin = std::move(origin);
 
@@ -223,6 +233,7 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
     // back, or it would cover the new one whatever the budget thinks.
     for (auto it = m_views.constBegin(); it != m_views.constEnd(); ++it)
         it.value()->setFrontmost(it.key() == moduleName);
+    m_frontmost = moduleName;
 
     qInfo().noquote()
         << QStringLiteral("Web container: %1 is visible; %2 live runtime(s), %3 of %4")
@@ -266,10 +277,26 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
     return evicted;
 }
 
+void MobileWebContainerBackend::setContentRect(const QRect& windowRect)
+{
+    if (m_contentRect == windowRect) return;
+    m_contentRect = windowRect;
+    for (auto it = m_views.constBegin(); it != m_views.constEnd(); ++it)
+        it.value()->setGeometry(m_contentRect);
+    qInfo().noquote()
+        << (m_contentRect.isEmpty()
+                ? QStringLiteral("Web container: a page may use the whole window again")
+                : QStringLiteral("Web container: a page lives at %1,%2 %3x%4 -- the host's "
+                                 "own chrome is outside it")
+                      .arg(m_contentRect.x()).arg(m_contentRect.y())
+                      .arg(m_contentRect.width()).arg(m_contentRect.height()));
+}
+
 void MobileWebContainerBackend::hideAll()
 {
     for (auto it = m_views.constBegin(); it != m_views.constEnd(); ++it)
         it.value()->setFrontmost(false);
+    m_frontmost.clear();
     qInfo().noquote()
         << QStringLiteral("Web container: no module is visible; %1 live runtime(s) held")
                .arg(m_budget.live().size());

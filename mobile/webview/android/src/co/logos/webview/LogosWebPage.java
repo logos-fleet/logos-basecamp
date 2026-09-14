@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.util.Log;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
@@ -181,6 +182,43 @@ public final class LogosWebPage {
             parent.removeView(mWebView);
             parent.addView(mWebView, 0);
         }
+        parent.requestLayout();
+    }
+
+    /**
+     * PUT THIS PAGE WHERE THE SHELL LEFT ROOM FOR IT, in the content view's own
+     * (device) pixels.
+     *
+     * <p>A page is added to {@code android.R.id.content} filling it, so a page
+     * brought forward covers the Shell's own navigation whole -- no sidebar, no
+     * tab bar, no way back out of the app (#110). The Shell docks a placeholder
+     * for a web app exactly as it docks a native one and publishes the rect its
+     * workspace gave it; this is that rect becoming layout params.
+     *
+     * <p>A width or height of zero means "fill the parent again", which is what
+     * a page is mounted at and what it goes back to when no app is docked.
+     * Called from the Android UI thread.
+     */
+    public void setGeometry(int x, int y, int width, int height) {
+        if (mWebView == null) return;
+        ViewGroup parent = (ViewGroup) mWebView.getParent();
+        if (!(parent instanceof FrameLayout)) {
+            // Every Activity this runs in has a FrameLayout content view. Saying
+            // so beats a page that silently stays full-screen and reads as the
+            // defect this method exists to fix.
+            Log.w(TAG, "the page's parent is not a FrameLayout; it cannot be inset");
+            return;
+        }
+        FrameLayout.LayoutParams params;
+        if (width <= 0 || height <= 0) {
+            params = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                                                  FrameLayout.LayoutParams.MATCH_PARENT);
+        } else {
+            params = new FrameLayout.LayoutParams(width, height);
+            params.leftMargin = x;
+            params.topMargin = y;
+        }
+        mWebView.setLayoutParams(params);
         parent.requestLayout();
     }
 

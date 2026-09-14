@@ -24,6 +24,7 @@
 #include "webview/MobileWebContainerBackend.h"
 
 #include <QtTest/QtTest>
+#include <QRect>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
@@ -61,6 +62,13 @@ struct FakeWebView {
     // about the budget's bookkeeping.
     bool frontmost = false;
     int frontmostCalls = 0;
+    // WHERE THE SHELL PUT IT. A page is mounted at the WINDOW's size, so a page
+    // that is merely brought forward covers the Shell's own navigation and the
+    // user is inside an app with no way out (#110). The Shell answers by saying
+    // what rect its workspace left for a web app's page, and this is that rect
+    // arriving at the platform half.
+    QRect geometry;
+    int geometryCalls = 0;
     // What the host asked the page to run. A `web` variant draws into a canvas,
     // so driving a real key or a real finger at it is the one conversation that
     // does not go down the channel.
@@ -102,6 +110,10 @@ private:
             platform.setFrontmost = [page](bool front) {
                 page->frontmost = front;
                 ++page->frontmostCalls;
+            };
+            platform.setGeometry = [page](const QRect& rect) {
+                page->geometry = rect;
+                ++page->geometryCalls;
             };
             platform.evaluateJavaScript = [page](const QString& script) {
                 page->scripts.append(script);
@@ -151,6 +163,18 @@ private:
     std::unique_ptr<LogosCore::WebModuleView> load(const QString& module)
     {
         return LogosCore::webModuleViewFactory()(requestFor(module));
+    }
+
+    // The page this module is on RIGHT NOW. A swap tears the platform page down
+    // and builds a second one from the same ingredients, so the first entry for
+    // a module stops being the one on screen the moment it has been backgrounded
+    // and brought back.
+    std::shared_ptr<FakeWebView> currentPageFor(const QString& module) const
+    {
+        for (auto it = m_pages.rbegin(); it != m_pages.rend(); ++it) {
+            if ((*it)->moduleName == module && !(*it)->destroyed) return *it;
+        }
+        return nullptr;
     }
 
 private slots:
@@ -475,6 +499,7 @@ private slots:
         backend->show("notes_ui");
         QVERIFY(!m_pages[0]->frontmost);
         QVERIFY(m_pages[1]->frontmost);
+        QCOMPARE(backend->frontmostModule(), QStringLiteral("notes_ui"));
     }
 
     // THE WORKSPACE IS BACK ON THE SHELL'S OWN CHROME. Closing an app is not
@@ -503,11 +528,100 @@ private slots:
         QCOMPARE(backend->loadedModules().size(), 2);
         QCOMPARE(backend->budget().live().size(), liveBefore);
         QVERIFY(backend->hasUiPage("counter_ui"));
+        // THE SURFACE, not the books. The budget still names the last module the
+        // user looked at -- nothing was given up -- and nothing is in front.
+        QCOMPARE(backend->frontmostModule(), QString());
+        QCOMPARE(backend->budget().visible(), QStringLiteral("counter_ui"));
     }
 
     // The host's own cost, which is what slice 28's "memory returns to within a
     // stated budget" is measured in. A platform that will not say answers -1;
     // every platform this runs on says something.
+    // ── #110: A PAGE GOES WHERE THE SHELL LEFT ROOM FOR IT ─────────────────
+    //
+    // A page is mounted at the window's size and brought forward when the user
+    // opens the app, which on a phone covers the Shell's navigation entirely:
+    // there is then no sidebar, no tab bar and no way back out of the app. The
+    // Shell's answer is to dock a PLACEHOLDER for a web app exactly as it docks
+    // a `ui_qml` one and to say where the workspace put it -- so the page lands
+    // inside the Shell's content area and the chrome around it stays live.
+    //
+    // Window coordinates, Qt logical pixels: the Shell measures a widget and the
+    // platform half converts. An empty rect is "the whole window", which is what
+    // a page gets before anyone has said otherwise.
+    void theShellSaysWhereAPageGoes()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(2));
+        auto view = load("counter_ui");
+        QCOMPARE(backend->contentRect(), QRect());
+        QCOMPARE(m_pages[0]->geometryCalls, 0);
+
+        backend->setContentRect(QRect(96, 48, 720, 960));
+
+        QCOMPARE(backend->contentRect(), QRect(96, 48, 720, 960));
+        QCOMPARE(m_pages[0]->geometry, QRect(96, 48, 720, 960));
+    }
+
+    // A page opened AFTER the Shell measured its workspace goes there too. The
+    // order is not the host's to pick: a module is loaded whenever the core
+    // discovers or the user installs one, and the content area was measured once
+    // at the first mount.
+    void aPageOpenedLaterGoesWhereTheShellAlreadySaid()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(2));
+        backend->setContentRect(QRect(0, 64, 800, 1000));
+
+        auto view = load("counter_ui");
+
+        QCOMPARE(m_pages[0]->geometry, QRect(0, 64, 800, 1000));
+    }
+
+    // AND IT KEEPS ITS PLACE ACROSS A BACKGROUND TRIP. An eviction destroys the
+    // platform page and builds a second one from the same ingredients
+    // (MobileWebModuleView::swapPageTo), so a rect that lived only in the
+    // platform half would be forgotten exactly once -- and the module the user
+    // came back to would come back covering the Shell again.
+    void aPageKeepsItsPlaceAcrossABackgroundTrip()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(1));
+        backend->setContentRect(QRect(10, 20, 300, 400));
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+
+        backend->show("counter_ui");
+        backend->show("notes_ui");     // counter_ui is backgrounded: a new page
+        backend->show("counter_ui");   // ...and its UI comes back: another one
+
+        auto page = currentPageFor("counter_ui");
+        QVERIFY(page);
+        QCOMPARE(page->geometry, QRect(10, 20, 300, 400));
+    }
+
+    // The Shell's chrome came back, so the page is the window's again. Symmetry
+    // matters here: the reset is what a host does when no app is docked, and a
+    // container that only ever narrowed a page would leave the last app's
+    // letterbox on screen for the next module that opened one.
+    void clearingTheContentRectGivesThePageTheWindowBack()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(2));
+        auto view = load("counter_ui");
+        backend->setContentRect(QRect(10, 20, 300, 400));
+
+        QCOMPARE(m_pages[0]->geometryCalls, 1);
+
+        backend->setContentRect(QRect());
+
+        QCOMPARE(backend->contentRect(), QRect());
+        // TOLD, not merely forgotten: the page is where the last app left it
+        // until the platform is asked to move it back.
+        QCOMPARE(m_pages[0]->geometryCalls, 2);
+        QCOMPARE(m_pages[0]->geometry, QRect());
+    }
+
     void theAppCanWeighItself()
     {
         const qint64 bytes = basecamp::web::appResidentBytes();

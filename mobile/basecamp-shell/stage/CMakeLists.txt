@@ -40,12 +40,16 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/ShellModulesBackend.h
     ${SRC}/BundledSetShellHost.cpp
     ${SRC}/BundledSetShellHost.h
+    ${SRC}/WebAppSurface.cpp
+    ${SRC}/WebAppSurface.h
     ${SRC}/ShellSceneDriver.cpp
     ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.cpp
     ${SRC}/ShellModulesDriver.h
     ${SRC}/ShellAppDriver.cpp
     ${SRC}/ShellAppDriver.h
+    ${SRC}/ShellWebAppDriver.cpp
+    ${SRC}/ShellWebAppDriver.h
     ${SRC}/ShellCatalogDriver.cpp
     ${SRC}/ShellCatalogDriver.h
     ${SRC}/ShellCallDriver.cpp
@@ -93,9 +97,11 @@ install(FILES
     ${SRC}/ShellModulesBackend.h
     ${SRC}/ShellStoreBackend.h
     ${SRC}/BundledSetShellHost.h
+    ${SRC}/WebAppSurface.h
     ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.h
     ${SRC}/ShellAppDriver.h
+    ${SRC}/ShellWebAppDriver.h
     ${SRC}/ShellCatalogDriver.h
     ${SRC}/ShellCallDriver.h
     ${BASECAMP_APP}/ModuleInstanceModel.h
