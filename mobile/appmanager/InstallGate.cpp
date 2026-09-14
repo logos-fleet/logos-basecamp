@@ -2,6 +2,28 @@
 
 namespace basecamp::appmanager {
 
+namespace {
+
+// The identity half of a package_manager signer verdict, verbatim, minus the
+// verdict. Empty when the verdict carries no DID: that is the unsigned case,
+// and an unsigned package has no signer to anchor.
+QVariantMap signerIdentityOf(const QVariantMap& verdict)
+{
+    if (verdict.value(QStringLiteral("signerDid")).toString().isEmpty())
+        return {};
+
+    QVariantMap identity;
+    for (const auto& key : {QStringLiteral("name"), QStringLiteral("version"),
+                            QStringLiteral("signatureStatus"), QStringLiteral("signerName"),
+                            QStringLiteral("signerDid")}) {
+        if (verdict.contains(key))
+            identity.insert(key, verdict.value(key));
+    }
+    return identity;
+}
+
+}  // namespace
+
 InstallGate::InstallGate(Modules* modules)
     : m_modules(modules)
 {
@@ -79,6 +101,7 @@ bool InstallGate::begin(const CatalogEntry& entry)
     // one thing signerTrust exists to prevent.
     m_prompt = m_modules->signerTrust(m_lgxPath);
     if (!m_prompt.value(QStringLiteral("installable"), false).toBool()) {
+        // Taken before refusing, because refuse() clears m_prompt.
         const QVariantMap verdict = m_prompt;
         const QString why = verdict.value(QStringLiteral("reason")).toString();
         refuse(why.isEmpty()
@@ -92,19 +115,7 @@ bool InstallGate::begin(const CatalogEntry& entry)
         // (ADR 0008). A refusal that named nothing left the Shell holding a
         // sentence about a key it could not repeat -- the library one layer
         // down names the DID in its own error for exactly this reason.
-        //
-        // Keyed off the DID rather than the status word: no DID means no signer
-        // to anchor, which is the unsigned case and has nothing to report.
-        const QString did = verdict.value(QStringLiteral("signerDid")).toString();
-        if (!did.isEmpty()) {
-            for (const auto& key : {QStringLiteral("name"), QStringLiteral("version"),
-                                    QStringLiteral("signatureStatus"),
-                                    QStringLiteral("signerName"),
-                                    QStringLiteral("signerDid")}) {
-                if (verdict.contains(key))
-                    m_refusedSigner.insert(key, verdict.value(key));
-            }
-        }
+        m_refusedSigner = signerIdentityOf(verdict);
         return false;
     }
 

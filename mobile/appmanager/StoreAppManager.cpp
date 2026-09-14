@@ -87,10 +87,9 @@ void StoreAppManager::refuseWithGateError()
     const QVariantMap refused = m_gate.refusedSigner();
     const QString did = refused.value(QStringLiteral("signerDid")).toString();
     if (!did.isEmpty()) {
+        const QString name = refused.value(QStringLiteral("name")).toString();
         emit log(QStringLiteral("%1: refused — %2; signer %3 (%4)")
-                     .arg(refused.value(QStringLiteral("name")).toString().isEmpty()
-                              ? m_installing
-                              : refused.value(QStringLiteral("name")).toString(),
+                     .arg(name.isEmpty() ? m_installing : name,
                           m_gate.error(),
                           refused.value(QStringLiteral("signerName")).toString(),
                           did));

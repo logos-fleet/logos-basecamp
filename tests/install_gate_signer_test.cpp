@@ -78,6 +78,26 @@ public:
     }
 };
 
+// package_manager's verdict for the case a Store shell exists to catch: signed,
+// signature valid, and anchored by nothing this device's keyring knows. The
+// identity half survives the refusal; `installable` does not.
+QVariantMap unanchoredSignerVerdict()
+{
+    return QVariantMap{
+        {QStringLiteral("name"), QStringLiteral("counter_ui")},
+        {QStringLiteral("version"), QStringLiteral("1.2.0")},
+        {QStringLiteral("signatureStatus"), QStringLiteral("signed")},
+        {QStringLiteral("signerName"), QStringLiteral("Acme Modules")},
+        {QStringLiteral("signerDid"), QStringLiteral("did:jwk:eyJjcnYiOiJFZDI1NTE5")},
+        {QStringLiteral("trusted"), false},
+        {QStringLiteral("trustedAs"), QString()},
+        {QStringLiteral("policy"), QStringLiteral("require")},
+        {QStringLiteral("installable"), false},
+        {QStringLiteral("reason"),
+         QStringLiteral("signed by a key your keyring does not vouch for")},
+    };
+}
+
 CatalogEntry installableRow()
 {
     CatalogEntry e;
@@ -321,24 +341,13 @@ private slots:
     void underRequireASignerTheKeyringDoesNotVouchForIsRefused()
     {
         FakeModules modules;
-        modules.signerAnswer = QVariantMap{
-            {QStringLiteral("name"), QStringLiteral("counter_ui")},
-            {QStringLiteral("version"), QStringLiteral("1.2.0")},
-            {QStringLiteral("signatureStatus"), QStringLiteral("signed")},
-            {QStringLiteral("signerName"), QStringLiteral("Acme Modules")},
-            {QStringLiteral("signerDid"), QStringLiteral("did:jwk:eyJjcnYiOiJFZDI1NTE5")},
-            {QStringLiteral("trusted"), false},
-            {QStringLiteral("trustedAs"), QString()},
-            {QStringLiteral("policy"), QStringLiteral("require")},
-            {QStringLiteral("installable"), false},
-            {QStringLiteral("reason"),
-             QStringLiteral("signed by a key your keyring does not vouch for")},
-        };
+        modules.signerAnswer = unanchoredSignerVerdict();
         InstallGate gate(&modules);
 
         QVERIFY(!gate.begin(installableRow()));
 
-        QCOMPARE(modules.calls.size(), 2);   // downloaded, asked, refused
+        // Downloaded and asked about; NOT installed.
+        QCOMPARE(modules.calls.size(), 2);
         QVERIFY(!modules.calls.contains(QStringLiteral("install:/tmp/counter_ui.lgx")));
         QCOMPARE(gate.stage(), InstallGate::Stage::Refused);
         QVERIFY(gate.error().contains(QStringLiteral("does not vouch")));
@@ -353,11 +362,7 @@ private slots:
         // then left the flow armed would install on the next tap of Install,
         // which is the same defect as never having refused.
         FakeModules modules;
-        modules.signerAnswer[QStringLiteral("installable")] = false;
-        modules.signerAnswer[QStringLiteral("trusted")] = false;
-        modules.signerAnswer[QStringLiteral("trustedAs")] = QString();
-        modules.signerAnswer[QStringLiteral("reason")] =
-            QStringLiteral("signed by a key your keyring does not vouch for");
+        modules.signerAnswer = unanchoredSignerVerdict();
         InstallGate gate(&modules);
 
         QVERIFY(!gate.begin(installableRow()));
@@ -381,11 +386,7 @@ private slots:
     void aRefusalUnderRequireStillNamesTheSignerItRefused()
     {
         FakeModules modules;
-        modules.signerAnswer[QStringLiteral("installable")] = false;
-        modules.signerAnswer[QStringLiteral("trusted")] = false;
-        modules.signerAnswer[QStringLiteral("trustedAs")] = QString();
-        modules.signerAnswer[QStringLiteral("reason")] =
-            QStringLiteral("signed by a key your keyring does not vouch for");
+        modules.signerAnswer = unanchoredSignerVerdict();
         InstallGate gate(&modules);
 
         QVERIFY(!gate.begin(installableRow()));
@@ -421,7 +422,7 @@ private slots:
         QVERIFY(gate.refusedSigner().isEmpty());
     }
 
-    void arefusalBeforeTheSignerStepNamesNoSigner()
+    void aRefusalBeforeTheSignerStepNamesNoSigner()
     {
         // Nothing was ever asked, so there is nothing to report. A gate that
         // carried a stale signer from a previous row here would offer the user
@@ -440,17 +441,13 @@ private slots:
     void aSecondBeginClearsTheFirstRefusedSigner()
     {
         FakeModules modules;
-        modules.signerAnswer[QStringLiteral("installable")] = false;
-        modules.signerAnswer[QStringLiteral("reason")] =
-            QStringLiteral("signed by a key your keyring does not vouch for");
+        modules.signerAnswer = unanchoredSignerVerdict();
         InstallGate gate(&modules);
         QVERIFY(!gate.begin(installableRow()));
         QVERIFY(!gate.refusedSigner().isEmpty());
 
-        FakeModules fresh;
-        InstallGate ok(&fresh);
-        QVERIFY(ok.begin(installableRow()));
-        // ...and on the gate that refused, a successful second begin clears it.
+        // A second begin that gets past the signer step clears the first one's
+        // DID, so the Shell cannot offer a previous row's signer to anchor.
         modules.signerAnswer[QStringLiteral("installable")] = true;
         QVERIFY(gate.begin(installableRow()));
         QVERIFY(gate.refusedSigner().isEmpty());

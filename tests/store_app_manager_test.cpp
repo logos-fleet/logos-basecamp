@@ -131,6 +131,36 @@ QVariantMap webRow()
                       QStringLiteral("https://logos.test/m/counter_ui"));
 }
 
+// package_manager's two refusing verdicts: nothing signed the package at all,
+// and signed by a publisher no anchor in this device's keyring validates. The
+// second is the case a Store shell's `require` policy exists to produce.
+QVariantMap unsignedVerdict()
+{
+    return QVariantMap{
+        {QStringLiteral("signatureStatus"), QStringLiteral("unsigned")},
+        {QStringLiteral("installable"), false},
+        {QStringLiteral("reason"),
+         QStringLiteral("this package is unsigned and this build requires a signature")},
+    };
+}
+
+QVariantMap unanchoredSignerVerdict()
+{
+    return QVariantMap{
+        {QStringLiteral("name"), QStringLiteral("counter_ui")},
+        {QStringLiteral("version"), QStringLiteral("1.2.0")},
+        {QStringLiteral("signatureStatus"), QStringLiteral("signed")},
+        {QStringLiteral("signerName"), QStringLiteral("Acme Modules")},
+        {QStringLiteral("signerDid"), QStringLiteral("did:jwk:acme")},
+        {QStringLiteral("trusted"), false},
+        {QStringLiteral("trustedAs"), QString()},
+        {QStringLiteral("policy"), QStringLiteral("require")},
+        {QStringLiteral("installable"), false},
+        {QStringLiteral("reason"),
+         QStringLiteral("signed by a key your keyring does not vouch for")},
+    };
+}
+
 QVariantMap nativeOnlyRow()
 {
     return catalogRow(QStringLiteral("desktop_only"), false,
@@ -362,12 +392,7 @@ private slots:
     {
         FakeBackend backend;
         backend.catalog = QVariantList{webRow()};
-        backend.signerAnswer = QVariantMap{
-            {QStringLiteral("signatureStatus"), QStringLiteral("unsigned")},
-            {QStringLiteral("installable"), false},
-            {QStringLiteral("reason"),
-             QStringLiteral("this package is unsigned and this build requires a signature")},
-        };
+        backend.signerAnswer = unsignedVerdict();
         StoreAppManager m(&backend);
         m.refreshCatalog();
 
@@ -390,19 +415,7 @@ private slots:
     {
         FakeBackend backend;
         backend.catalog = QVariantList{webRow()};
-        backend.signerAnswer = QVariantMap{
-            {QStringLiteral("name"), QStringLiteral("counter_ui")},
-            {QStringLiteral("version"), QStringLiteral("1.2.0")},
-            {QStringLiteral("signatureStatus"), QStringLiteral("signed")},
-            {QStringLiteral("signerName"), QStringLiteral("Acme Modules")},
-            {QStringLiteral("signerDid"), QStringLiteral("did:jwk:acme")},
-            {QStringLiteral("trusted"), false},
-            {QStringLiteral("trustedAs"), QString()},
-            {QStringLiteral("policy"), QStringLiteral("require")},
-            {QStringLiteral("installable"), false},
-            {QStringLiteral("reason"),
-             QStringLiteral("signed by a key your keyring does not vouch for")},
-        };
+        backend.signerAnswer = unanchoredSignerVerdict();
         StoreAppManager m(&backend);
         m.refreshCatalog();
         QSignalSpy logSpy(&m, &StoreAppManager::log);
@@ -432,12 +445,7 @@ private slots:
         // unsigned package has no publisher to offer for anchoring.
         FakeBackend backend;
         backend.catalog = QVariantList{webRow()};
-        backend.signerAnswer = QVariantMap{
-            {QStringLiteral("signatureStatus"), QStringLiteral("unsigned")},
-            {QStringLiteral("installable"), false},
-            {QStringLiteral("reason"),
-             QStringLiteral("this package is unsigned and this build requires a signature")},
-        };
+        backend.signerAnswer = unsignedVerdict();
         StoreAppManager m(&backend);
         m.refreshCatalog();
 
