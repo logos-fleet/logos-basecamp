@@ -29,24 +29,46 @@ constexpr int kNoPromptWindowMs = 15000;
 
 // What the page prints when a call it made comes back. The fixture's line, and
 // the only window into a canvas there is: `logos-view: callModuleAsync -> <payload>`.
-const char* const kCallResultPattern = "logos-view: callModuleAsync -> (.*)$";
-
-// A FAILURE IS AN OBJECT WITH `error` IN IT; a success is the bare return value
-// (logos-module-builder's logos_view_wasm_host.cpp). Same rule the fixture's own
-// QML applies, so the two cannot disagree about what a refusal is.
-bool isRefusal(const QString& payload, QString* code, QString* message)
+const QRegularExpression& callResultPattern()
 {
+    static const QRegularExpression re(QStringLiteral("logos-view: callModuleAsync -> (.*)$"));
+    return re;
+}
+
+// WHAT ONE OF THOSE ANSWERS WAS. A FAILURE IS AN OBJECT WITH `error` IN IT; a
+// success is the bare return value (logos-module-builder's
+// logos_view_wasm_host.cpp). Same rule the fixture's own QML applies, so the two
+// cannot disagree about what a refusal is.
+struct CallAnswer {
+    bool    refused = false;
+    QString code;
+    // The refuser's own sentence, or the raw payload when it sent none: a
+    // console line that named only the code would drop the half a person reads.
+    QString message;
+
+    QString describe() const { return QStringLiteral("%1: %2").arg(code, message); }
+};
+
+CallAnswer readAnswer(const QString& payload)
+{
+    CallAnswer answer;
     const QJsonDocument doc = QJsonDocument::fromJson(payload.trimmed().toUtf8());
-    if (!doc.isObject())
-        return false;
+    if (!doc.isObject() || !doc.object().contains(QStringLiteral("error")))
+        return answer;
+
     const QJsonObject obj = doc.object();
-    if (!obj.contains(QStringLiteral("error")))
-        return false;
-    if (code)
-        *code = obj.value(QStringLiteral("error")).toString();
-    if (message)
-        *message = obj.value(QStringLiteral("message")).toString();
-    return true;
+    answer.refused = true;
+    answer.code = obj.value(QStringLiteral("error")).toString();
+    answer.message = obj.value(QStringLiteral("message")).toString();
+    if (answer.message.isEmpty())
+        answer.message = payload;
+    return answer;
+}
+
+// The pair, as every console line in here names it.
+QString pairName(const ConsentScript::Plan& plan)
+{
+    return QStringLiteral("%1 -> %2").arg(plan.caller, plan.target);
 }
 
 } // namespace
@@ -101,7 +123,6 @@ QVariantMap ShellConsentDriver::awaitPrompt(const Plan& plan, int ms)
 
 QString ShellConsentDriver::awaitCallResult(const Plan& plan, int fromLine, int ms)
 {
-    const QRegularExpression re(QString::fromUtf8(kCallResultPattern));
     QString payload;
     pumpUntil(ms, [&]() {
         for (int i = fromLine; i < m_lines.size(); ++i) {
@@ -110,7 +131,7 @@ QString ShellConsentDriver::awaitCallResult(const Plan& plan, int fromLine, int 
             // question.
             if (!m_lines.at(i).startsWith(plan.caller))
                 continue;
-            const QRegularExpressionMatch m = re.match(m_lines.at(i));
+            const QRegularExpressionMatch m = callResultPattern().match(m_lines.at(i));
             if (m.hasMatch()) {
                 payload = m.captured(1).trimmed();
                 return true;
@@ -139,183 +160,205 @@ QString ShellConsentDriver::describeStatus(const Plan& plan) const
              s.value(QStringLiteral("reason")).toString());
 }
 
-bool ShellConsentDriver::runStep(const Plan& plan, Step step)
+bool ShellConsentDriver::awaitPromptOverAFailingCall(const Plan& plan)
 {
     basecamp::appmanager::StoreAppManager* manager = m_backend->appManager();
-    const QString pair = QStringLiteral("%1 -> %2").arg(plan.caller, plan.target);
+    const QString pair = pairName(plan);
 
+    const QVariantMap prompt = awaitPrompt(plan, kPromptWaitMs);
+    if (prompt.isEmpty()) {
+        emit log(QStringLiteral("CONSENT FAILED: no prompt for %1 in %2 ms; %3")
+                     .arg(pair).arg(kPromptWaitMs).arg(describeStatus(plan)));
+        return false;
+    }
+    // WHAT A USER WOULD HAVE READ, before anything is answered -- the same
+    // reason the signer prompt is logged before it is approved.
+    emit log(QStringLiteral("consent: PROMPT for %1 -- \"%2\" (%3 pending)")
+                 .arg(pair, prompt.value(QStringLiteral("question")).toString())
+                 .arg(manager->pendingConsentCount()));
+    emit log(QStringLiteral("consent: capability_module says %1").arg(describeStatus(plan)));
+
+    // THE CALL THAT IS FAILING MEANWHILE. A prompt with a call that died at
+    // MODULE_NOT_LOADED behind it proves nothing: that call never reached the
+    // gate.
+    const QString pending = awaitCallResult(plan, 0, kRetryWaitMs);
+    if (pending.isEmpty()) {
+        emit log(QStringLiteral("CONSENT FAILED: %1 never reported a call result")
+                     .arg(plan.caller));
+        return false;
+    }
+    const CallAnswer undecided = readAnswer(pending);
+    if (!undecided.refused || undecided.code == QLatin1String("MODULE_NOT_LOADED")) {
+        emit log(QStringLiteral("CONSENT FAILED: while undecided, %1's call came back "
+                                "'%2' -- which is not the gate refusing it")
+                     .arg(pair, pending));
+        return false;
+    }
+    emit log(QStringLiteral("consent: while undecided the call failed -- %1")
+                 .arg(undecided.describe()));
+    return true;
+}
+
+bool ShellConsentDriver::runDismiss(const Plan& plan)
+{
+    if (!awaitPromptOverAFailingCall(plan))
+        return false;
+
+    m_backend->appManager()->dismissConsent();
+    const QString state = stateOf(plan);
+    emit log(QStringLiteral("consent: dismissed (not now); capability_module still "
+                            "says state=%1").arg(state));
+    // A dismissal must record NOTHING: turning "not now" into "never" is the one
+    // answer the user did not give.
+    if (state == QLatin1String("granted") || state == QLatin1String("denied")) {
+        emit log(QStringLiteral("CONSENT FAILED: a dismissal was recorded as '%1'")
+                     .arg(state));
+        return false;
+    }
+    return true;
+}
+
+bool ShellConsentDriver::runDeny(const Plan& plan)
+{
+    if (!awaitPromptOverAFailingCall(plan))
+        return false;
+
+    const QString pair = pairName(plan);
+    const int before = int(m_lines.size());
+    m_backend->appManager()->answerConsent(false);
+    emit log(QStringLiteral("consent: answered DENY for %1").arg(pair));
+
+    const QString state = stateOf(plan);
+    if (state != QLatin1String("denied")) {
+        emit log(QStringLiteral("CONSENT FAILED: after the denial capability_module says "
+                                "state=%1").arg(state));
+        return false;
+    }
+    // THE CALLER'S NEXT ATTEMPT, which is where a decision actually lands:
+    // capability_module cannot hold a dispatch thread open across a dialog, so
+    // the refusal is carried by the retry and by nothing else.
+    const QString after = awaitCallResult(plan, before, kRetryWaitMs);
+    if (after.isEmpty()) {
+        emit log(QStringLiteral("CONSENT FAILED: %1 did not call again after the denial")
+                     .arg(plan.caller));
+        return false;
+    }
+    const CallAnswer answer = readAnswer(after);
+    if (!answer.refused) {
+        emit log(QStringLiteral("CONSENT FAILED: the call SUCCEEDED after a denial -- %1")
+                     .arg(after));
+        return false;
+    }
+    emit log(QStringLiteral("consent: after the denial the call still fails -- %1")
+                 .arg(answer.describe()));
+    emit log(QStringLiteral("consent: capability_module says %1").arg(describeStatus(plan)));
+    return true;
+}
+
+bool ShellConsentDriver::runGrant(const Plan& plan)
+{
+    basecamp::appmanager::StoreAppManager* manager = m_backend->appManager();
+    const QString pair = pairName(plan);
+
+    // NO PROMPT IS WAITED FOR. capability_module does not re-announce a pair it
+    // already has a decision for, so a user changing their mind after a denial
+    // is a decision and not a second dialog. When one IS on screen (the plain
+    // grant-first case) it is answered through the queue, so the queue pops it
+    // rather than being left holding a question that has been answered behind
+    // its back.
+    const int before = int(m_lines.size());
+    const QVariantMap prompt = manager->consentPrompt();
+    const bool onScreen =
+        prompt.value(QStringLiteral("caller")).toString() == plan.caller
+        && prompt.value(QStringLiteral("target")).toString() == plan.target;
+    if (onScreen)
+        manager->answerConsent(true);
+    else if (!m_backend->decideConsent(plan.caller, plan.target, true)) {
+        emit log(QStringLiteral("CONSENT FAILED: the grant for %1 was not recorded")
+                     .arg(pair));
+        return false;
+    }
+    emit log(QStringLiteral("consent: answered GRANT for %1%2")
+                 .arg(pair, onScreen ? QStringLiteral(" (from the prompt)")
+                                     : QStringLiteral(" (no prompt on screen)")));
+
+    const QString state = stateOf(plan);
+    if (state != QLatin1String("granted")) {
+        emit log(QStringLiteral("CONSENT FAILED: after the grant capability_module says "
+                                "state=%1").arg(state));
+        return false;
+    }
+    const QString after = awaitCallResult(plan, before, kRetryWaitMs);
+    if (after.isEmpty()) {
+        emit log(QStringLiteral("CONSENT FAILED: %1 did not call again after the grant")
+                     .arg(plan.caller));
+        return false;
+    }
+    const CallAnswer answer = readAnswer(after);
+    if (answer.refused) {
+        emit log(QStringLiteral("CONSENT FAILED: the call is still refused after a grant "
+                                "-- %1").arg(answer.describe()));
+        return false;
+    }
+    emit log(QStringLiteral("consent: after the grant the call SUCCEEDS -- %1").arg(after));
+    return true;
+}
+
+bool ShellConsentDriver::runExpectGranted(const Plan& plan)
+{
+    basecamp::appmanager::StoreAppManager* manager = m_backend->appManager();
+    const QString pair = pairName(plan);
+
+    // THE SECOND LAUNCH. Nothing is answered here: what is asserted is that the
+    // answer given by a PREVIOUS run of this app was read back off disk before
+    // anything asked, that no prompt comes up, and that the call goes straight
+    // through.
+    const QString state = stateOf(plan);
+    emit log(QStringLiteral("consent: at startup capability_module says %1")
+                 .arg(describeStatus(plan)));
+    if (state != QLatin1String("granted")) {
+        emit log(QStringLiteral("CONSENT FAILED: the grant for %1 did not survive the "
+                                "restart (state=%2)").arg(pair, state));
+        return false;
+    }
+
+    const QString result = awaitCallResult(plan, 0, kRetryWaitMs);
+    if (result.isEmpty()) {
+        emit log(QStringLiteral("CONSENT FAILED: %1 made no call to assert")
+                     .arg(plan.caller));
+        return false;
+    }
+    const CallAnswer answer = readAnswer(result);
+    if (answer.refused) {
+        emit log(QStringLiteral("CONSENT FAILED: the call was refused on a granted pair "
+                                "-- %1").arg(answer.describe()));
+        return false;
+    }
+    emit log(QStringLiteral("consent: the call succeeded with no prompt -- %1").arg(result));
+
+    // AND NO SECOND QUESTION. A grant that persisted but still prompted would
+    // satisfy every other check here and be exactly the thing the criterion
+    // forbids.
+    const bool prompted = pumpUntil(kNoPromptWindowMs, [manager]() {
+        return !manager->consentPrompt().isEmpty();
+    });
+    if (prompted) {
+        emit log(QStringLiteral("CONSENT FAILED: a granted pair prompted again -- \"%1\"")
+                     .arg(manager->consentPrompt().value(QStringLiteral("question")).toString()));
+        return false;
+    }
+    emit log(QStringLiteral("consent: no prompt in %1 ms, as a remembered grant requires")
+                 .arg(kNoPromptWindowMs));
+    return true;
+}
+
+bool ShellConsentDriver::runStep(const Plan& plan, Step step)
+{
     switch (step) {
-    case Step::Deny:
-    case Step::Dismiss: {
-        const QVariantMap prompt = awaitPrompt(plan, kPromptWaitMs);
-        if (prompt.isEmpty()) {
-            emit log(QStringLiteral("CONSENT FAILED: no prompt for %1 in %2 ms; %3")
-                         .arg(pair).arg(kPromptWaitMs).arg(describeStatus(plan)));
-            return false;
-        }
-        // WHAT A USER WOULD HAVE READ, before anything is answered -- the same
-        // reason the signer prompt is logged before it is approved.
-        emit log(QStringLiteral("consent: PROMPT for %1 -- \"%2\" (%3 pending)")
-                     .arg(pair, prompt.value(QStringLiteral("question")).toString())
-                     .arg(manager->pendingConsentCount()));
-        emit log(QStringLiteral("consent: capability_module says %1").arg(describeStatus(plan)));
-
-        // THE CALL THAT IS FAILING MEANWHILE. A prompt with a call that died at
-        // MODULE_NOT_LOADED behind it proves nothing: that call never reached
-        // the gate.
-        const QString pending = awaitCallResult(plan, 0, kRetryWaitMs);
-        QString code;
-        QString why;
-        if (pending.isEmpty()) {
-            emit log(QStringLiteral("CONSENT FAILED: %1 never reported a call result")
-                         .arg(plan.caller));
-            return false;
-        }
-        if (!isRefusal(pending, &code, &why) || code == QLatin1String("MODULE_NOT_LOADED")) {
-            emit log(QStringLiteral("CONSENT FAILED: while undecided, %1's call came back "
-                                    "'%2' -- which is not the gate refusing it")
-                         .arg(pair, pending));
-            return false;
-        }
-        emit log(QStringLiteral("consent: while undecided the call failed -- %1: %2")
-                     .arg(code, why.isEmpty() ? pending : why));
-
-        if (step == Step::Dismiss) {
-            manager->dismissConsent();
-            const QString state = stateOf(plan);
-            emit log(QStringLiteral("consent: dismissed (not now); capability_module still "
-                                    "says state=%1").arg(state));
-            // A dismissal must record NOTHING: turning "not now" into "never"
-            // is the one answer the user did not give.
-            if (state == QLatin1String("granted") || state == QLatin1String("denied")) {
-                emit log(QStringLiteral("CONSENT FAILED: a dismissal was recorded as '%1'")
-                             .arg(state));
-                return false;
-            }
-            return true;
-        }
-
-        const int before = int(m_lines.size());
-        manager->answerConsent(false);
-        emit log(QStringLiteral("consent: answered DENY for %1").arg(pair));
-
-        const QString state = stateOf(plan);
-        if (state != QLatin1String("denied")) {
-            emit log(QStringLiteral("CONSENT FAILED: after the denial capability_module says "
-                                    "state=%1").arg(state));
-            return false;
-        }
-        // THE CALLER'S NEXT ATTEMPT, which is where a decision actually lands:
-        // capability_module cannot hold a dispatch thread open across a dialog,
-        // so the refusal is carried by the retry and by nothing else.
-        const QString after = awaitCallResult(plan, before, kRetryWaitMs);
-        if (after.isEmpty()) {
-            emit log(QStringLiteral("CONSENT FAILED: %1 did not call again after the denial")
-                         .arg(plan.caller));
-            return false;
-        }
-        if (!isRefusal(after, &code, &why)) {
-            emit log(QStringLiteral("CONSENT FAILED: the call SUCCEEDED after a denial -- %1")
-                         .arg(after));
-            return false;
-        }
-        emit log(QStringLiteral("consent: after the denial the call still fails -- %1: %2")
-                     .arg(code, why.isEmpty() ? after : why));
-        emit log(QStringLiteral("consent: capability_module says %1").arg(describeStatus(plan)));
-        return true;
-    }
-
-    case Step::Grant: {
-        // NO PROMPT IS WAITED FOR. capability_module does not re-announce a pair
-        // it already has a decision for, so a user changing their mind after a
-        // denial is a decision and not a second dialog. When one IS on screen
-        // (the plain grant-first case) it is answered through the queue, so the
-        // queue pops it rather than being left holding a question that has been
-        // answered behind its back.
-        const int before = int(m_lines.size());
-        const QVariantMap prompt = manager->consentPrompt();
-        const bool onScreen =
-            prompt.value(QStringLiteral("caller")).toString() == plan.caller
-            && prompt.value(QStringLiteral("target")).toString() == plan.target;
-        if (onScreen)
-            manager->answerConsent(true);
-        else if (!m_backend->decideConsent(plan.caller, plan.target, true)) {
-            emit log(QStringLiteral("CONSENT FAILED: the grant for %1 was not recorded")
-                         .arg(pair));
-            return false;
-        }
-        emit log(QStringLiteral("consent: answered GRANT for %1%2")
-                     .arg(pair, onScreen ? QStringLiteral(" (from the prompt)")
-                                         : QStringLiteral(" (no prompt on screen)")));
-
-        const QString state = stateOf(plan);
-        if (state != QLatin1String("granted")) {
-            emit log(QStringLiteral("CONSENT FAILED: after the grant capability_module says "
-                                    "state=%1").arg(state));
-            return false;
-        }
-        const QString after = awaitCallResult(plan, before, kRetryWaitMs);
-        if (after.isEmpty()) {
-            emit log(QStringLiteral("CONSENT FAILED: %1 did not call again after the grant")
-                         .arg(plan.caller));
-            return false;
-        }
-        QString code;
-        QString why;
-        if (isRefusal(after, &code, &why)) {
-            emit log(QStringLiteral("CONSENT FAILED: the call is still refused after a grant "
-                                    "-- %1: %2").arg(code, why.isEmpty() ? after : why));
-            return false;
-        }
-        emit log(QStringLiteral("consent: after the grant the call SUCCEEDS -- %1").arg(after));
-        return true;
-    }
-
-    case Step::ExpectGranted: {
-        // THE SECOND LAUNCH. Nothing is answered here: what is asserted is that
-        // the answer given by a PREVIOUS run of this app was read back off disk
-        // before anything asked, that no prompt comes up, and that the call goes
-        // straight through.
-        const QString state = stateOf(plan);
-        emit log(QStringLiteral("consent: at startup capability_module says %1")
-                     .arg(describeStatus(plan)));
-        if (state != QLatin1String("granted")) {
-            emit log(QStringLiteral("CONSENT FAILED: the grant for %1 did not survive the "
-                                    "restart (state=%2)").arg(pair, state));
-            return false;
-        }
-
-        const QString result = awaitCallResult(plan, 0, kRetryWaitMs);
-        if (result.isEmpty()) {
-            emit log(QStringLiteral("CONSENT FAILED: %1 made no call to assert")
-                         .arg(plan.caller));
-            return false;
-        }
-        QString code;
-        QString why;
-        if (isRefusal(result, &code, &why)) {
-            emit log(QStringLiteral("CONSENT FAILED: the call was refused on a granted pair "
-                                    "-- %1: %2").arg(code, why.isEmpty() ? result : why));
-            return false;
-        }
-        emit log(QStringLiteral("consent: the call succeeded with no prompt -- %1").arg(result));
-
-        // AND NO SECOND QUESTION. A grant that persisted but still prompted
-        // would satisfy every other check here and be exactly the thing the
-        // criterion forbids.
-        basecamp::appmanager::StoreAppManager* mgr = m_backend->appManager();
-        const bool prompted = pumpUntil(kNoPromptWindowMs, [&]() {
-            return !mgr->consentPrompt().isEmpty();
-        });
-        if (prompted) {
-            emit log(QStringLiteral("CONSENT FAILED: a granted pair prompted again -- \"%1\"")
-                         .arg(mgr->consentPrompt().value(QStringLiteral("question")).toString()));
-            return false;
-        }
-        emit log(QStringLiteral("consent: no prompt in %1 ms, as a remembered grant requires")
-                     .arg(kNoPromptWindowMs));
-        return true;
-    }
+    case Step::Deny:          return runDeny(plan);
+    case Step::Dismiss:       return runDismiss(plan);
+    case Step::Grant:         return runGrant(plan);
+    case Step::ExpectGranted: return runExpectGranted(plan);
     }
     return false;
 }

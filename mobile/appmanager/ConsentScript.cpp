@@ -17,25 +17,48 @@ QString valueAfter(const QStringList& args, int& i)
     return args.at(++i);
 }
 
+// THE STEP WORDS, SPELLED ONCE. The parser, `stepName` and the sentence a bad
+// word is refused with all read these rows, so a fifth step cannot be taught to
+// one of the three and forgotten in the other two.
+struct StepWord {
+    const char*         word;
+    ConsentScript::Step step;
+};
+
+const StepWord kStepWords[] = {
+    {"deny",           ConsentScript::Step::Deny},
+    {"grant",          ConsentScript::Step::Grant},
+    {"dismiss",        ConsentScript::Step::Dismiss},
+    {"expect-granted", ConsentScript::Step::ExpectGranted},
+};
+
 bool parseStep(const QString& word, ConsentScript::Step* out)
 {
-    if (word == QLatin1String("deny"))            { *out = ConsentScript::Step::Deny;    return true; }
-    if (word == QLatin1String("grant"))           { *out = ConsentScript::Step::Grant;   return true; }
-    if (word == QLatin1String("dismiss"))         { *out = ConsentScript::Step::Dismiss; return true; }
-    if (word == QLatin1String("expect-granted"))  { *out = ConsentScript::Step::ExpectGranted; return true; }
+    for (const StepWord& known : kStepWords) {
+        if (word == QLatin1String(known.word)) {
+            *out = known.step;
+            return true;
+        }
+    }
     return false;
+}
+
+// Every step word, for the refusal that lists what was expected instead.
+QString knownStepWords()
+{
+    QStringList words;
+    for (const StepWord& known : kStepWords)
+        words << QLatin1String(known.word);
+    return words.join(QStringLiteral(", "));
 }
 
 } // namespace
 
 QString ConsentScript::stepName(Step step)
 {
-    switch (step) {
-    case Step::Deny:          return QStringLiteral("deny");
-    case Step::Grant:         return QStringLiteral("grant");
-    case Step::Dismiss:       return QStringLiteral("dismiss");
-    case Step::ExpectGranted: return QStringLiteral("expect-granted");
-    }
+    for (const StepWord& known : kStepWords)
+        if (known.step == step)
+            return QString::fromLatin1(known.word);
     return QStringLiteral("unknown");
 }
 
@@ -80,9 +103,8 @@ ConsentScript ConsentScript::fromArguments(const QStringList& args)
             Step step{};
             if (!parseStep(word.trimmed(), &step)) {
                 out.m_refusals
-                    << QStringLiteral("%1: '%2' is not a consent step "
-                                      "(deny, grant, dismiss, expect-granted)")
-                           .arg(spec, word.trimmed());
+                    << QStringLiteral("%1: '%2' is not a consent step (%3)")
+                           .arg(spec, word.trimmed(), knownStepWords());
                 refused = true;
                 break;
             }

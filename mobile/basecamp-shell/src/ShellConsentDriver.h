@@ -92,6 +92,19 @@ private:
     // past a failed step would assert against a state nothing produced.
     bool runStep(const Plan& plan, Step step);
 
+    // One per step word. Each emits what it saw and what it expected, so a
+    // false is already explained by the time it is returned.
+    bool runDeny(const Plan& plan);
+    bool runDismiss(const Plan& plan);
+    bool runGrant(const Plan& plan);
+    bool runExpectGranted(const Plan& plan);
+
+    // The prologue `deny` and `dismiss` share: the prompt for this pair is up,
+    // and the call it is about is meanwhile failing AT THE GATE -- a call that
+    // died at MODULE_NOT_LOADED never reached it, and a prompt standing over one
+    // proves nothing.
+    bool awaitPromptOverAFailingCall(const Plan& plan);
+
     ShellModulesBackend* m_backend;   // not owned
     basecamp::appmanager::ConsentScript m_script;
     // Every line the backend has logged, so a step can ask what happened AFTER
