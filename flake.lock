@@ -34428,11 +34428,11 @@
         "rust-overlay": "rust-overlay_24"
       },
       "locked": {
-        "lastModified": 1789372182,
-        "narHash": "sha256-cVIloX+HHEE1St8CUSOu4EbyLVSEvUmzybta1voMut8=",
+        "lastModified": 1789484349,
+        "narHash": "sha256-H6G2Qk60/HBkRsgWMfsbTV0VBpSwxc8FTG3ePH2VgVM=",
         "owner": "logos-fleet",
         "repo": "logos-module-builder",
-        "rev": "8c00d21aa53a4b9eea119110bfa8a556e3e38a6f",
+        "rev": "aa5e5d36e9c6c9c4e77f545113d260631fe5ce1f",
         "type": "github"
       },
       "original": {
