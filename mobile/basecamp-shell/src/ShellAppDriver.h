@@ -59,6 +59,13 @@ private:
         // The handle of the list whose `count` says the app has real data, or
         // empty if this app has no such list.
         QString contentList;
+        // How often this app's backend calls the module it fronts on a timer,
+        // or 0 for one that does not. The close-and-re-open check below waits
+        // out one of these on the SECOND mount: a periodic call made through a
+        // transport the first mount left behind is the shape of
+        // logos-workspace#158, and a run that returns before the first tick
+        // never makes it.
+        int probeIntervalMs = 0;
     };
     static KnownApp knownApp(const QString& appName);
 

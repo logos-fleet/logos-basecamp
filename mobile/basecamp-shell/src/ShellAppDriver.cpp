@@ -15,6 +15,11 @@ namespace {
 // replica's fetch crosses the node, and the backend's own snapshot call is a
 // module hop behind it.
 constexpr int kModelBudgetMs = 15000;
+// How long a mount gets to put the app's handles on screen: the launch is
+// queued, the framework dlopens the plugin and the replica waits for its
+// source -- seconds of work on a phone. Spent once per mount, and step 6
+// mounts the app a second time.
+constexpr int kMountBudgetMs = 30000;
 } // namespace
 
 ShellAppDriver::ShellAppDriver(BundledSetShellHost* host, QWidget* shellWidget,
@@ -38,7 +43,9 @@ ShellAppDriver::KnownApp ShellAppDriver::knownApp(const QString& appName)
     // in it are the core's conversations.
     if (appName == QLatin1String("chat_ui")) {
         const QString pane = QStringLiteral("conversationList");
-        return { { pane, QStringLiteral("newMenuButton") }, pane };
+        // 10 s is ChatBackend's own kHealthIntervalMs. Named here rather than
+        // guessed: the re-open check below has to outlast one tick of it.
+        return { { pane, QStringLiteral("newMenuButton") }, pane, 10000 };
     }
     // view_counter's button and label -- the fixture's whole view. It lists
     // nothing, so there is no content to check it against.
@@ -93,7 +100,7 @@ void ShellAppDriver::run(bool expectLiveContent)
     // on a phone, and the QML then has to instantiate. So this waits for the
     // app's handles rather than for the call to return.
     for (const QString& handle : handles) {
-        QQuickItem* item = waitFor(handle, 30000);
+        QQuickItem* item = waitFor(handle, kMountBudgetMs);
         if (!item) {
             dumpNames(QStringLiteral("app '%1' has no '%2' on screen").arg(app, handle));
             return;
@@ -126,9 +133,14 @@ void ShellAppDriver::run(bool expectLiveContent)
                                 "never took the widget").arg(app));
         return;
     }
-    if (view->width() <= 0 || view->height() <= 0) {
+    // Read into locals rather than off `view` at the summary below: step 6
+    // closes this mount, and the widget the host handed the Shell is deleted
+    // with it -- so by the time that line runs there is nothing left to ask.
+    const int shownWidth = view->width();
+    const int shownHeight = view->height();
+    if (shownWidth <= 0 || shownHeight <= 0) {
         emit log(QStringLiteral("WRONG: '%1' is mounted in the Shell at %2x%3")
-                     .arg(app).arg(view->width()).arg(view->height()));
+                     .arg(app).arg(shownWidth).arg(shownHeight));
         return;
     }
 
@@ -179,10 +191,65 @@ void ShellAppDriver::run(bool expectLiveContent)
         }
     }
 
+    // ── 6. and the user can close it and open it again ──
+    //
+    // A docked app has a close button, and pressing it destroys the whole mount
+    // -- the view module's plugin object, its replica node, and the LogosAPI the
+    // host built for THAT mount. Opening the app again builds a second set. No
+    // run ever did that pair, and the pair is exactly what broke: the
+    // module-to-module transport cached the first mount's identity object for
+    // the life of the PROCESS, so the second mount's first call out ran on freed
+    // memory -- a SIGSEGV inside TokenManager::getToken, reached from chat_ui's
+    // health probe (logos-workspace#158).
+    //
+    // Through IShellHost rather than by pressing the tab's close button: the
+    // button is the Shell's own chrome and ShellWebAppDriver already closes a
+    // web app through this same call. What is under test here is the MOUNT, not
+    // the control that asks for it.
+    m_host->unloadUiModule(app);
+    // Long enough for the deferred deletes the close queues -- the widget first,
+    // the runner behind it -- to actually run. Re-opening before they do would
+    // leave the first mount's LogosAPI alive and prove nothing.
+    settle(1500);
+    if (m_host->mountedView(app)) {
+        emit log(QStringLiteral("WRONG: '%1' was closed and the host still holds a view "
+                                "for it").arg(app));
+        return;
+    }
+    m_host->loadUiModule(app);
+    for (const QString& handle : handles) {
+        if (!waitFor(handle, kMountBudgetMs)) {
+            dumpNames(QStringLiteral("app '%1' was closed and opened again and has no "
+                                     "'%2' on screen").arg(app, handle));
+            return;
+        }
+    }
+    if (!m_host->mountedView(app)) {
+        emit log(QStringLiteral("WRONG: '%1' rendered again and the host holds no view "
+                                "for it").arg(app));
+        return;
+    }
+    // DRAWN IS NOT ENOUGH, and the call that matters is not the mount's. The
+    // frame the report faulted in is chat_ui's periodic health probe -- the
+    // second mount's timer, calling out through the transport the first mount
+    // left behind -- so the loop is turned for a full probe interval and a
+    // margin, which is what makes that call happen inside the run rather than
+    // after it. An app with no such timer asks for nothing and pays nothing.
+    if (known.probeIntervalMs > 0)
+        settle(known.probeIntervalMs + 2000);
+    else
+        settle(1000);
+    if (!m_host->mountedView(app)) {
+        emit log(QStringLiteral("WRONG: '%1' came back and did not stay").arg(app));
+        return;
+    }
+    emit log(QStringLiteral("shell app: %1 was closed and opened again, and the second "
+                            "mount is live").arg(app));
+
     emit log(QStringLiteral("shell app: %1 rendered %2 in the Shell (%3x%4) %5 ms after "
                             "the tile was pressed")
                  .arg(app, handles.join(QStringLiteral(", ")))
-                 .arg(view->width()).arg(view->height()).arg(shownMs));
+                 .arg(shownWidth).arg(shownHeight).arg(shownMs));
     emit log(QStringLiteral("SHELL SHOWS THE BUNDLED APP"));
     emit appShown(app, shownMs);
 }
