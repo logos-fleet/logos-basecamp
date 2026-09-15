@@ -6,19 +6,27 @@ namespace {
 
 const QLatin1String kCoreModuleType("core");
 
+// EITHER EVIDENCE, and they answer the same question from two sides: the
+// container has a UI page open for it right now, or its installed package says
+// it has one (#123). The second is what a module that is installed and not
+// running has -- which on every launch after the one that installed it is every
+// Downloaded module, because a Store shell's cold start does not load what it
+// discovers. Pressing the tile is what brings it up.
+//
+// ONE RULE, because the sidebar's tile and the Modules tab's row are two
+// answers to it and they must not disagree about what a module is.
+bool declaresUi(const ModuleFacts& facts, const QString& name)
+{
+    return facts.openPages.contains(name) || facts.uiPackages.contains(name);
+}
+
 // The rule `isWebContainerApp` publishes, taking the manifest's name list from
 // the caller: `launcherApps` asks it once per known module and must not rebuild
 // that list every time.
 bool runsInWebContainer(const ModuleFacts& facts, const QStringList& bundled,
                         const QString& name)
 {
-    // EITHER EVIDENCE, and they answer the same question from two sides: the
-    // container has a UI page open for it right now, or its installed package
-    // says it has one (#123). The second is what a module that is installed and
-    // not running has -- which on every launch after the one that installed it
-    // is every Downloaded module, because a Store shell's cold start does not
-    // load what it discovers. Pressing the tile is what brings it up.
-    return (facts.openPages.contains(name) || facts.uiPackages.contains(name))
+    return declaresUi(facts, name)
         && (facts.shipped.contains(name) || !bundled.contains(name));
 }
 
@@ -84,11 +92,10 @@ QVariantMap discoveredRow(const ModuleFacts& facts, const QString& name, bool em
     // a second answer to it.
     row[QStringLiteral("version")] = QString();
     // Its page, or its package's own manifest when nothing has opened one yet
-    // -- the same pair of answers the tile is made from, so a row cannot call
-    // a module a `core` one while the sidebar carries an app tile for it.
+    // -- by `declaresUi`, the same rule the tile is made by, so a row cannot
+    // call a module a `core` one while the sidebar carries an app tile for it.
     row[QStringLiteral("type")] =
-        (facts.openPages.contains(name) || facts.uiPackages.contains(name))
-            ? kViewModuleType : kCoreModuleType;
+        declaresUi(facts, name) ? kViewModuleType : kCoreModuleType;
     row[QStringLiteral("category")] =
         embedded ? QStringLiteral("bundled") : QStringLiteral("downloaded");
     row[QStringLiteral("installType")] =

@@ -41,23 +41,6 @@ BundledSetShellHost::BundledSetShellHost(BundledSetCoreRuntime* core)
                      &m_backend, [this](const QString& name) { dropWebSurface(name); });
 }
 
-void BundledSetShellHost::dropWebSurface(const QString& name)
-{
-    WebAppSurface* surface = m_webSurfaces.take(name);
-    if (!surface) return;
-    if (m_observer)
-        m_observer->onPluginWindowRemoveRequested(surface);
-    surface->deleteLater();
-    if (m_webVisible == name) m_webVisible.clear();
-    if (m_backend.currentVisibleApp() == name)
-        m_backend.setCurrentVisibleApp(QString());
-    m_backend.report(QStringLiteral("web app %1 has no page any more; its tab is closed")
-                         .arg(name));
-    // Whatever is left decides what is in front now, by the one rule that
-    // decides it everywhere else.
-    queueWebSync();
-}
-
 BundledSetShellHost::~BundledSetShellHost()
 {
     // The runners, not the widgets: a mounted widget was handed to the Shell
@@ -275,6 +258,23 @@ void BundledSetShellHost::mountWebApp(const QString& name)
         m_observer->onPluginWindowRequested(surface, name);
     queueWebSync();
     m_backend.report(QStringLiteral("web app %1 is on screen").arg(name));
+}
+
+void BundledSetShellHost::dropWebSurface(const QString& name)
+{
+    WebAppSurface* surface = m_webSurfaces.take(name);
+    if (!surface) return;
+    if (m_observer)
+        m_observer->onPluginWindowRemoveRequested(surface);
+    surface->deleteLater();
+    if (m_webVisible == name) m_webVisible.clear();
+    if (m_backend.currentVisibleApp() == name)
+        m_backend.setCurrentVisibleApp(QString());
+    m_backend.report(QStringLiteral("web app %1 has no page any more; its tab is closed")
+                         .arg(name));
+    // Whatever is left decides what is in front now, by the one rule that
+    // decides it everywhere else.
+    queueWebSync();
 }
 
 void BundledSetShellHost::queueWebSync()
