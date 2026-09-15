@@ -83,6 +83,16 @@ let
   # again here: ios-runner.nix names its own runners, and one copy of that
   # convention is enough.
   scriptOf = c: lib.getExe c.drv;
+
+  # The DEVICE runners alone, for the launch-retry case below: the simulator
+  # half launches through simctl and has never shown the race.
+  deviceCases = lib.flatten (lib.mapAttrsToList
+    (name: frameworks:
+      lib.mapAttrsToList
+        (half: webAssetsPath:
+          (fixture "${name}-${half}" frameworks webAssetsPath).runDevice)
+        webHalves)
+    sizes);
 in
 pkgs.runCommand "ios-runner-lint"
   {
@@ -94,8 +104,9 @@ pkgs.runCommand "ios-runner-lint"
     # not checked.
     expected = lib.concatMapStrings
       (c: "${scriptOf c} ${lib.concatStringsSep " " c.frameworks}\n") cases;
+    deviceScripts = lib.concatMapStrings (d: "${lib.getExe d}\n") deviceCases;
     nativeBuildInputs = [ pkgs.bash ];
-    passAsFile = [ "expected" ];
+    passAsFile = [ "expected" "deviceScripts" ];
   } ''
   set -euo pipefail
 
@@ -136,8 +147,100 @@ pkgs.runCommand "ios-runner-lint"
     fi
   done < "$expectedPath"
 
+  # THE POST-INSTALL LAUNCH RETRY, RUN rather than read (issue #154).
+  #
+  # Under Xcode 27 the FIRST `devicectl device process launch` after an install
+  # intermittently answers a freshly installed app with CoreDeviceError 10002 /
+  # NSPOSIXErrorDomain 22, and the identical invocation succeeds a moment later.
+  # Every flag the runner passes is still accepted by Xcode 27, so there is no
+  # flag to assert; what a device run needs is to try again. That is behaviour,
+  # not text, so it is exercised here against a stub `xcrun` -- the real one
+  # needs a paired iPhone, a signing identity and a Mac, and this check has
+  # none of the three.
+  mkdir -p stub
+  cat > stub/xcrun <<'STUB'
+#!/usr/bin/env bash
+# One byte per call, so the caller can count them without a shared shell.
+printf 'x' >> "$STUB_COUNT"
+n=$(wc -c < "$STUB_COUNT" | tr -d ' ')
+if [ "$n" -le "$STUB_FAILURES" ]; then
+  echo "ERROR: The application failed to launch. (com.apple.dt.CoreDeviceError error 10002 (0x2712))"
+  echo "       The operation couldn't be completed. Invalid argument (NSPOSIXErrorDomain error 22 (0x16))"
+  exit 1
+fi
+echo "Launched application with co.logos.lint bundle identifier."
+echo "Waiting for the application to terminate…"
+STUB
+  chmod +x stub/xcrun
+  export PATH="$PWD/stub:$PATH"
+
+  # The function, lifted out of the rendered runner the same way the framework
+  # arrays above are: what the script would really run, not a copy of it.
+  call_launch_console() {
+    bash -c '
+      set -euo pipefail
+      device=fixture-device
+      bundle_id=co.logos.lint
+      build_dir="$PWD/run"
+      . ./launch_console.sh
+      launch_console
+    '
+  }
+
+  while read -r script; do
+    [ -n "$script" ] || continue
+    echo "==> launch retry: $(basename "$script")"
+
+    sed -n '/launch_console() {/,/^ *}$/p' "$script" > launch_console.sh
+    if ! grep -q 'devicectl device process launch' launch_console.sh; then
+      echo "error: $script has no launch_console() that launches anything." >&2
+      echo "       A single-shot launch ends a whole device run non-zero on the" >&2
+      echo "       first post-install EINVAL from CoreDevice -- app installed," >&2
+      echo "       app launchable, run reported as failed (issue #154)." >&2
+      exit 1
+    fi
+
+    # A transient failure, then a success: the run ends with a launched app,
+    # and it took more than one call to get there.
+    rm -rf run; mkdir -p run; : > run/count
+    if ! STUB_COUNT="$PWD/run/count" STUB_FAILURES=2 \
+         LOGOS_IOS_LAUNCH_RETRY_DELAY=0 \
+         call_launch_console > run/out 2>&1; then
+      echo "error: launch_console gave up on a transient CoreDevice failure" >&2
+      cat run/out >&2
+      exit 1
+    fi
+    tries=$(wc -c < run/count | tr -d ' ')
+    if [ "$tries" != 3 ]; then
+      echo "error: launch_console called devicectl $tries time(s), wanted 3" >&2
+      cat run/out >&2
+      exit 1
+    fi
+    grep -q 'Launched application with' run/out || {
+      echo "error: launch_console returned without the app's console output" >&2
+      cat run/out >&2
+      exit 1
+    }
+
+    # And it gives up: an app really can be unlaunchable, and a runner that
+    # retries for ever is worse than one that fails.
+    rm -rf run; mkdir -p run; : > run/count
+    if STUB_COUNT="$PWD/run/count" STUB_FAILURES=99 \
+       LOGOS_IOS_LAUNCH_RETRY_DELAY=0 LOGOS_IOS_LAUNCH_ATTEMPTS=3 \
+       call_launch_console > run/out 2>&1; then
+      echo "error: launch_console reported success though nothing launched" >&2
+      cat run/out >&2
+      exit 1
+    fi
+    tries=$(wc -c < run/count | tr -d ' ')
+    if [ "$tries" != 3 ]; then
+      echo "error: launch_console made $tries attempt(s), wanted 3" >&2
+      exit 1
+    fi
+  done < "$deviceScriptsPath"
+
   echo "ios-runner-lint: ${toString (lib.length cases)} runner(s) lint clean, sizes ${
     lib.concatStringsSep ", " (lib.mapAttrsToList (_: fws: toString (lib.length fws)) sizes)
-  }"
+  }; ${toString (lib.length deviceCases)} device runner(s) retry a failed launch and give up"
   touch $out
 ''

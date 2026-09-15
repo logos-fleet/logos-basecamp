@@ -196,12 +196,54 @@ let
       [ -n "$team" ] || { echo "LOGOS_IOS_TEAM_ID is unset" >&2; exit 1; }
       [ -n "$device" ] || { echo "LOGOS_IOS_DEVICE is unset (xcrun devicectl list devices)" >&2; exit 1; }
       ${buildApp}
+
+      # THE FIRST LAUNCH AFTER AN INSTALL IS NOT RELIABLE (issue #154).
+      #
+      # Under Xcode 27 `devicectl device process launch` intermittently answers
+      # a just-installed app with
+      #   CoreDeviceError 10002 / NSPOSIXErrorDomain 22 (Invalid argument)
+      # and the identical invocation succeeds a second later -- measured on the
+      # venue's iPad Air, where one run failed at install+0 and the very next
+      # attempt launched and streamed the console. It is a race in CoreDevice's
+      # post-install bookkeeping, not a renamed option: `--activate`,
+      # `--console` and `--terminate-existing` are all still in Xcode 27's
+      # `devicectl device process launch --help`, and all three together launch
+      # that app when it is not fresh out of an install.
+      #
+      # RETRIED ON "DID NOT LAUNCH", NEVER ON A NON-ZERO EXIT. With --console
+      # devicectl waits for the app and exits with what the app made of itself,
+      # so retrying a failed exit would start a second copy of an app that ran.
+      # "Launched application with" is devicectl's own line, printed before it
+      # starts waiting, and it is the only thing that separates the two.
+      launch_console() {
+        local attempt attempts delay status
+        attempts=''${LOGOS_IOS_LAUNCH_ATTEMPTS:-5}
+        delay=''${LOGOS_IOS_LAUNCH_RETRY_DELAY:-3}
+        attempt=1
+        while [ "$attempt" -le "$attempts" ]; do
+          set +e
+          xcrun devicectl device process launch --activate --console --terminate-existing \
+            --device "$device" "$bundle_id" "$@" 2>&1 | tee "$build_dir/launch.log"
+          status=''${PIPESTATUS[0]}
+          set -e
+          if grep -q 'Launched application with' "$build_dir/launch.log"; then
+            return "$status"
+          fi
+          echo "==> attempt $attempt did not start $bundle_id; retrying in ''${delay}s" >&2
+          attempt=$(( attempt + 1 ))
+          sleep "$delay"
+        done
+        echo "error: $bundle_id did not launch in $attempts attempt(s)." >&2
+        echo "       It IS installed on $device. To start it without a console:" >&2
+        echo "       xcrun devicectl device process launch --device $device $bundle_id" >&2
+        return 1
+      }
+
       configure_app "-DLOGOS_IOS_DEVELOPMENT_TEAM=$team"
       LOGOS_IOS_VERIFY_SIGNATURE=1 xcodebuild_app -allowProvisioningUpdates
-      echo "==> install + launch on $device (console attached)"
+      echo "==> install + launch on $device (console attached; log: $build_dir/launch.log)"
       xcrun devicectl device install app --device "$device" "$app"
-      xcrun devicectl device process launch --activate --console --terminate-existing \
-        --device "$device" "$bundle_id" "$@"
+      launch_console "$@"
     '';
   };
 in
