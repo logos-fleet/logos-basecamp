@@ -15,6 +15,7 @@
 #include <QQuickWindow>
 #include <QRectF>
 #include <QStringList>
+#include <QUrl>
 
 namespace {
 
@@ -27,13 +28,32 @@ constexpr int kMenuSettleMs = 400;
 // it has been reported. Measured on the iPad Air simulator at well under this.
 constexpr int kKeyboardBudgetMs = 3000;
 
+QString describe(QObject* object);
+
 QString describe(QObject* object)
 {
     if (!object)
         return QStringLiteral("<none>");
     const QString name = object->objectName();
-    return QStringLiteral("%1(%2)").arg(QString::fromUtf8(object->metaObject()->className()),
-                                        name.isEmpty() ? QStringLiteral("-") : name);
+    QString text = QStringLiteral("%1(%2)")
+                       .arg(QString::fromUtf8(object->metaObject()->className()),
+                            name.isEmpty() ? QStringLiteral("-") : name);
+    // A QQuickWidget is never the interesting half of the answer -- it forwards
+    // every input-method query to the item its own scene has focused, and WHICH
+    // widget it is is the whole question when several are on screen. So the
+    // scene behind it is named too.
+    if (auto* surface = qobject_cast<QQuickWidget*>(object)) {
+        QObject* inScene = surface->quickWindow() ? surface->quickWindow()->focusObject()
+                                                  : nullptr;
+        text += QStringLiteral(" over scene %1, focusing %2")
+                    .arg(surface->source().fileName().isEmpty()
+                             ? QStringLiteral("<none>")
+                             : surface->source().fileName(),
+                         inScene && inScene != surface->quickWindow()
+                             ? describe(inScene)
+                             : QStringLiteral("nothing"));
+    }
+    return text;
 }
 
 } // namespace

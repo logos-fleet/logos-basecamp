@@ -24,6 +24,7 @@
 #include "IShellView.h"
 #include "NetworkSmokeRunner.h"
 #include "PlatformConsole.h"
+#include "QuickWidgetKeyboardFocus.h"
 #include "ShellAppDriver.h"
 #include "ShellCallDriver.h"
 #include "ShellCatalogDriver.h"
@@ -109,6 +110,17 @@ int main(int argc, char* argv[])
 
     QElapsedTimer sinceMain;
     sinceMain.start();
+
+    // THE ON-SCREEN KEYBOARD, BEFORE ANY SCENE EXISTS. The Shell's QML and a
+    // mounted app's both live in QQuickWidgets, whose focus is the offscreen
+    // window's and not the one the platform input context is told about -- and
+    // on iOS nothing ever hands the widget the window's focus, so a tapped
+    // field took a caret and no keyboard (logos-workspace#152). This watches
+    // every QQuickWidget in the process, including the one an app is mounted
+    // into long after startup, which is why it is installed here rather than
+    // handed a list of surfaces.
+    auto* keyboardFocus = new QuickWidgetKeyboardFocus(&app);
+    keyboardFocus->watchEverything();
 
     SmokeRunner runner;
     QObject::connect(&runner, &SmokeRunner::log, &console);
