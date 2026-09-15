@@ -71,15 +71,15 @@ QString WebPageInput::driverScript()
   // swallows events. An item below the fold is reported for what it is rather
   // than pressed: this driver does not scroll, and a form whose fields are off
   // the page is a finding, not something to paper over.
-  var reachable = function (el) {
-    var r = el.getBoundingClientRect();
-    if (r.width < 20 || r.height < 20) return false;
+  var onCanvas = function (r) {
     var c = canvas();
     if (!c) return false;
     var box = c.getBoundingClientRect();
-    return r.top >= box.top && r.bottom <= box.bottom
+    return r.width >= 20 && r.height >= 20
+        && r.top >= box.top && r.bottom <= box.bottom
         && r.left >= box.left && r.right <= box.right;
   };
+  var reachable = function (el) { return onCanvas(el.getBoundingClientRect()); };
 
   // Exactly, then case-insensitively from the front. The second is what lets a
   // caller ask for 'Account label' when the field's accessible name is its
@@ -90,22 +90,86 @@ QString WebPageInput::driverScript()
     if (own === name) return true;
     return own.toLowerCase().indexOf(name.toLowerCase()) === 0;
   };
-  var find = function (name) {
+
+  // ── THE TWO HANDLES A CONTROL CAN HAVE ────────────────────────────────────
+  //
+  // 1. ITS objectName, asked of the bundled QML runtime
+  //    (`logosViewItem` -> LogosWebRuntime::describeItem). It answers the rect
+  //    in the WINDOW's coordinates and, for a field, the text the item now
+  //    holds -- which is the module's own state and the only honest readback
+  //    there is.
+  // 2. ITS ACCESSIBLE NAME, off Qt's accessibility DOM. It is what a button
+  //    has: a Logos button carries no objectName, and its text is its name.
+  //
+  // The first is tried first and the second is the fallback, because a page
+  // publishes an EDITABLE TEXT ITEM WITH NO NAME AT ALL -- measured, Qt's wasm
+  // accessibility writes `<input aria-hidden="true">` for one -- so the control
+  // a typed flow is about is exactly the one the tree cannot be asked for.
+  //
+  // Both answers are normalised to CLIENT coordinates, which is what a pointer
+  // event carries: the canvas's own box is the window's origin.
+  var fromRuntime = function (name, done) {
+    if (!window.logosWebViewReady) { done(null); return; }
+    window.logosWebViewReady.then(function (state) {
+      var item = null;
+      try { item = JSON.parse(state.runtime.logosViewItem(state.module, name)); }
+      catch (e) { item = null; }
+      if (!item || !item.found) { done(null); return; }
+      var c = canvas();
+      if (!c) { done(null); return; }
+      var box = c.getBoundingClientRect();
+      done({ left: box.left + item.x, top: box.top + item.y,
+             width: item.width, height: item.height,
+             value: item.text, via: 'objectName' });
+    }).catch(function () { done(null); });
+  };
+  var fromTree = function (name) {
     var all = controls(), named = [], reach = [];
     for (var i = 0; i < all.length; i++) {
       if (!matches(all[i], name)) continue;
       named.push(all[i]);
       if (reachable(all[i])) reach.push(all[i]);
     }
-    if (reach.length) return reach[0];
-    if (named.length) { say("'" + name + "' is on the page and not reachable"); return null; }
-    var here = [];
+    var el = reach.length ? reach[0] : null;
+    if (!el) return { el: null, onPage: named.length > 0 };
+    var r = el.getBoundingClientRect();
+    return { el: el, left: r.left, top: r.top, width: r.width, height: r.height,
+             value: el.type === 'password'
+                        ? String(el.value || '').length + ' character(s)'
+                        : String(el.value === undefined ? '' : el.value),
+             via: 'accessible name' };
+  };
+  // Every name the page CAN be asked for, for a refusal that names them.
+  var reachableNames = function () {
+    var all = controls(), here = [];
     for (var j = 0; j < all.length; j++) {
       if (nameOf(all[j]) && reachable(all[j])) here.push(nameOf(all[j]));
     }
-    say("no control named '" + name + "'; reachable: "
-        + (here.length ? here.join(' | ') : '(nothing)'));
-    return null;
+    return here;
+  };
+  var find = function (name, done) {
+    fromRuntime(name, function (item) {
+      if (item) {
+        if (!onCanvas({ left: item.left, top: item.top,
+                        right: item.left + item.width, bottom: item.top + item.height,
+                        width: item.width, height: item.height })) {
+          say("'" + name + "' is on the page and not reachable");
+          done(null);
+          return;
+        }
+        done(item);
+        return;
+      }
+      var found = fromTree(name);
+      if (found.el) { done(found); return; }
+      if (found.onPage) { say("'" + name + "' is on the page and not reachable"); }
+      else {
+        var here = reachableNames();
+        say("no control named '" + name + "'; reachable: "
+            + (here.length ? here.join(' | ') : '(nothing)'));
+      }
+      done(null);
+    });
   };
 
   // Qt captures the pointer on pointerdown, and a browser refuses to capture an
@@ -162,8 +226,7 @@ QString WebPageInput::driverScript()
   };
   // ...AND THE SAME PRESS AS A FINGER, a moment later: the two are separate
   // paths through Qt and a webview may act on one and not the other.
-  var pressElement = function (el) {
-    var r = el.getBoundingClientRect();
+  var pressRect = function (r) {
     var x = r.left + r.width / 2, y = r.top + r.height / 2;
     pressAt(x, y, 'mouse');
     setTimeout(function () { pressAt(x, y, 'touch'); }, 250);
@@ -179,16 +242,19 @@ QString WebPageInput::driverScript()
     return n;
   };
   // A PASSPHRASE IS NOT PRINTED. The page's console crosses to the app's log
-  // and off the device with it; the length is enough to say the keys arrived.
-  var valueOf = function (el) {
-    var v = (el.value === undefined || el.value === null) ? '' : String(el.value);
-    if (el.type === 'password') return v.length + ' character(s)';
-    return "'" + v + "'";
+  // and off the device with it; both handles answer a password field with its
+  // length instead, and that text is what is said.
+  var valueOf = function (found) {
+    var v = found.value;
+    if (v === undefined || v === null) return "''";
+    if (/ character\(s\)$/.test(String(v))) return String(v);
+    return "'" + String(v) + "'";
   };
 
   // EVERY ENTRY POINT WAKES THE TREE AND THEN WAITS A TURN. Waking it is a
   // click Qt answers on its own event loop, and a tree read in the same turn is
-  // the empty one.
+  // the empty one. Harmless for a control found by objectName, which does not
+  // need the tree at all.
   var afterWaking = function (work) { wake(); setTimeout(work, 300); };
 
   window.logosDrive = {
@@ -213,44 +279,48 @@ QString WebPageInput::driverScript()
 
     press: function (name) {
       afterWaking(function () {
-        var el = find(name);
-        if (!el) return;
-        pressElement(el);
-        say("pressed '" + name + "'");
+        find(name, function (found) {
+          if (!found) return;
+          pressRect(found);
+          say("pressed '" + name + "' (by " + found.via + ")");
+        });
       });
     },
 
     // THE PRESS AND THE KEYS CANNOT BE IN THE SAME TURN of the page's event
     // loop: Qt moves focus on ITS loop, so keys sent with the press land on
     // whatever had the focus before it. And the field is looked up AGAIN for
-    // the readback, because Qt rebuilds an accessibility element when the item
-    // it mirrors changes.
+    // the readback, because what it now holds is a second question from the
+    // one the press was aimed at.
     type: function (name, text) {
       afterWaking(function () {
-        var el = find(name);
-        if (!el) return;
-        pressElement(el);
-        setTimeout(function () {
-          var target = deepActive() || document.body;
-          for (var i = 0; i < text.length; i++) {
-            var key = text[i];
-            var init = { key: key, code: 'Key' + key.toUpperCase(),
-                         bubbles: true, cancelable: true, composed: true };
-            target.dispatchEvent(new KeyboardEvent('keydown', init));
-            target.dispatchEvent(new KeyboardEvent('keyup', init));
-          }
+        find(name, function (found) {
+          if (!found) return;
+          pressRect(found);
           setTimeout(function () {
-            var again = find(name) || el;
-            say("'" + name + "' now " + valueOf(again));
-          }, 400);
-        }, 800);
+            var target = deepActive() || document.body;
+            for (var i = 0; i < text.length; i++) {
+              var key = text[i];
+              var init = { key: key, code: 'Key' + key.toUpperCase(),
+                           bubbles: true, cancelable: true, composed: true };
+              target.dispatchEvent(new KeyboardEvent('keydown', init));
+              target.dispatchEvent(new KeyboardEvent('keyup', init));
+            }
+            setTimeout(function () {
+              find(name, function (again) {
+                say("'" + name + "' now " + valueOf(again || found));
+              });
+            }, 400);
+          }, 800);
+        });
       });
     },
 
     read: function (name) {
       afterWaking(function () {
-        var el = find(name);
-        if (el) say("'" + name + "' now " + valueOf(el));
+        find(name, function (found) {
+          if (found) say("'" + name + "' now " + valueOf(found));
+        });
       });
     }
   };

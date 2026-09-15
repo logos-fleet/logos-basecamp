@@ -40,6 +40,16 @@ private slots:
         QVERIFY(script.contains(QLatin1String(".qt-window-a11y-container")));
     }
 
+    // The runtime is the first handle tried: a field has no accessible name, so
+    // a script that did not ask for `logosViewItem` could press buttons and
+    // nothing else.
+    void theScriptAsksTheRuntimeForAnItemByObjectName()
+    {
+        const QString script = WebPageInput::driverScript();
+        QVERIFY(script.contains(QLatin1String("logosViewItem")));
+        QVERIFY(script.contains(QLatin1String("window.logosWebViewReady")));
+    }
+
     void theCallsNameTheControl()
     {
         QCOMPARE(WebPageInput::pressCall(QStringLiteral("Advanced")),
@@ -117,6 +127,11 @@ private slots:
         const QString line = QStringLiteral("logos-drive: pressed 'Import'");
         QVERIFY(WebPageInput::pressReported(line, QStringLiteral("Import")));
         QVERIFY(!WebPageInput::pressReported(line, QStringLiteral("Advanced")));
+        // The page says which handle it found the control by, and a driver
+        // waiting for the press must not be thrown by it.
+        QVERIFY(WebPageInput::pressReported(
+            QStringLiteral("logos-drive: pressed 'Import' (by accessible name)"),
+            QStringLiteral("Import")));
     }
 
     // Both refusals, because they are different findings and a driver has to

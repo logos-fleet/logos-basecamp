@@ -430,13 +430,21 @@ module's `.rep` SLOTs. So a wallet flow whose input is typed — the seed-phrase
 import, a Send's recipient and amount, the Advanced tab's custom RPC — could
 not be driven on a device at all (logos-workspace#174).
 
-**What made it possible is Qt's own accessibility tree.** Qt for WebAssembly
-maintains a DOM mirror of the scene inside `.qt-window-a11y-container` — one
-element per accessible item, with its ARIA role, its name and its real client
-rect — and it builds it lazily: the tree is EMPTY until something clicks the
-hidden button Qt leaves in the container for a screen-reader user. Woken up, it
-gives a driver the three things a canvas denies it: where a control is, what it
-is called, and **what it holds** once the keys have gone in.
+**A control is found by whichever handle it has.** A field by its
+`objectName`, asked of the bundled QML runtime (`logosViewItem`, which is
+`LogosWebRuntime::describeItem`): it answers the rect in the window's
+coordinates and **the text the item now holds**, which is the module's own
+state and the only honest readback there is. A button by its accessible name,
+off Qt for WebAssembly's own DOM mirror of the scene inside
+`.qt-window-a11y-container` — which Qt builds lazily, so the tree is EMPTY
+until something clicks the hidden button it leaves there for a screen-reader
+user.
+
+The runtime is asked first, and that is the shape of the whole thing: Qt's wasm
+bridge publishes a text editor as an `<input aria-hidden="true">` with no name
+at all, so the one control a typed flow is about is exactly the one the
+accessibility tree cannot be asked for. A Logos button, conversely, carries no
+objectName and its text is its name.
 
 The events themselves are real, and they are the same calibrated pointer and
 key events the browser end-to-end drives — a Qt wasm window reads a local point
@@ -451,12 +459,10 @@ either. Only the LOCATING is done through the accessibility tree.
         'issue174', put there by real key events at the page
 ```
 
-A control is named the way the PAGE names it: a button by its text, a Logos
-text field by its placeholder — `logos-design-system`'s `LogosTextField` gives
-its editor the placeholder as its accessible name, because a bare `TextInput`
-goes into the tree with no name at all and neither a screen reader nor a driver
-can then ask for it. The match is from the front, so `Account label` finds the
-field whose placeholder is `Account label (e.g. main)`.
+So the wallet's flow names `Advanced` and `Import` (their text) and
+`advSeedField`, `advAcctLabelField` and `advAcctPwField` (their objectNames,
+which wallet_ui already carries for the desktop inspector). An accessible name
+is matched from the front, so `Refresh` finds `Refresh balances`.
 
 The script and the console vocabulary its answers come back in are
 [`mobile/webview/WebPageInput.h`](../webview/WebPageInput.h); the walk is

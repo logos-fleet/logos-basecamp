@@ -21,29 +21,36 @@ namespace basecamp::web {
 // module's `.rep` SLOTs. So an app that has to show that a real key reaches a
 // module's form has to put the events in itself.
 //
-// THE HANDLE IT USES IS THE ACCESSIBILITY TREE, and that is the finding this
-// file is built on. Qt for WebAssembly maintains a DOM mirror of the scene --
-// one element per accessible item, with its ARIA role, its name and its real
-// client rect -- inside `.qt-window-a11y-container`, and it builds it lazily:
-// the tree is EMPTY until something clicks the hidden button Qt leaves in the
-// container for a screen-reader user. Woken up, it gives a driver the three
-// things a canvas denies it:
+// A CONTROL HAS TWO POSSIBLE HANDLES, and this uses whichever it has.
 //
-//   * WHERE a control is, in client coordinates, without a screenshot and
-//     without coordinates baked into a recipe per device size;
-//   * WHAT it is called -- `aria-label`, which for a Logos text field is its
-//     placeholder (logos-design-system, LogosTextField);
-//   * WHAT IT NOW HOLDS, read back off the element after the keys went in,
-//     which is the difference between "the driver dispatched events" and "the
-//     module got the text".
+//   ITS objectName, asked of the bundled QML runtime -- `logosViewItem`, which
+//   is LogosWebRuntime::describeItem. It answers the item's rect in the
+//   window's coordinates and the text it now HOLDS, which is the module's own
+//   state and the only honest readback there is. objectName because that is
+//   the handle every Logos view already carries for UI automation: the desktop
+//   inspector finds items by it and nothing on the QML side has to know about
+//   this.
+//
+//   ITS ACCESSIBLE NAME, off Qt for WebAssembly's own accessibility DOM -- a
+//   mirror of the scene inside `.qt-window-a11y-container`, one element per
+//   accessible item with its ARIA role and its real client rect. It is built
+//   LAZILY: the tree is empty until something clicks the hidden button Qt
+//   leaves in the container for a screen-reader user. This is what a BUTTON
+//   has -- a Logos button carries no objectName and its text is its name.
+//
+// The runtime is asked first, and the reason is the whole shape of this: Qt's
+// wasm bridge publishes a text editor as an `<input aria-hidden="true">` with
+// NO NAME AT ALL -- measured -- so the one control a typed flow is about is
+// exactly the one the accessibility tree cannot be asked for.
 //
 // The events themselves are REAL: the same calibrated pointer and key events
 // the browser end-to-end and the smoke's web-module pass dispatch (see
 // WebModuleRunner's kInputDriver, whose findings this shares -- the offset a
 // Qt wasm window reads cannot be set and has to be measured per engine, pointer
 // capture has to be defused, and the keys cannot go in the same turn of the
-// page's event loop as the press). Only the LOCATING is done through the
-// accessibility tree.
+// page's event loop as the press). Only the LOCATING is asked for; a control
+// is pressed where it says it is and the module is what decides what that
+// means.
 //
 // FIRE AND FORGET, SO THE ANSWERS COME BACK ON THE CONSOLE. A platform page's
 // `evaluateJavaScript` returns nothing to Qt (see PlatformPage), and the

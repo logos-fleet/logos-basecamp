@@ -50,10 +50,14 @@ ShellWebInputDriver::TypedFlow ShellWebInputDriver::flowFor(const QString& app)
 {
     // wallet_ui's Advanced tab: the seed-phrase import, which is the flow
     // logos-workspace#147 could not verify on a device and the reason #174 was
-    // split out of it. The controls are named as the PAGE names them -- a
-    // button by its text, a Logos text field by its placeholder -- and the
-    // driver matches from the front, so "Account label" finds the field whose
-    // placeholder is "Account label (e.g. main)".
+    // split out of it.
+    //
+    // A CONTROL IS NAMED BY WHICHEVER HANDLE IT HAS. The buttons here are named
+    // by their text, which is what Qt's accessibility tree publishes for one;
+    // the FIELDS are named by their `objectName`, because Qt publishes a text
+    // editor with no accessible name at all and the module already carries
+    // objectNames for the desktop inspector to find it by. WebPageInput.h has
+    // the account of the two handles.
     //
     // The seed is the all-zero BIP-39 test vector, deliberately: it is the
     // phrase every wallet test in this workspace uses, it is worthless, and it
@@ -62,14 +66,14 @@ ShellWebInputDriver::TypedFlow ShellWebInputDriver::flowFor(const QString& app)
         TypedFlow flow;
         flow.steps = {
             { QStringLiteral("Advanced"), QString() },
-            { QStringLiteral("Seed phrase"),
+            { QStringLiteral("advSeedField"),
               QStringLiteral("abandon abandon abandon abandon abandon abandon abandon "
                              "abandon abandon abandon abandon about") },
-            { QStringLiteral("Account label"), QStringLiteral("issue174") },
-            { QStringLiteral("Account passphrase"), QStringLiteral("hunter2") },
+            { QStringLiteral("advAcctLabelField"), QStringLiteral("issue174") },
+            { QStringLiteral("advAcctPwField"), QStringLiteral("hunter2") },
             { QStringLiteral("Import"), QString() },
         };
-        flow.verdictField = QStringLiteral("Account label");
+        flow.verdictField = QStringLiteral("advAcctLabelField");
         flow.verdictText = QStringLiteral("issue174");
         return flow;
     }
