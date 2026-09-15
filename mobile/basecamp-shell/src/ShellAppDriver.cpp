@@ -15,6 +15,11 @@ namespace {
 // replica's fetch crosses the node, and the backend's own snapshot call is a
 // module hop behind it.
 constexpr int kModelBudgetMs = 15000;
+// How long a mount gets to put the app's handles on screen: the launch is
+// queued, the framework dlopens the plugin and the replica waits for its
+// source -- seconds of work on a phone. Spent once per mount, and step 6
+// mounts the app a second time.
+constexpr int kMountBudgetMs = 30000;
 } // namespace
 
 ShellAppDriver::ShellAppDriver(BundledSetShellHost* host, QWidget* shellWidget,
@@ -95,7 +100,7 @@ void ShellAppDriver::run(bool expectLiveContent)
     // on a phone, and the QML then has to instantiate. So this waits for the
     // app's handles rather than for the call to return.
     for (const QString& handle : handles) {
-        QQuickItem* item = waitFor(handle, 30000);
+        QQuickItem* item = waitFor(handle, kMountBudgetMs);
         if (!item) {
             dumpNames(QStringLiteral("app '%1' has no '%2' on screen").arg(app, handle));
             return;
@@ -128,9 +133,14 @@ void ShellAppDriver::run(bool expectLiveContent)
                                 "never took the widget").arg(app));
         return;
     }
-    if (view->width() <= 0 || view->height() <= 0) {
+    // Read into locals rather than off `view` at the summary below: step 6
+    // closes this mount, and the widget the host handed the Shell is deleted
+    // with it -- so by the time that line runs there is nothing left to ask.
+    const int shownWidth = view->width();
+    const int shownHeight = view->height();
+    if (shownWidth <= 0 || shownHeight <= 0) {
         emit log(QStringLiteral("WRONG: '%1' is mounted in the Shell at %2x%3")
-                     .arg(app).arg(view->width()).arg(view->height()));
+                     .arg(app).arg(shownWidth).arg(shownHeight));
         return;
     }
 
@@ -208,7 +218,7 @@ void ShellAppDriver::run(bool expectLiveContent)
     }
     m_host->loadUiModule(app);
     for (const QString& handle : handles) {
-        if (!waitFor(handle, 30000)) {
+        if (!waitFor(handle, kMountBudgetMs)) {
             dumpNames(QStringLiteral("app '%1' was closed and opened again and has no "
                                      "'%2' on screen").arg(app, handle));
             return;
@@ -239,7 +249,7 @@ void ShellAppDriver::run(bool expectLiveContent)
     emit log(QStringLiteral("shell app: %1 rendered %2 in the Shell (%3x%4) %5 ms after "
                             "the tile was pressed")
                  .arg(app, handles.join(QStringLiteral(", ")))
-                 .arg(view->width()).arg(view->height()).arg(shownMs));
+                 .arg(shownWidth).arg(shownHeight).arg(shownMs));
     emit log(QStringLiteral("SHELL SHOWS THE BUNDLED APP"));
     emit appShown(app, shownMs);
 }
