@@ -61,7 +61,7 @@ reason.
 
 ## Driving is a per-run choice
 
-The Shell knows how to drive itself through six acceptance passes, and it runs
+The Shell knows how to drive itself through seven acceptance passes, and it runs
 **none of them** unless the launch asks:
 
 ```
@@ -75,6 +75,8 @@ The Shell knows how to drive itself through six acceptance passes, and it runs
                     the on-screen keyboard reaches it (#152)
 --drive web-apps    open a `web` app, check its page is inset to the workspace,
                     and LEAVE it again (#110)
+--drive web-input   open a `web` app and TYPE into its form, with real pointer
+                    and key events at the page, then read the field back (#174)
 --drive modules     the Modules tab: the rows, their install type, their stats,
                     and a Load/Unload round trip
 --drive all         every pass, in the order above
@@ -409,6 +411,62 @@ The rule is stated without a phone in
 which sets up the state an iOS tap leaves behind — an item with `activeFocus`
 inside a surface that is not the window's focus widget — and asserts the focus
 widget and that the object handed to the input context answers `Qt::ImEnabled`.
+
+## Typing into a `web` app's page
+
+`--drive web-input`. The pass above is about the Shell's own QML; this one is
+about a form drawn **inside a page**, which is a different problem with a
+different answer.
+
+A `web` variant's UI is pixels in a canvas. There is no widget to press, no
+text node to read and no `QQuickItem` a driver can find by `objectName` —
+`ShellSceneDriver`, which is how every other pass presses something, sees
+nothing in there. And as of this venue's Xcode 27 nothing OUTSIDE the app can
+put a key in one either: `idb ui text` and `idb ui tap` are accepted and
+silently dropped (measured against Safari's own address bar and `ui button
+HOME`, with the companion logging `hid succeeded` every time), `simctl` has
+never had an input verb, and `--call` answers `(no value)` for a `ui_qml`
+module's `.rep` SLOTs. So a wallet flow whose input is typed — the seed-phrase
+import, a Send's recipient and amount, the Advanced tab's custom RPC — could
+not be driven on a device at all (logos-workspace#174).
+
+**What made it possible is Qt's own accessibility tree.** Qt for WebAssembly
+maintains a DOM mirror of the scene inside `.qt-window-a11y-container` — one
+element per accessible item, with its ARIA role, its name and its real client
+rect — and it builds it lazily: the tree is EMPTY until something clicks the
+hidden button Qt leaves in the container for a screen-reader user. Woken up, it
+gives a driver the three things a canvas denies it: where a control is, what it
+is called, and **what it holds** once the keys have gone in.
+
+The events themselves are real, and they are the same calibrated pointer and
+key events the browser end-to-end drives — a Qt wasm window reads a local point
+off `offsetX`, which cannot be set and is derived differently by each engine, so
+the script measures the relation with two probe moves rather than believing
+either. Only the LOCATING is done through the accessibility tree.
+
+```
+[shell] web input: pressed wallet_ui's 'Advanced'
+[shell] web input: typed 12 character(s) into wallet_ui's 'Account label'
+[shell] TYPED TEXT REACHES A WEB APP'S PAGE: wallet_ui's 'Account label' holds
+        'issue174', put there by real key events at the page
+```
+
+A control is named the way the PAGE names it: a button by its text, a Logos
+text field by its placeholder — `logos-design-system`'s `LogosTextField` gives
+its editor the placeholder as its accessible name, because a bare `TextInput`
+goes into the tree with no name at all and neither a screen reader nor a driver
+can then ask for it. The match is from the front, so `Account label` finds the
+field whose placeholder is `Account label (e.g. main)`.
+
+The script and the console vocabulary its answers come back in are
+[`mobile/webview/WebPageInput.h`](../webview/WebPageInput.h); the walk is
+[`src/ShellWebInputDriver.h`](src/ShellWebInputDriver.h), and the reading of
+those answers is stated without a webview in
+[`tests/web_page_input_test.cpp`](../../tests/web_page_input_test.cpp).
+
+This pass does not scroll: a field below the fold is reported as "on the page
+and not reachable" rather than worked around, because a form whose fields are
+off the page is a finding.
 
 ## The Settings page at a phone's width
 

@@ -47,6 +47,10 @@ function(logos_mobile_host_sources out_var)
         ${_webview}/LiveRuntimeBudget.cpp ${_webview}/LiveRuntimeBudget.h
         ${_webview}/MobileWebContainerBackend.cpp ${_webview}/MobileWebContainerBackend.h
         ${_webview}/WebPageProbe.cpp ${_webview}/WebPageProbe.h
+        # Driving a page from the host: the script, and the console vocabulary
+        # its answers come back in. Platform-free -- what it produces is a
+        # string -- so it is in the shared list with the rest of the container.
+        ${_webview}/WebPageInput.cpp ${_webview}/WebPageInput.h
         # What the process is costing, which is what the live-runtime budget is
         # spent against. In the shared list rather than beside a runner because
         # MobileWebContainerBackend itself calls it (appMemoryLine), so a host
