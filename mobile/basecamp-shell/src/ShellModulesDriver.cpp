@@ -355,6 +355,11 @@ void ShellModulesDriver::run()
         // the dock, `web app web_counter_b has no page any more; its tab is
         // closed` is the last line the process prints; without it, the same
         // unload round-trips.
+        //
+        // The docked case IS driven, once: ShellWebAppDriver::
+        // checkUnloadedWhileOpen does it last in its own pass, on the app it
+        // already has open, where a death costs nothing that has not already
+        // been asserted (#151). This loop still does not risk it per row.
         if (!tap(toggle)) return;
         // A `web` module's unload tears a page down and its load brings 290 MB
         // of QML runtime back up, and both are announced rather than awaited by

@@ -121,11 +121,8 @@ void MobileWebContainerBackend::forget(const QString& moduleName)
     // It is also the second half of the pair slice 28 asks for: the memory a
     // shell holds with a module's UI live, and what it returns to when that UI
     // is given up.
-    qInfo().noquote()
-        << QStringLiteral("Web container: %1's page is gone; %2 live runtime(s), %3 of %4")
-               .arg(moduleName, QString::number(m_budget.live().size()),
-                    megabytes(m_budget.projectedBytes()),
-                    megabytes(m_budget.budgetBytes()));
+    qInfo().noquote() << QStringLiteral("Web container: %1's page is gone; %2")
+                             .arg(moduleName, budgetLine());
     qInfo().noquote() << appMemoryLine(QStringLiteral("with %1's page gone").arg(moduleName));
     emit viewClosed(moduleName);
 }
@@ -240,6 +237,14 @@ QString MobileWebContainerBackend::appMemoryLine(const QString& occasion)
         : QStringLiteral("Web container: app memory %1: %2").arg(occasion, megabytes(bytes));
 }
 
+QString MobileWebContainerBackend::budgetLine() const
+{
+    return QStringLiteral("%1 live runtime(s), %2 of %3")
+        .arg(QString::number(m_budget.live().size()),
+             megabytes(m_budget.projectedBytes()),
+             megabytes(m_budget.budgetBytes()));
+}
+
 QStringList MobileWebContainerBackend::show(const QString& moduleName)
 {
     // THE BOOKS MAY ONLY NAME A MODULE THIS CONTAINER HAS A PAGE FOR (#151).
@@ -261,10 +266,8 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
     if (!m_views.contains(moduleName)) {
         qInfo().noquote()
             << QStringLiteral("Web container: %1 has no page; nothing to show and nothing "
-                              "spent on it (%2 live runtime(s), %3 of %4)")
-                   .arg(moduleName, QString::number(m_budget.live().size()),
-                        megabytes(m_budget.projectedBytes()),
-                        megabytes(m_budget.budgetBytes()));
+                              "spent on it (%2)")
+                   .arg(moduleName, budgetLine());
         return {};
     }
 
@@ -278,11 +281,8 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
         it.value()->setFrontmost(it.key() == moduleName);
     m_frontmost = moduleName;
 
-    qInfo().noquote()
-        << QStringLiteral("Web container: %1 is visible; %2 live runtime(s), %3 of %4")
-               .arg(moduleName, QString::number(m_budget.live().size()),
-                    megabytes(m_budget.projectedBytes()),
-                    megabytes(m_budget.budgetBytes()));
+    qInfo().noquote() << QStringLiteral("Web container: %1 is visible; %2")
+                             .arg(moduleName, budgetLine());
     qInfo().noquote() << appMemoryLine(QStringLiteral("with %1 visible").arg(moduleName));
 
     for (const QString& name : evicted) {

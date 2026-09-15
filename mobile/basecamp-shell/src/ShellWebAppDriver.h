@@ -58,10 +58,10 @@ private:
     // is and is NOT loaded at startup, so a run that only looked at what was
     // already open would have nothing to open.
     void loadShippedWebModules();
-    // 5 is the user closing the app. This is the module being taken away while
-    // the app is OPEN -- the state logos-workspace#151 was reported in, which
-    // has to take the page, the tab AND the container's live-runtime slot with
-    // it. Runs last, because it leaves the module unloaded.
+    // 4 is the user closing the app. This is 5: the module being taken away
+    // while the app is OPEN -- the state logos-workspace#151 was reported in,
+    // which has to take the page, the tab AND the container's live-runtime
+    // slot with it. Runs last, because it leaves the module unloaded.
     void checkUnloadedWhileOpen(const QString& app);
 
     BundledSetShellHost* m_host;  // not owned
