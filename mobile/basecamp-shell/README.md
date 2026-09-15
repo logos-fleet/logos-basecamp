@@ -412,6 +412,60 @@ which sets up the state an iOS tap leaves behind — an item with `activeFocus`
 inside a surface that is not the window's focus widget — and asserts the focus
 widget and that the object handed to the input context answers `Qt::ImEnabled`.
 
+### And the other picture, from a device (#170)
+
+Every simulator in the fleet connects a hardware keyboard, and turning that off
+is a Simulator UI control with no `simctl` verb — so the panel above is all a
+simulator can ever show. The venue's **physical iPad Air (4th generation)**
+(iOS 26.5.2) has no keyboard attached, and prints the other half of the answer
+on the same build:
+
+```
+[shell] keyboard: 'convAddressField' activeFocus=true
+[shell] keyboard: app focus object QQuickWidget(-) over scene ChatView.qml, focusing LogosTextArea(convAddressField), accepts input method: yes
+[shell] keyboard: QInputMethod isVisible=true, panel 820x337 of a 820x1180 screen after 0 ms
+[shell] keyboard: that is a full software keyboard -- 337 of 1180 points, 29% of the screen
+[shell] KEYBOARD REACHES THE FIELD
+[shell] keyboard: the panel is on screen; holding it for 4000 ms so a screenshot can see it
+```
+
+Same field, same build, 337 points instead of 69: a keyboard rather than a bar.
+The rule that tells those two apart is
+[`KeyboardPanel.h`](src/KeyboardPanel.h) — a panel shorter than a sixth of the
+screen has no keys on it — and both measured shapes are pinned against it in
+[`tests/keyboard_panel_test.cpp`](../../tests/keyboard_panel_test.cpp), because
+they came from two device runs that no check can repeat. A panel the platform
+reports with no geometry is neither: it is `Unmeasured`, and saying "shortcut
+bar" for it would put a connected hardware keyboard in the log of a run that
+measured nothing.
+
+The last line is the capture handle. Taking the picture is a command on the
+HOST, so the pass leaves the panel standing for four seconds after it has
+measured it rather than dismissing the dialog straight away:
+
+```bash
+# in one shell: build, install, and drive the device
+LOGOS_IOS_DEVICE=<udid> LOGOS_IOS_TEAM_ID=<team> \
+  ws run logos-basecamp --target ios-arm64 --app shell \
+  --bundle capability_module,libp2p_module,chat_ui -- --drive chat,apps,keyboard
+
+# in another: shoot as soon as the panel is up (Xcode 27; ~0.7 s a frame)
+xcrun devicectl device capture screenshot --device <udid> --destination shot.png
+# a simulator answers the same question with
+xcrun simctl io <udid> screenshot shot.png
+```
+
+`--drive chat` is not optional on that line: chat_ui's "+" is
+`enabled: root.online`, so a run that did not bring the delivery node up presses
+a disabled button and the pass reports a menu with no entries.
+
+What the picture does NOT show is the dialog. On the device the keyboard is up
+and the field behind it holds the caret, and neither the "+" menu nor the New DM
+dialog is painted — every `Popup` in the mounted app's scene is missing from the
+screen while its items exist, have geometry and take focus. That is a separate
+defect from the one this pass measures, and the pass is unaffected by it:
+logos-workspace#187.
+
 ## Typing into a `web` app's page
 
 `--drive web-input`. The pass above is about the Shell's own QML; this one is

@@ -1,6 +1,7 @@
 #include "ShellKeyboardDriver.h"
 
 #include "BundledSetShellHost.h"
+#include "KeyboardPanel.h"
 #include "QuickWidgetKeyboardFocus.h"
 #include "ShellSections.h"
 
@@ -27,6 +28,15 @@ constexpr int kMenuSettleMs = 400;
 // The keyboard is animated up by UIKit, and isVisible() only becomes true once
 // it has been reported. Measured on the iPad Air simulator at well under this.
 constexpr int kKeyboardBudgetMs = 3000;
+// And how long the panel is left standing once it has been measured. The other
+// half of logos-workspace#170's answer is a picture of it, and the only way to
+// take one -- `xcrun devicectl device capture screenshot` on a device, `simctl
+// io screenshot` on a simulator -- is a command on the HOST that has to be
+// started after the log line says there is something to photograph. A pass
+// that dismissed the dialog the moment it had the numbers left nothing to aim
+// at. Four seconds is that round trip with room to spare, against a run that
+// spends minutes on the chat bring-up alone.
+constexpr int kPanelHoldMs = 4000;
 
 QString describe(QObject* object)
 {
@@ -185,17 +195,25 @@ void ShellKeyboardDriver::askTheField(const FieldPath& path)
                  .arg(keyboard.width(), 0, 'f', 0).arg(keyboard.height(), 0, 'f', 0)
                  .arg(screen.width(), 0, 'f', 0).arg(screen.height(), 0, 'f', 0)
                  .arg(waiting.elapsed()));
-    // A panel this short is not a keyboard: it is the shortcut bar iOS draws
-    // INSTEAD of one while a hardware keyboard is connected -- which on a
-    // simulator is a setting, and is the thing logos-workspace#152 asks to rule
-    // out. Named here rather than left as a number, because "isVisible=true and
-    // nothing to type on" is the confusing case.
-    const bool panelIsABarOnly =
-        im->isVisible() && !screen.isEmpty() && keyboard.height() < screen.height() / 6;
-    if (panelIsABarOnly) {
+    // WHICH panel, named rather than left as a number, because "isVisible=true
+    // and nothing to type on" is the confusing case and it is the one every
+    // simulator in the fleet reports (logos-workspace#152, #170).
+    using basecamp::shell::KeyboardPanel;
+    const KeyboardPanel panel = basecamp::shell::panelDrawn(im->isVisible(), keyboard, screen);
+    if (panel == KeyboardPanel::ShortcutBar) {
         emit log(QStringLiteral("keyboard: that is a shortcut bar, not a keyboard -- this "
                                 "device has a hardware keyboard connected, so iOS draws no "
                                 "panel. The input method is still ON the field"));
+    } else if (panel == KeyboardPanel::Keyboard) {
+        emit log(QStringLiteral("keyboard: that is a full software keyboard -- %1 of %2 "
+                                "points, %3% of the screen")
+                     .arg(keyboard.height(), 0, 'f', 0).arg(screen.height(), 0, 'f', 0)
+                     .arg(100.0 * keyboard.height() / screen.height(), 0, 'f', 0));
+    } else if (panel == KeyboardPanel::Unmeasured) {
+        emit log(QStringLiteral("keyboard: the platform says a panel is up and gave no "
+                                "geometry for it in %1 ms -- there is nothing here to tell "
+                                "a keyboard from a shortcut bar")
+                     .arg(kKeyboardBudgetMs));
     }
 
     if (!caret) {
@@ -207,7 +225,7 @@ void ShellKeyboardDriver::askTheField(const FieldPath& path)
                                 "context is handed is %2, which wants no keyboard -- "
                                 "nothing the user does can raise one")
                      .arg(path.field, describe(focusObject)));
-    } else if (!im->isVisible()) {
+    } else if (panel == KeyboardPanel::None) {
         // Everything Qt owns is right and the platform is still not drawing a
         // panel. On a simulator that is the hardware keyboard being connected,
         // which is the first thing logos-workspace#152 asks to rule out.
@@ -218,6 +236,15 @@ void ShellKeyboardDriver::askTheField(const FieldPath& path)
         emit log(QStringLiteral("KEYBOARD REACHES THE FIELD (no panel drawn)"));
     } else {
         emit log(QStringLiteral("KEYBOARD REACHES THE FIELD"));
+    }
+
+    // And leave it up long enough to be photographed. AFTER the verdict, so
+    // that the line a capture is timed from is the last one printed and the
+    // picture is of a panel that has already been measured.
+    if (panel != KeyboardPanel::None) {
+        emit log(QStringLiteral("keyboard: the panel is on screen; holding it for %1 ms "
+                                "so a screenshot can see it").arg(kPanelHoldMs));
+        settle(kPanelHoldMs);
     }
 }
 

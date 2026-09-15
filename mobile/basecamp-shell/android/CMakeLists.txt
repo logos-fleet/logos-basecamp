@@ -60,6 +60,7 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/BundledSetShellHost.cpp ${SHELL_SRC}/BundledSetShellHost.h
     ${SHELL_SRC}/WebAppSurface.cpp ${SHELL_SRC}/WebAppSurface.h
     ${SHELL_SRC}/QuickWidgetKeyboardFocus.cpp ${SHELL_SRC}/QuickWidgetKeyboardFocus.h
+    ${SHELL_SRC}/KeyboardPanel.cpp ${SHELL_SRC}/KeyboardPanel.h
     ${SHELL_SRC}/ShellSceneDriver.cpp ${SHELL_SRC}/ShellSceneDriver.h
     ${SHELL_SRC}/ShellModulesDriver.cpp ${SHELL_SRC}/ShellModulesDriver.h
     ${SHELL_SRC}/ShellPackageSectionDriver.cpp ${SHELL_SRC}/ShellPackageSectionDriver.h

@@ -48,6 +48,8 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/WebAppSurface.h
     ${SRC}/QuickWidgetKeyboardFocus.cpp
     ${SRC}/QuickWidgetKeyboardFocus.h
+    ${SRC}/KeyboardPanel.cpp
+    ${SRC}/KeyboardPanel.h
     ${SRC}/ShellSceneDriver.cpp
     ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.cpp
