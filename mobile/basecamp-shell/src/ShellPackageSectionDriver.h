@@ -37,5 +37,5 @@ private:
     // How long the page may stay on "Loading…" before that is the verdict. The
     // refusal path answers inside the press itself; this is the margin for a
     // build where something really is loading.
-    static constexpr int kSettleMs = 12000;
+    static constexpr int kLoadingVerdictMs = 12000;
 };

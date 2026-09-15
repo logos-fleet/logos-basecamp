@@ -36,12 +36,12 @@ PackageManagerPane::PackageManagerPane(QWidget* parent)
 
 QString PackageManagerPane::message() const
 {
-    return m_label ? m_label->text() : QString();
+    return m_label->text();
 }
 
 void PackageManagerPane::setMessage(const QString& text)
 {
-    if (m_label) m_label->setText(text);
+    m_label->setText(text);
 }
 
 void PackageManagerPane::beginLoading()
@@ -56,9 +56,9 @@ void PackageManagerPane::showUnavailable(const QString& reason)
     m_deadline->stop();
     m_state = Unavailable;
     const QString headline = tr("Package Manager is not available in this build.");
-    setMessage(reason.trimmed().isEmpty()
-                   ? headline
-                   : headline + QStringLiteral("\n\n") + reason.trimmed());
+    const QString detail = reason.trimmed();
+    setMessage(detail.isEmpty() ? headline
+                                : headline + QStringLiteral("\n\n") + detail);
 }
 
 void PackageManagerPane::setLoadDeadline(int ms)

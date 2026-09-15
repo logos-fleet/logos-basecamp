@@ -50,7 +50,7 @@ bool ShellPackageSectionDriver::run()
         }
         text = label->text();
         loading = text.contains(kLoading);
-    } while (loading && waited.elapsed() < kSettleMs);
+    } while (loading && waited.elapsed() < kLoadingVerdictMs);
 
     if (loading) {
         emit log(QStringLiteral("WRONG: the Package Manager section still says \"%1\" %2 ms "
