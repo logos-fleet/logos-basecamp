@@ -122,6 +122,8 @@ void StoreAppManager::refreshCatalog()
     for (const QVariant& row : rows)
         m_entries.append(entryFrom(row.toMap(), installed));
 
+    applyPlatformFloor();
+
     // A catalog link this shell will not open is worth one line each: it means a
     // repository is publishing something odd, and the alternative is a report
     // affordance that is silently missing.
@@ -134,6 +136,37 @@ void StoreAppManager::refreshCatalog()
     }
 
     emit catalogChanged();
+}
+
+void StoreAppManager::applyPlatformFloor()
+{
+    if (!m_floor.isDeclared())
+        return;
+
+    // The catalog's OWN dependency graph, assembled from the rows it published.
+    // Anything the walk reaches that is not a row here is a name the floor
+    // either carries (and then refuses) or has never heard of (and then is not
+    // this object's to judge).
+    QHash<QString, QStringList> dependencies;
+    for (const CatalogEntry& e : m_entries)
+        dependencies.insert(e.name, e.dependencies);
+
+    for (CatalogEntry& e : m_entries) {
+        const QString missing = m_floor.missingFor(e.name, dependencies);
+        if (missing.isEmpty())
+            continue;
+
+        // A REFUSAL, not a warning beside an install control. A Bundled set is
+        // fixed at build time (ADR 0007), so there is no remedy on the device:
+        // an install offered here succeeds and the module dies at its first
+        // call, which is the one failure the honest-availability rule exists to
+        // prevent. The reason REPLACES package_manager's -- "installable here
+        // as the 'web' variant" is no longer true of this row on this shell.
+        e.available = false;
+        e.variant.clear();
+        e.unavailableReason = PlatformFloor::reasonFor(missing);
+        emit log(QStringLiteral("%1: %2").arg(e.name, e.unavailableReason));
+    }
 }
 
 void StoreAppManager::beginInstall(const QString& packageName)

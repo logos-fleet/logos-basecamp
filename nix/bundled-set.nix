@@ -31,6 +31,9 @@
 #       name         = "counter_ui";
 #       version      = "1.0.0";
 #       type         = "ui_qml";         # core | ui_qml
+#       platform     = false;            # ADR 0009: owns access a webview cannot
+#                                        # give it, so a Downloaded module may
+#                                        # depend on it only where it is bundled
 #       dependencies = [ "counter" ];    # strings, or { name = ...; } entries
 #       variants     = { ios-sim-arm64 = { main = "..."; view = "..."; }; ... };
 #       file         = "packages/counter_ui.lgx";   # relative to `root`, OR
@@ -54,6 +57,11 @@ let
   inherit (publisher) variantForSystem systemForVariant embedDirFor;
 
   verifyMemberScript = ./verify-lgx-member.sh;
+
+  # THE PLATFORM FLOOR (#169), derived from this shell's own catalog and its own
+  # closure. Kept in its own file because the runtime half reads the answer back
+  # out of the manifest written below -- see nix/platform-floor.nix.
+  platformFloor = import ./platform-floor.nix { inherit lib; };
 
   depNames = entry:
     map (d: if builtins.isString d then d else d.name) (entry.dependencies or [ ]);
@@ -191,6 +199,14 @@ let
       closure = resolveClosure { inherit index target apps; };
       verified = map (verifyPackage { inherit (catalog) root; inherit signers target; }) closure;
       embedDir = embedDirFor target;
+
+      # What this shell's Bundled closure makes possible for a DOWNLOADED module
+      # (ADR 0009, #169): the Platform modules it ships, and the ones this
+      # catalog knows about that it does not. Derived here because this is the
+      # one place both facts are known at once, and written into the manifest
+      # because the device -- browsing a repository this build never saw -- is
+      # the only place the verdict can be applied.
+      floor = platformFloor.floorOf { inherit index closure; };
     in
     assert lib.assertMsg (apps != [ ])
       "logos-basecamp: an empty --bundle produces an app with no Bundled set; name at least one module";
@@ -200,8 +216,9 @@ let
         members = lib.concatStringsSep " " (map toString verified);
         requested = lib.concatStringsSep " " apps;
         inherit target embedDir;
+        platformFloorJson = builtins.toJSON floor;
         passthru = {
-          inherit target embedDir;
+          inherit target embedDir floor;
           members = verified;
           # The closure, AT EVAL. Everything here is in the catalog index, so a
           # consumer that has to name the images -- the iOS app's embed list,
@@ -257,6 +274,12 @@ let
           "embedDir": embed,
           "requested": os.environ["requested"].split(),
           "modules": modules,
+          # THE PLATFORM FLOOR, as this build derived it (nix/platform-floor.nix).
+          # The app compiles this manifest in (BundledSetManifest.h) and the App
+          # Manager reads the floor back out of it, which is what lets a shell
+          # judge a repository it has never seen: `absent` names the Platform
+          # modules a Downloaded module may not depend on HERE.
+          "platformFloor": json.loads(os.environ["platformFloorJson"]),
       }
       json.dump(manifest, open(os.path.join(out, "bundled-set.json"), "w"),
                 indent=2, sort_keys=True)
@@ -267,4 +290,5 @@ let
 in
 {
   inherit variantForSystem systemForVariant embedDirFor readCatalog refusals resolveClosure mkBundledSet;
+  inherit platformFloor;
 }

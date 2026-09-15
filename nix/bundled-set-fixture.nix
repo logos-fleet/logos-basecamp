@@ -72,10 +72,16 @@ let
       };
       inherit signingKey;
     };
+    # A PLATFORM MODULE THIS SET SHIPS (ADR 0009). `platform: true` is the
+    # module's own declaration in metadata.json -- it owns access a webview
+    # cannot give it -- and the catalog carries it so a consumer can derive a
+    # shell's floor from the index. `counter` is the one in the closure, which
+    # is what makes the derived floor's `present` half observable at all.
     counter = {
       name = "counter";
       version = "1.0.0";
       type = "core";
+      platform = true;
       dependencies = [ "capability_module" ];
       variants = {
         ios-sim-arm64 = iosVariant { stem = "counter_bare"; };
@@ -100,6 +106,10 @@ let
       name = "desktop_only";
       version = "2.1.0";
       type = "core";
+      # ...AND A PLATFORM MODULE THIS SET DOES NOT SHIP, which is the other half
+      # of the floor: a Downloaded module that reached it would install and then
+      # have nothing to call (#169).
+      platform = true;
       dependencies = [ ];
       variants = {
         darwin-arm64 = darwinVariant "desktop_only";

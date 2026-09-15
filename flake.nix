@@ -620,6 +620,18 @@
           mkBareSpec = { name, version, category, description, module, dependencies ? [ ] }: {
             inherit name version category description dependencies signingKey;
             type = "core";
+            # ADR 0009's Platform flag, READ OFF THE MODULE rather than listed
+            # here (#169). It is `"platform": true` in the module's own
+            # metadata.json -- it owns access a webview cannot give it, so it
+            # ships no `web` variant and a Downloaded module reaches what it owns
+            # by calling it. The catalog index carries it so a shell's Platform
+            # FLOOR can be derived from this catalog and that shell's own Bundled
+            # closure (nix/platform-floor.nix), which is the only way the answer
+            # cannot drift from what the modules declare.
+            #
+            # `or false` for a pin that predates the flag: an unflagged module is
+            # judged by the variant rule alone, exactly as it was.
+            platform = (module.config or { }).platform or false;
             variants.${target} = catalogLib.mkVariantPayload {
               drv = module.legacyPackages.${androidBuildSystem}.mobile.${system}.bare;
               stem = "${name}_bare";

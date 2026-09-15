@@ -168624,11 +168624,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789110524,
-        "narHash": "sha256-BKIrqDbUFzWvw6uiAQMW9H+7gGoIrin6ojYK0KNEJYU=",
+        "lastModified": 1789502730,
+        "narHash": "sha256-is2/iD5678SkS61v6ji3I1plcLuAWtny0/UfRkC0GXI=",
         "owner": "logos-fleet",
         "repo": "nix-bundle-lgx",
-        "rev": "25aa9e362983e313c9d6911cca7d96b76d31d543",
+        "rev": "e9fe75eb6aad48c7a78eb925793f239c1de93375",
         "type": "github"
       },
       "original": {

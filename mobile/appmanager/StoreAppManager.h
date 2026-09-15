@@ -3,6 +3,7 @@
 #include "CatalogEntry.h"
 #include "ConsentQueue.h"
 #include "InstallGate.h"
+#include "PlatformFloor.h"
 
 #include <QHash>
 #include <QObject>
@@ -89,6 +90,16 @@ public:
 
     explicit StoreAppManager(Backend* backend, QObject* parent = nullptr);
 
+    // THIS BUILD'S PLATFORM FLOOR (#169), derived by the build and read back out
+    // of the Bundled-set manifest by the host that constructs this object.
+    //
+    // It is set rather than asked for through `Backend` because it is not a
+    // question about anything outside the process: the answer was computed at
+    // build time, compiled into the app image, and is the same for the life of
+    // the app. A shell that never calls this declares no floor, which refuses
+    // nothing -- see PlatformFloor.
+    void setPlatformFloor(const PlatformFloor& floor) { m_floor = floor; }
+
     QVariantList catalogEntries() const;
     QString catalogUnavailableReason() const { return m_catalogUnavailable; }
     QVariantMap signerPrompt() const { return m_gate.signerPrompt(); }
@@ -144,9 +155,14 @@ signals:
 private:
     void setLastError(const QString& error);
     void refuseWithGateError();
+    // Apply the Platform floor to `m_entries`, in place. Runs after the rows are
+    // built because the walk is over the CATALOG's dependency graph and a row's
+    // verdict can therefore depend on a row further down the list.
+    void applyPlatformFloor();
 
-    Backend*     m_backend;   // not owned
-    InstallGate  m_gate;
+    Backend*      m_backend;  // not owned
+    InstallGate   m_gate;
+    PlatformFloor m_floor;
     ConsentQueue m_consents;
 
     QList<CatalogEntry> m_entries;

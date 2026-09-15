@@ -78,9 +78,22 @@ CatalogEntry entryFrom(const QVariantMap& annotatedRow,
     // would fetch — versions[] is newest-first out of the downloader.
     const QVariantList versions = annotatedRow.value(QStringLiteral("versions")).toList();
     if (!versions.isEmpty()) {
-        e.version = versions.first().toMap()
-                        .value(QStringLiteral("manifest")).toMap()
-                        .value(QStringLiteral("version")).toString();
+        const QVariantMap manifest =
+            versions.first().toMap().value(QStringLiteral("manifest")).toMap();
+        e.version = manifest.value(QStringLiteral("version")).toString();
+        // The package's own dependency list, as it signed it. A catalog that
+        // publishes none leaves this empty, which is the same answer as "it
+        // depends on nothing" and is the right one: the floor refuses on what a
+        // row SAYS it reaches, never on what it declined to say.
+        for (const QVariant& dep : manifest.value(QStringLiteral("dependencies")).toList()) {
+            // Strings, or `{ "name": ... }` entries -- the two spellings an LGX
+            // manifest allows.
+            const QString name = dep.typeId() == QMetaType::QVariantMap
+                                     ? dep.toMap().value(QStringLiteral("name")).toString()
+                                     : dep.toString();
+            if (!name.isEmpty())
+                e.dependencies.append(name);
+        }
     }
 
     // Availability is package_manager's verdict and is passed through. A row
