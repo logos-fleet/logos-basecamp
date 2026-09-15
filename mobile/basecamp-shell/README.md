@@ -292,16 +292,20 @@ facts the platform reads, in order:
 [shell] keyboard: 'newDmMenuItem' opened the dialog holding 'convAddressField'
 [shell] drive: press 'convAddressField' at (362, 560) in 723x1116
 [shell] keyboard: 'convAddressField' activeFocus=true
-[shell] keyboard: app focus object QQuickWidget(-) over scene Main.qml, focusing QQuickTextArea(convAddressField), accepts input method: yes
-[shell] keyboard: QInputMethod isVisible=true, panel 820x384 after 412 ms
+[shell] keyboard: app focus object QQuickWidget(-) over scene ChatView.qml, focusing LogosTextArea(convAddressField), accepts input method: yes
+[shell] keyboard: QInputMethod isVisible=true, panel 820x69 of a 820x1180 screen after 799 ms
+[shell] keyboard: that is a shortcut bar, not a keyboard -- this device has a
+        hardware keyboard connected, so iOS draws no panel. The input method is
+        still ON the field
 [shell] KEYBOARD REACHES THE FIELD
 ```
 
-Those three also settle what #152 asks to rule out first. A run where the caret
-and the input method are both on the field and no panel is drawn is a
-**hardware keyboard connected to the simulator**, not a defect — the driver says
-so in as many words. A run where the focus object wants no keyboard is the
-defect, and it is what the iPad printed before this:
+Those three also settle what #152 asks to rule out first, and the run above is
+the answer for a simulator: 69 points of panel on a 1180-point screen is the
+**shortcut bar** iOS draws instead of a keyboard while a hardware keyboard is
+connected, which the Simulator does by default. That is a setting, not a
+defect — and reaching it at all is the fix, because the same iPad printed this
+before:
 
 ```
 [shell] keyboard: 'convAddressField' activeFocus=true
