@@ -55,13 +55,21 @@ private:
     };
     static FieldPath fieldPathFor(const QString& appName);
 
+    // Everything between the opened "+" menu and the verdict: the entry, the
+    // dialog, the tap on its field and the three facts. Split out so that
+    // run() has one place to close what the menu opened, whether this reached
+    // the field or gave up short of it.
+    void askTheField(const FieldPath& path);
+
     // The view module whose app is up, or an empty string. Both hasWork() and
     // run() are about that one app.
     QString appOnScreen() const;
 
-    // Press Escape at the surface, which is what closePolicy CloseOnEscape
-    // listens for -- the dialog's Cancel button carries no handle.
-    void dismiss(QQuickItem* field);
+    // Close whatever the walk left open. Escape at the SURFACE is what a
+    // Popup's closePolicy CloseOnEscape listens for -- the dialog's Cancel
+    // button carries no handle -- so `anchor` only has to be an item in the
+    // same scene as the popups, not the popup itself.
+    void dismiss(QQuickItem* anchor);
 
     BundledSetShellHost* m_host;  // not owned
 };

@@ -309,22 +309,12 @@ int main(int argc, char* argv[])
     auto* packages = new ShellPackageSectionDriver(shellWidget, &app);
     QObject::connect(packages, &ShellPackageSectionDriver::log, &console);
 
-    // AND THE KEYBOARD, for the app's own input fields (#152). LAST of the
-    // passes that press the Shell's own scene, and still ahead of the web app.
-    // Both ends of that are about what a pass leaves behind:
-    //
-    //   it goes AFTER the package-manager section because it is the only pass
-    //   that leaves a PLATFORM panel over the Shell -- the keyboard, or the
-    //   shortcut bar that stands in for one -- and it is also the only one that
-    //   restores its own starting state, switching back to the workspace and
-    //   finding the app's "+" again, so nothing is owed to it by the pass in
-    //   front. Run the other way round, the section pass would be pressing a
-    //   sidebar it does not fully own and holding a page for a screenshot with
-    //   a keyboard across the bottom of it;
-    //
-    //   it goes BEFORE the web app for the reason every scene pass does:
-    //   opening a page hands the workspace to a platform view, and the question
-    //   here is about the Shell's own focus chain.
+    // AND THE KEYBOARD, for the app's own input fields: the app's "+", its New
+    // DM entry, the address field in the dialog that opens -- and then the
+    // three facts the platform reads before it raises a keyboard. Asked from
+    // in-process because nothing outside can ask it any more: Xcode 27 removed
+    // SimulatorKit, so `idb ui tap` refuses HID and `simctl` has no input verb
+    // at all (#152). Where it sits in the order is at its call site below.
     auto* keyboard = new ShellKeyboardDriver(&host, shellWidget, &app);
     QObject::connect(keyboard, &ShellKeyboardDriver::log, &console);
 
@@ -414,9 +404,19 @@ int main(int argc, char* argv[])
         // has the window.
         if (drive.wants(DrivePass::Packages))
             packages->run();
-        // AND THE KEYBOARD, last of the scene passes and still ahead of the web
-        // app: it is the one that leaves a platform panel over the Shell, and
-        // the one that puts itself back where it started (#152).
+        // AND THE KEYBOARD, last of the passes that press the Shell's own
+        // scene and still ahead of the web app. Both ends of that are about
+        // what a pass leaves behind. It goes AFTER the package-manager section
+        // because it is the only one that leaves a PLATFORM panel over the
+        // Shell -- the keyboard, or the shortcut bar that stands in for one --
+        // and run the other way round the section pass would be pressing a
+        // sidebar it does not fully own and holding a page for a screenshot
+        // with a keyboard across the bottom of it. It goes BEFORE the web app
+        // for the reason every scene pass does: opening a page hands the
+        // workspace to a platform view, and the question here is about the
+        // Shell's own focus chain. Nothing is owed to it by the pass in front
+        // either way -- it switches back to the workspace and finds the app's
+        // "+" itself, and closes again whatever it opened (#152).
         if (drive.wants(DrivePass::Keyboard) && keyboard->hasWork())
             keyboard->run();
         if (drive.wants(DrivePass::WebApps) && webApps->hasWork())

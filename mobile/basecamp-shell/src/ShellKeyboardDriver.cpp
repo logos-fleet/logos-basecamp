@@ -15,7 +15,6 @@
 #include <QQuickWindow>
 #include <QRectF>
 #include <QScreen>
-#include <QStringList>
 #include <QUrl>
 
 namespace {
@@ -118,7 +117,20 @@ void ShellKeyboardDriver::run()
     if (!tap(menuButton)) return;
     settle(kMenuSettleMs);
 
-    // From here on the items are inside Popups, which hang off the scene's
+    // From here the app has something of its own over the workspace -- the
+    // menu, then the dialog -- and EVERY way out of the walk below closes it
+    // again, not just the one that reached the field. The passes sequenced
+    // behind this one press the Shell's own chrome, and a popup left open over
+    // the workspace would swallow their taps. The "+" is the anchor because it
+    // is in the same scene as the popups and is the one handle that exists on
+    // all of those paths.
+    askTheField(path);
+    dismiss(menuButton);
+}
+
+void ShellKeyboardDriver::askTheField(const FieldPath& path)
+{
+    // The items from here on are inside Popups, which hang off the scene's
     // overlay rather than off the view's root object.
     QQuickItem* menuItem = waitFor(path.menuItem, 5000, Scope::WithOverlays);
     if (!menuItem) {
@@ -207,13 +219,11 @@ void ShellKeyboardDriver::run()
     } else {
         emit log(QStringLiteral("KEYBOARD REACHES THE FIELD"));
     }
-
-    dismiss(field);
 }
 
-void ShellKeyboardDriver::dismiss(QQuickItem* field)
+void ShellKeyboardDriver::dismiss(QQuickItem* anchor)
 {
-    QQuickWidget* surface = surfaceOf(field);
+    QQuickWidget* surface = surfaceOf(anchor);
     if (!surface) return;
     QKeyEvent press(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
     QKeyEvent release(QEvent::KeyRelease, Qt::Key_Escape, Qt::NoModifier);
