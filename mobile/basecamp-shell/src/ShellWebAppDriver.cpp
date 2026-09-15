@@ -242,4 +242,77 @@ void ShellWebAppDriver::run()
     emit log(QStringLiteral("web app: %1 is closed, off screen, and still loaded")
                  .arg(app));
     emit log(QStringLiteral("SHELL OPENS A WEB APP AND THE USER CAN LEAVE IT AGAIN"));
+
+    checkUnloadedWhileOpen(app);
+}
+
+// ── #151: THE APP IS OPEN AND THE MODULE GOES AWAY UNDER IT ─────────────────
+//
+// The state the issue was reported in, and the one nothing drove: a `web` app
+// the user has OPENED -- its page docked in the workspace, its tab in the strip
+// -- unloaded from Settings -> Module Inspector while they are looking at it.
+// Closing an app (step 5 above) is the user's own instruction and the module
+// survives it; this is the other direction, where the module is taken away and
+// everything the Shell and the container were holding for it has to go with it.
+//
+// ShellModulesDriver presses that Unload for real, on the row, and deliberately
+// does NOT dock the app first -- it is inside a loop over every row and the
+// state it would leave behind belongs to one of them. So the docked case is
+// asserted here, on the app this driver already has open, and the unload is the
+// call the row's toggle makes (`ShellModulesBackend::unloadCoreModule`).
+//
+// WHAT IT ADDS TO ShellModulesDriver's OWN CHECK is the container's BOOKS. A
+// module with no page left in the live set costs the phone's single 290 MB
+// runtime slot, so the next app the user opens has to evict a module that no
+// longer exists -- and the console said both things at once: `web_counter is
+// visible; 1 live runtime(s)` from the container, `app web_counter is not
+// mounted` from the Shell, about the same module at the same moment.
+void ShellWebAppDriver::checkUnloadedWhileOpen(const QString& app)
+{
+    auto* web = basecamp::web::MobileWebContainerBackend::instance();
+    ShellModulesBackend* backend = m_host->backend();
+
+    // Open again, the way the tile does -- the page is still loaded after step
+    // 5, so this is the mount and not a cold start.
+    m_host->loadUiModule(app);
+    settle(1000);
+    WebAppSurface* surface = m_host->webSurface(app);
+    if (!surface || !surface->onScreen() || web->frontmostModule() != app) {
+        emit log(QStringLiteral("WRONG: %1 could not be reopened for the unload check")
+                     .arg(app));
+        return;
+    }
+    emit log(QStringLiteral("web app: %1 is open again; %2 live runtime(s), and now it is "
+                            "unloaded from under the user")
+                 .arg(app).arg(web->budget().live().size()));
+
+    // WHAT THE MODULES TAB'S UNLOAD DOES. A `web` app's module is the CORE's --
+    // its page lives in the Web container, which is a core container (#149) --
+    // so this is the same call the row's toggle makes.
+    backend->unloadCoreModule(app);
+    settle(2000);
+
+    if (web->hasView(app)) {
+        emit log(QStringLiteral("WRONG: %1 was unloaded while it was open and the "
+                                "container still has its page").arg(app));
+        return;
+    }
+    if (m_host->webSurface(app)) {
+        emit log(QStringLiteral("WRONG: %1 was unloaded while it was open and the Shell "
+                                "still holds its tab -- a tab onto a page that does not "
+                                "exist").arg(app));
+        return;
+    }
+    if (web->budget().isLive(app) || web->budget().visible() == app
+        || web->frontmostModule() == app) {
+        emit log(QStringLiteral("WRONG: %1 was unloaded and the container still counts it "
+                                "-- live: %2, visible: '%3', in front: '%4'")
+                     .arg(app, web->budget().live().join(QStringLiteral(", ")),
+                          web->budget().visible(), web->frontmostModule()));
+        return;
+    }
+    emit log(QStringLiteral("UNLOADING AN OPEN WEB APP TAKES ITS PAGE, ITS TAB AND ITS "
+                            "RUNTIME WITH IT (%1: %2 live runtime(s) held, nothing "
+                            "visible)")
+                 .arg(app).arg(web->budget().live().size()));
 }

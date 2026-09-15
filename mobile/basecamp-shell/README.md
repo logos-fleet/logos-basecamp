@@ -141,10 +141,22 @@ Shell must not still hold a tab onto it, and its tile must stay on the sidebar
 (#123).
 
 One thing this deliberately does NOT drive: unloading a `web` app while the
-Shell still holds its tab. It works — `web app <name> has no page any more; its
-tab is closed` — and then the app dies tearing the QDockWidget's accessibility
-cache down, which is #139 and not this. ShellWebAppDriver's close already meets
-it.
+Shell still holds its tab. Not because the case does not matter — it is the
+state logos-workspace#151 was reported in — but because this is a loop over
+every row, and an app docked in the middle of it belongs to one of them. The
+web-apps pass drives it instead, on the app it already has open, and checks the
+container's BOOKS as well as its pages:
+
+```
+[shell] web app: web_counter_b is open again; 1 live runtime(s), and now it is unloaded from under the user
+[shell] UNLOADING AN OPEN WEB APP TAKES ITS PAGE, ITS TAB AND ITS RUNTIME WITH IT (web_counter_b: 0 live runtime(s) held, nothing visible)
+```
+
+The runtime half is what #151 is left as. A module with no page still in the
+live set spends the phone's single 290 MB slot on nothing, so the next app the
+user opens has to evict a dead one — and the console said both things at once,
+`web_counter is visible; 1 live runtime(s)` from the container beside `app
+web_counter is not mounted` from the Shell.
 
 The rows are counted off the **scene**, not off the model: each row's status
 badge carries its module's name, so a filter proxy that dropped a row or a
