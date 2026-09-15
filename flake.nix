@@ -128,11 +128,30 @@
     logos-evm-uniswap-module.url = "github:logos-co/logos-evm-uniswap-module";
     logos-evm-uniswap-module.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-evm-uniswap-module.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
+    # `token_list_module` is the THIRD member (#148), and the one the wallet's
+    # Tokens tab asks for a list. Same shape as the two above: a Bundled Bare
+    # module, its builder followed onto this flake's so the Bare image carries
+    # the SAME logos-protocol stamp the phone's host gates at load.
+    #
+    # It has no `web` (wasm) variant, and unlike uniswap's that is DECLARED
+    # rather than circumstantial: `platform: true` in its metadata.json (ADR
+    # 0009), because it owns a socket -- `reqwest` with `socks` and a
+    # `proxyRequired` that fails closed -- which a webview cannot give a page.
+    # The builder's gate then refuses a `web` output by name at eval.
+    #
+    # LOCKED TO THE logos-fleet FORK, for the reason uniswap's note above gives:
+    # upstream publishes no mobile keys, so a bare `nix flake update` walks the
+    # lock back to logos-co and this catalog entry stops EVALUATING. Re-pin with
+    #   nix flake lock --override-input logos-evm-token-list-module \
+    #     github:logos-fleet/logos-evm-token-list-module/<rev>
+    logos-evm-token-list-module.url = "github:logos-co/logos-evm-token-list-module";
+    logos-evm-token-list-module.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-evm-wallet-ui.url = "github:logos-co/logos-evm-wallet-ui";
     logos-evm-wallet-ui.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-evm-wallet-ui.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
     logos-evm-wallet-ui.inputs.keystore_module.follows = "logos-evm-keystore-module";
     logos-evm-wallet-ui.inputs.uniswap_module.follows = "logos-evm-uniswap-module";
+    logos-evm-wallet-ui.inputs.token_list_module.follows = "logos-evm-token-list-module";
     # The capability broker, and a MEMBER of the mobile dev catalog
     # (mobileCatalogFor below): the catalog carries its `bare` output, reached
     # as `legacyPackages.<buildSystem>.mobile.<target>.bare`. A module-to-module
@@ -314,7 +333,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-token-list-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -693,10 +712,10 @@
             #
             # The ONE module on a phone that can answer `eth_getBalance`, and
             # therefore the whole of what the wallet UI's `web` variant has to
-            # fetch a balance FROM. The other five the wallet chain names
-            # (wallet_backend, token_list, uniswap, railgun, and the keystore's
-            # native form) have no mobile Bare build, which is why the `web`
-            # variant talks to this one directly rather than to the coordinator.
+            # fetch a balance FROM. The coordinator the desktop wallet drives
+            # (wallet_backend_module) still has no mobile Bare build, which is
+            # why the `web` variant talks to this one -- and to the two members
+            # below it -- directly rather than to the coordinator.
             #
             # No dependencies: eth_rpc declares none, and a reqwest/rustls
             # client cross-compiles to both phones with nothing added.
@@ -726,6 +745,29 @@
               description = "Uniswap V2/V3/V4 price oracle (Multicall3-batched) + swap building";
               module = logos-evm-uniswap-module;
               dependencies = logos-evm-uniswap-module.config.dependencies;
+            };
+
+            # ...AND THE THIRD (#148). The wallet's Tokens tab printed "Token
+            # lists needs token_list_module, which has no mobile build", for the
+            # same one reason uniswap's Market tab did: no entry here.
+            #
+            # A PLATFORM MODULE, and the first in this catalog that is one by
+            # DECLARATION -- `platform: true`, ADR 0009. It owns a socket the
+            # webview cannot lend it (reqwest + socks, `proxyRequired` failing
+            # closed), so it has no `web` variant at all and a Downloaded module
+            # reaches token metadata by CALLING it. That makes its presence in
+            # the Bundled set the whole of how a phone gets a token list.
+            #
+            # `dependencies` read off its own metadata.json for the reason
+            # mkBareSpec gives -- it declares none, which is a fact the catalog
+            # has to read rather than assume.
+            token_list_module = mkBareSpec {
+              name = "token_list_module";
+              version = logos-evm-token-list-module.config.version;
+              category = "wallet";
+              description = "Uniswap token lists: a shipped offline catalogue, fetch/merge, custom tokens";
+              module = logos-evm-token-list-module;
+              dependencies = logos-evm-token-list-module.config.dependencies;
             };
 
             # ── the apps (slices 22 and 27) ──────────────────────────────
