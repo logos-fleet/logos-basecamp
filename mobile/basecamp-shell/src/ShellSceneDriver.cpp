@@ -9,6 +9,7 @@
 #include <QVariant>
 #include <QQuickItem>
 #include <QQuickWidget>
+#include <QQuickWindow>
 #include <QScreen>
 #include <QUrl>
 #include <QWidget>
@@ -51,6 +52,18 @@ void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
     const QList<QQuickItem*> children = item->childItems();
     for (QQuickItem* child : children)
         walkItems(child, visit);
+}
+
+// Where a walk of one surface starts. The quick window's contentItem is the
+// WHOLE scene -- the root object AND the Overlay a Popup (a menu, a dialog) is
+// parented to; the root object alone is only what the view draws. Only a lookup
+// that has to reach inside a popup asks for the wider one, because everything
+// else is better off not seeing an item a closed popup still holds.
+QQuickItem* walkRoot(QQuickWidget* surface, bool withOverlays)
+{
+    if (withOverlays && surface->quickWindow())
+        return surface->quickWindow()->contentItem();
+    return surface->rootObject();
 }
 
 // The display `w` is on, in the global coordinates mapToGlobal() answers in.
@@ -105,8 +118,7 @@ void ShellSceneDriver::dumpNames(const QString& why)
         // The whole scene, overlays included: a handle a driver could not find
         // because it is inside a menu that never opened is a different bug
         // from one that is spelled differently, and this is where that is told.
-        walkItems(surface->quickWindow() ? surface->quickWindow()->contentItem() : root,
-                  [&named](QQuickItem* item) {
+        walkItems(walkRoot(surface, /*withOverlays=*/true), [&named](QQuickItem* item) {
             if (!item->objectName().isEmpty())
                 named << item->objectName();
         });
@@ -120,16 +132,8 @@ void ShellSceneDriver::forEachItem(const std::function<void(QQuickItem*)>& visit
                                    Scope scope) const
 {
     if (!m_shell) return;
-    for (QQuickWidget* surface : m_shell->findChildren<QQuickWidget*>()) {
-        // The contentItem is the whole scene -- the root object AND the
-        // Overlay a Popup is parented to. Only a driver that has to reach
-        // inside a menu or a dialog asks for it, because everything else is
-        // better off not seeing an item a closed popup still holds.
-        walkItems(scope == Scope::WithOverlays && surface->quickWindow()
-                      ? surface->quickWindow()->contentItem()
-                      : surface->rootObject(),
-                  visit);
-    }
+    for (QQuickWidget* surface : m_shell->findChildren<QQuickWidget*>())
+        walkItems(walkRoot(surface, scope == Scope::WithOverlays), visit);
 }
 
 QQuickItem* ShellSceneDriver::find(const QString& objectName, Scope scope) const

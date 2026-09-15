@@ -55,6 +55,10 @@ private:
     };
     static FieldPath fieldPathFor(const QString& appName);
 
+    // The view module whose app is up, or an empty string. Both hasWork() and
+    // run() are about that one app.
+    QString appOnScreen() const;
+
     // Press Escape at the surface, which is what closePolicy CloseOnEscape
     // listens for -- the dialog's Cancel button carries no handle.
     void dismiss(QQuickItem* field);

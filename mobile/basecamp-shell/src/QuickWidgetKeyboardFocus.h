@@ -80,7 +80,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    void reconcile(QQuickWidget* surface);
+    void followSceneFocus(QQuickWidget* surface, QObject* focusObject);
 
     QSet<QObject*> m_watched;
 };

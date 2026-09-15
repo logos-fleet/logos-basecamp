@@ -36,24 +36,27 @@ void QuickWidgetKeyboardFocus::watch(QQuickWidget* surface)
     if (!surface || m_watched.contains(surface))
         return;
     m_watched.insert(surface);
+    QQuickWindow* scene = surface->quickWindow();
     connect(surface, &QObject::destroyed, this,
             [this](QObject* gone) { m_watched.remove(gone); });
-    connect(surface->quickWindow(), &QQuickWindow::focusObjectChanged, this,
+    connect(scene, &QQuickWindow::focusObjectChanged, this,
             [this, surface](QObject* focusObject) {
-                if (acceptsInputMethod(focusObject))
-                    takeKeyboardFocus(surface);
+                followSceneFocus(surface, focusObject);
             });
-    reconcile(surface);
+    // And once for the focus the scene already holds: the QML is loaded and
+    // shown in one go, and a dialog that opens with a focused field emits its
+    // change before anyone here is listening. Asking now is what makes watch()
+    // total -- after it the invariant holds, rather than holding from the next
+    // change onwards.
+    followSceneFocus(surface, scene->focusObject());
 }
 
-void QuickWidgetKeyboardFocus::reconcile(QQuickWidget* surface)
+// The invariant, applied to one scene focus change: whenever the scene focuses
+// something that wants a keyboard, its widget takes the window's focus, because
+// that is the object the platform input context is told about.
+void QuickWidgetKeyboardFocus::followSceneFocus(QQuickWidget* surface, QObject* focusObject)
 {
-    // A scene can have focused its field before anyone was listening -- the QML
-    // is loaded and shown in one go, and a dialog that opens with a focused
-    // field emits its change in between. Asking once here is what makes watch()
-    // total: after it, the invariant holds rather than holding from the next
-    // change onwards.
-    if (acceptsInputMethod(surface->quickWindow()->focusObject()))
+    if (acceptsInputMethod(focusObject))
         takeKeyboardFocus(surface);
 }
 

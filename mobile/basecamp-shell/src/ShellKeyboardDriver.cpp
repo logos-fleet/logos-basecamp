@@ -29,8 +29,6 @@ constexpr int kMenuSettleMs = 400;
 // it has been reported. Measured on the iPad Air simulator at well under this.
 constexpr int kKeyboardBudgetMs = 3000;
 
-QString describe(QObject* object);
-
 QString describe(QObject* object)
 {
     if (!object)
@@ -43,17 +41,17 @@ QString describe(QObject* object)
     // every input-method query to the item its own scene has focused, and WHICH
     // widget it is is the whole question when several are on screen. So the
     // scene behind it is named too.
-    if (auto* surface = qobject_cast<QQuickWidget*>(object)) {
-        QObject* inScene = surface->quickWindow() ? surface->quickWindow()->focusObject()
-                                                  : nullptr;
-        text += QStringLiteral(" over scene %1, focusing %2")
-                    .arg(surface->source().fileName().isEmpty()
-                             ? QStringLiteral("<none>")
-                             : surface->source().fileName(),
-                         inScene && inScene != surface->quickWindow()
-                             ? describe(inScene)
-                             : QStringLiteral("nothing"));
-    }
+    auto* surface = qobject_cast<QQuickWidget*>(object);
+    if (!surface)
+        return text;
+    QQuickWindow* scene = surface->quickWindow();
+    // focusObject() answers the window ITSELF when no item in it holds focus.
+    QObject* inScene = scene ? scene->focusObject() : nullptr;
+    const bool sceneHoldsAnItem = inScene && inScene != scene;
+    const QString qml = surface->source().fileName();
+    text += QStringLiteral(" over scene %1, focusing %2")
+                .arg(qml.isEmpty() ? QStringLiteral("<none>") : qml,
+                     sceneHoldsAnItem ? describe(inScene) : QStringLiteral("nothing"));
     return text;
 }
 
@@ -79,20 +77,25 @@ ShellKeyboardDriver::FieldPath ShellKeyboardDriver::fieldPathFor(const QString& 
     return { };
 }
 
+QString ShellKeyboardDriver::appOnScreen() const
+{
+    // The set's first view module: the one ShellAppDriver mounts and leaves up,
+    // and an empty string when the set carries none.
+    return m_host->backend()->viewModuleNames().value(0);
+}
+
 bool ShellKeyboardDriver::hasWork() const
 {
-    const QStringList apps = m_host->backend()->viewModuleNames();
-    return !apps.isEmpty() && !fieldPathFor(apps.first()).field.isEmpty();
+    return !fieldPathFor(appOnScreen()).field.isEmpty();
 }
 
 void ShellKeyboardDriver::run()
 {
-    const QStringList apps = m_host->backend()->viewModuleNames();
-    if (apps.isEmpty()) {
+    const QString app = appOnScreen();
+    if (app.isEmpty()) {
         emit log(QStringLiteral("keyboard: no app in this Bundled set"));
         return;
     }
-    const QString app = apps.first();
     const FieldPath path = fieldPathFor(app);
     if (path.field.isEmpty()) {
         emit log(QStringLiteral("keyboard: no input-field path is known for app '%1'").arg(app));
