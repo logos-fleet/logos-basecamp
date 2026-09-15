@@ -14,6 +14,9 @@ PackageManagerPane::PackageManagerPane(QWidget* parent)
     layout->setAlignment(Qt::AlignCenter);
 
     m_label = new QLabel(this);
+    // The one handle on this page. A driver on a phone has nothing else to read
+    // it by: the pane is a widget, not a QML item, so there is no id to find.
+    m_label->setObjectName(QStringLiteral("packageManagerPane.message"));
     m_label->setAlignment(Qt::AlignCenter);
     m_label->setWordWrap(true);
     m_label->setStyleSheet(QStringLiteral("color: #a0a0a0; font-size: 14px;"));

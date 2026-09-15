@@ -32,10 +32,14 @@ Control {
         ]
 
         // 0=Apps, 1=Applications, 2=Package Manager, 3=Settings.
+        //
+        // `key` is an automation handle and nothing else: the names are
+        // user-visible and translatable, so a driver that matched on one would
+        // break the day someone shortens it.
         readonly property var viewSections: [
-            { name: "Applications",    icon: BasecampIcons.dashboard },
-            { name: "Package Manager", icon: BasecampIcons.modules },
-            { name: "Settings",        icon: BasecampIcons.settings }
+            { key: "app_manager",      name: "Applications",    icon: BasecampIcons.dashboard },
+            { key: "package_manager",  name: "Package Manager", icon: BasecampIcons.modules },
+            { key: "settings",         name: "Settings",        icon: BasecampIcons.settings }
         ]
 
         readonly property var loadedApps: (root.launcherApps || []).filter(function(item) {
@@ -178,6 +182,7 @@ Control {
             Repeater {
                 model: _d.viewSections
                 delegate: SidebarCircleButton {
+                    objectName: "sidebar.section." + modelData.key
                     checked: backend.currentActiveSectionIndex -1 === index
                     text: modelData.name
                     icon.source: modelData.icon
