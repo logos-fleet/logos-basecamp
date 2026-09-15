@@ -40,9 +40,12 @@ public:
     void run();
 
 private:
-    // The web modules the container has opened a UI page for -- i.e. the ones
-    // the sidebar carries a tile for.
+    // The web modules the container has opened a UI page for.
     QStringList openWebApps() const;
+    // The ones the sidebar carries a TILE for, which since #123 is the wider
+    // set: a module whose installed package declares a UI has a tile before
+    // anything has loaded it, and pressing that tile is what brings it up.
+    QStringList tiledWebApps() const;
     // WHAT THE IMAGE CARRIES BESIDE THE MANIFEST: shippedModuleNames() is the
     // Bundled set plus the app's own `web-modules` tree, and the set is already
     // up -- so the difference is the tree, and the tree is what the Module

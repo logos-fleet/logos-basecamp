@@ -12,7 +12,13 @@ const QLatin1String kCoreModuleType("core");
 bool runsInWebContainer(const ModuleFacts& facts, const QStringList& bundled,
                         const QString& name)
 {
-    return facts.openPages.contains(name)
+    // EITHER EVIDENCE, and they answer the same question from two sides: the
+    // container has a UI page open for it right now, or its installed package
+    // says it has one (#123). The second is what a module that is installed and
+    // not running has -- which on every launch after the one that installed it
+    // is every Downloaded module, because a Store shell's cold start does not
+    // load what it discovers. Pressing the tile is what brings it up.
+    return (facts.openPages.contains(name) || facts.uiPackages.contains(name))
         && (facts.shipped.contains(name) || !bundled.contains(name));
 }
 
@@ -77,9 +83,12 @@ QVariantMap discoveredRow(const ModuleFacts& facts, const QString& name, bool em
     // advertised is the App Manager's to show, and inventing one here would be
     // a second answer to it.
     row[QStringLiteral("version")] = QString();
-    // A page is the only evidence this Shell has that the module has a UI.
+    // Its page, or its package's own manifest when nothing has opened one yet
+    // -- the same pair of answers the tile is made from, so a row cannot call
+    // a module a `core` one while the sidebar carries an app tile for it.
     row[QStringLiteral("type")] =
-        facts.openPages.contains(name) ? kViewModuleType : kCoreModuleType;
+        (facts.openPages.contains(name) || facts.uiPackages.contains(name))
+            ? kViewModuleType : kCoreModuleType;
     row[QStringLiteral("category")] =
         embedded ? QStringLiteral("bundled") : QStringLiteral("downloaded");
     row[QStringLiteral("installType")] =
@@ -152,9 +161,9 @@ QVariantList launcherApps(const ModuleFacts& facts)
         const QString name = entry.value(QStringLiteral("name")).toString();
         apps.append(tile(name, facts.mountedViews.contains(name)));
     }
-    // A page is what makes one an app, and that is the same question for a
-    // shipped `web` module as for an installed one -- neither is in the
-    // manifest, and both run in the Web container.
+    // A page -- or a package that declares one -- is what makes one an app, and
+    // that is the same question for a shipped `web` module as for an installed
+    // one: neither is in the manifest, and both run in the Web container.
     const QStringList bundled = bundledNames(facts.bundledSet);
     for (const QString& name : facts.known) {
         if (runsInWebContainer(facts, bundled, name))

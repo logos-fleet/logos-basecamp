@@ -2,6 +2,7 @@
 
 #include "BundledSetCoreRuntime.h"
 #include "CoreModuleManager.h"
+#include "InstalledPackages.h"
 #include "ShellSections.h"
 #include "ShellStoreBackend.h"
 
@@ -80,6 +81,12 @@ QObject* ShellModulesBackend::appManagerObject() const
 
 void ShellModulesBackend::startAppManager(const basecamp::appmanager::ModuleDirectories& dirs)
 {
+    m_moduleDirs = dirs;
+    // WHAT IS ALREADY ON THIS DEVICE, before anything is loaded. An app the
+    // user installed in an EARLIER launch is on disk and discovered and nothing
+    // will load it, so its package's own manifest is what puts it back on the
+    // sidebar (#123).
+    refreshInstalledPackages();
     const bool configured = m_storeBackend->configure(dirs);
     // THE AUTHORITY FIRST, and loaded rather than merely present. See
     // ShellStoreBackend::ensureCapabilityAuthority: every cross-module call on
@@ -123,6 +130,25 @@ int ShellModulesBackend::declareModuleOrigins()
                  .arg(downloaded.isEmpty() ? QStringLiteral("none")
                                            : downloaded.join(QStringLiteral(", "))));
     return declared;
+}
+
+int ShellModulesBackend::refreshInstalledPackages()
+{
+    const QStringList declared = basecamp::shell::uiPackageNames(m_moduleDirs.coreModulesDirs);
+    const QSet<QString> uiPackages(declared.cbegin(), declared.cend());
+    if (uiPackages == m_uiPackages)
+        return uiPackages.size();
+    m_uiPackages = uiPackages;
+    emit log(QStringLiteral("app manager: %1 package(s) on this device declare a UI: %2")
+                 .arg(declared.size())
+                 .arg(declared.isEmpty() ? QStringLiteral("none")
+                                         : declared.join(QStringLiteral(", "))));
+    // The sidebar and the Modules tab are both derived from this, and a tile
+    // that appears only on the next stats tick is a tile the user pressed and
+    // did not have.
+    emit launcherAppsChanged();
+    rebuildRows();
+    return uiPackages.size();
 }
 
 QVariantMap ShellModulesBackend::consentStatus(const QString& caller,
@@ -223,6 +249,10 @@ void ShellModulesBackend::onModuleInstalled(const QString& packageName, const QS
     // module starts calling out while it comes up, and an origin declared after
     // that first call would let it through the 4.7.3 gate.
     declareModuleOrigins();
+    // ...and the package it wrote, so the app has a tile whatever happens to
+    // the load below -- and so that the tile survives the next launch, when
+    // nothing will have loaded it.
+    refreshInstalledPackages();
 
     if (!m_modules->loadModule(packageName)) {
         emit log(QStringLiteral("app manager: %1 installed and discovered but "
@@ -268,6 +298,7 @@ basecamp::shell::ModuleFacts ShellModulesBackend::facts() const
     out.shipped      = m_shipped;
     out.mountedViews = m_mounted;
     out.openPages    = m_openPages;
+    out.uiPackages   = m_uiPackages;
     return out;
 }
 

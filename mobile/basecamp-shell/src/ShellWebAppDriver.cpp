@@ -65,22 +65,55 @@ void ShellWebAppDriver::loadShippedWebModules()
 
 bool ShellWebAppDriver::hasWork() const
 {
-    if (!openWebApps().isEmpty()) return true;
+    if (!tiledWebApps().isEmpty()) return true;
     if (!shippedOutsideTheBundledSet().isEmpty()) return true;
     return !m_host->backend()->downloadedModules().isEmpty();
+}
+
+QStringList ShellWebAppDriver::tiledWebApps() const
+{
+    ShellModulesBackend* backend = m_host->backend();
+    QStringList apps;
+    for (const QVariant& tile : backend->launcherApps()) {
+        const QString name = tile.toMap().value(QStringLiteral("name")).toString();
+        if (backend->isWebContainerApp(name)) apps.append(name);
+    }
+    return apps;
 }
 
 void ShellWebAppDriver::run()
 {
     auto* web = basecamp::web::MobileWebContainerBackend::instance();
 
-    if (openWebApps().isEmpty()) loadShippedWebModules();
-    const QStringList apps = openWebApps();
+    // A TILE IS NOT A RUNNING MODULE (#123). Since a tile is drawn from the
+    // installed package rather than from an open page, the sidebar carries an
+    // app the user installed in an earlier launch -- and nothing has loaded it,
+    // because a Store shell's cold start does not. That is the case this driver
+    // prefers: pressing the tile has to bring the module up, and every
+    // assertion below then says whether it really did.
+    if (tiledWebApps().isEmpty()) loadShippedWebModules();
+    const QStringList apps = tiledWebApps();
     if (apps.isEmpty()) {
         emit log(QStringLiteral("web app: no `web` module in this build has a UI page"));
         return;
     }
-    const QString app = apps.first();
+    // A Downloaded one first, and one that is not running before one that is:
+    // an app the user installed in an earlier launch is the case #123 is about,
+    // and a build that ships a `web` module in its own tree has the same shape
+    // one step less far from the image.
+    const QStringList downloaded = m_host->backend()->downloadedModules();
+    const auto rank = [&](const QString& name) {
+        return (web->hasView(name) ? 0 : 2) + (downloaded.contains(name) ? 1 : 0);
+    };
+    QString app = apps.first();
+    for (const QString& name : apps) {
+        if (rank(name) > rank(app)) app = name;
+    }
+    const bool wasRunning = web->hasView(app);
+    emit log(wasRunning
+                 ? QStringLiteral("web app: %1 has a page already").arg(app)
+                 : QStringLiteral("web app: %1 has a tile and is NOT running -- the "
+                                  "press is what has to load it").arg(app));
 
     // ── 1. the tile, where a user would find it ──
     m_host->setCurrentSectionIndex(ShellSection::Workspace);
@@ -94,10 +127,14 @@ void ShellWebAppDriver::run()
     if (!tap(tile)) return;
 
     // ── 2. the page is INSIDE the Shell, not over it ──
+    // The mount's own budget when the module is up, and the PAGE's when the
+    // press has to load it first: a `web` module's wasm image and the app's
+    // 26 MB QML runtime are seconds, and they are spent inside the press.
+    const int budgetMs = wasRunning ? kMountBudgetMs : kPageBudgetMs;
     QElapsedTimer sincePress;
     sincePress.start();
     WebAppSurface* surface = nullptr;
-    while (sincePress.elapsed() < kMountBudgetMs) {
+    while (sincePress.elapsed() < budgetMs) {
         surface = m_host->webSurface(app);
         if (surface && surface->onScreen()) break;   // i.e. it has a non-empty rect
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);

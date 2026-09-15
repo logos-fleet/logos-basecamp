@@ -64,6 +64,26 @@ struct ModuleFacts {
     // makes one an APP: the Shell has no manifest for it to read a type off,
     // and a `web` variant of a HEADLESS module has no UI to mount.
     QSet<QString> openPages;
+    // Modules whose INSTALLED PACKAGE declares a user interface, running or
+    // not: the `type` in the manifest.json that package_manager wrote beside
+    // the module (or that the app image carries beside a shipped one), read as
+    // the container reads it -- anything but `core` is a UI.
+    //
+    // THE ANSWER TO #123. `openPages` is evidence that only exists while the
+    // module is up, and a Downloaded module is loaded exactly once, by the
+    // install that brought it: on the next launch the core discovers it and
+    // waits to be asked, because a Store shell's cold start deliberately does
+    // not ask (a page is 290 MB of QML runtime and seconds of it, and the
+    // container's budget is ONE live runtime). So a rule that needed a page
+    // took the app off the sidebar on every launch after the first -- present
+    // in the Modules tab, missing where the user left it.
+    //
+    // The manifest is on disk from the install and needs nothing loaded, and
+    // its `type` is the SAME field MobileWebModuleView's servesUiOf reads to
+    // decide whether a page serves a UI, so the tile and the page cannot
+    // disagree about what a module IS. The module itself comes up when the
+    // tile is pressed (BundledSetShellHost::mountWebApp).
+    QSet<QString> uiPackages;
 };
 
 // Every name in the Bundled-set manifest, in its order.

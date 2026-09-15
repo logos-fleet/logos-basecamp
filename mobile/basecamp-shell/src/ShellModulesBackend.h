@@ -208,6 +208,18 @@ public:
     // tree accounts for: everything a user installed. The Shell's own answer
     // to "where did this come from".
     QStringList downloadedModules() const;
+    // WHAT THE PACKAGES ON THIS DEVICE DECLARE, re-read off disk.
+    //
+    // A Downloaded module's tile used to need its page, and a page exists only
+    // while the module is running -- which, after the launch that installed it,
+    // it is not (#123). This reads the `type` out of the manifest.json beside
+    // each installed and each shipped module, so the sidebar can carry the app
+    // before anything has loaded it and the load can wait for the tile press.
+    //
+    // Called once the module directories are known and again after every
+    // install. Returns how many packages declare a UI.
+    int refreshInstalledPackages();
+
     // Whether this one's UI is a page in the Web container rather than a
     // framework the host instantiates -- i.e. an app the sidebar carries a tile
     // for and mounts by z-order. The SAME rule the tile is made by, so the two
@@ -343,5 +355,12 @@ private:
     QSet<QString>          m_openPages;
     // The app's own `web-modules` tree, by name.
     QStringList            m_shipped;
+    // Modules whose installed package declares a UI, whether or not they are
+    // running. See refreshInstalledPackages().
+    QSet<QString>          m_uiPackages;
+    // Where this shell's modules live -- the tree the app ships and the one an
+    // install writes into. Kept because the packages in them are re-read after
+    // every install, not only at startup.
+    basecamp::appmanager::ModuleDirectories m_moduleDirs;
     QString                m_currentVisibleApp;
 };

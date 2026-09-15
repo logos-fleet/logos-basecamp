@@ -319,6 +319,11 @@ it, so an iPhone 16 Pro's 402×874 arrives there as 306×834 and an iPad Air 13'
 
 ```
 src/ShellModulesBackend.*   the QML-facing `backend`
+src/ShellModuleRows.*       what the Modules tab and the sidebar show, as a
+                            pure function of the facts that decide it
+src/InstalledPackages.*     what the packages ON THIS DEVICE declare, read off
+                            their manifests with nothing loaded -- which is how
+                            an installed app has a tile before it runs (#123)
 src/ShellStoreBackend.*     the App Manager's one seam, over the real modules
 src/BundledSetShellHost.*   IShellHost over it
 src/WebAppSurface.*         the placeholder a `web` app is DOCKED as, so the
@@ -401,6 +406,45 @@ in; only a `ui_qml` one's page is a user interface. The package's declared
 `type` is what tells them apart (`MobileWebModuleView::servesUi`), and reading
 a page as evidence of a UI gave the first headless module a tile onto a blank
 document.
+
+## An app you installed, on the NEXT launch
+
+A Downloaded module is loaded exactly once: by the install that brought it
+(`ShellModulesBackend::onModuleInstalled`). On every later launch the core
+discovers the same package in the same scanned directory and waits to be asked,
+and a Store shell's cold start deliberately does not ask -- one `web` page is
+290 MB of QML runtime and seconds of it, and the container's budget is ONE live
+runtime, so loading every installed app at startup would evict the one the user
+actually wanted before they could reach it.
+
+So the app is brought up when its TILE IS PRESSED, and the tile is there before
+it runs. What makes a tile is no longer the Web container having opened a page
+-- evidence that only exists while the module is up -- but the package's own
+`type`, read off the manifest.json beside it (`src/InstalledPackages.h`). That
+is the same field the container reads to decide whether a page serves a UI
+(`MobileWebModuleView::servesUi`), so a tile and a page cannot disagree about
+what a module is, and a `core` module's `web` variant still gets no tile.
+
+Relaunching the app from the run above, with no `--install` and no arguments at
+all:
+
+```
+[shell] app manager: 2 package(s) on this device declare a UI: web_counter, web_counter_b
+[shell] web app: web_counter_b has a tile and is NOT running -- the press is what has to load it
+[shell] bringing up web_counter_b, which this device has and nothing has asked for yet
+[shell]   web_counter_b loaded in 953 ms
+[shell] web app web_counter_b is on screen
+[shell] web app: web_counter_b's page is at 88,33 927x1302 inside a 1024x1366 window
+```
+
+The Modules tab agrees: a Downloaded row reads as a view (`ui_qml`) from the
+same fact, rather than as a `core` module until something opens its page.
+
+A page can also go away while the Shell still holds the app's tab -- the
+live-runtime budget unloads a module that ships no headless document, or the
+Modules tab unloads one. The tab goes with it (`BundledSetShellHost::
+dropWebSurface`), because a dock the Shell would raise onto no page is a tab
+that shows nothing; the TILE stays, and pressing it loads the module again.
 
 ## Answering the consent prompt
 

@@ -28,6 +28,34 @@ BundledSetShellHost::BundledSetShellHost(BundledSetCoreRuntime* core)
                      &m_backend, [this](const QString& name) { mountApp(name); });
     QObject::connect(&m_backend, &ShellModulesBackend::uiModuleCloseRequested,
                      &m_backend, [this](const QString& name) { unmountApp(name); });
+
+    // A DOCK MEANS A PAGE, and the container is the only thing that knows when
+    // one stops existing. A `web` app's page goes away for reasons that are not
+    // the user closing it -- the live-runtime budget unloads a module that
+    // ships no headless document, the module is unloaded from the Modules tab
+    // -- and the placeholder used to outlive it: an empty tab the Shell would
+    // raise whenever the one in front was closed, claiming a module was in
+    // front of a page that no longer existed.
+    QObject::connect(basecamp::web::MobileWebContainerBackend::instance(),
+                     &basecamp::web::MobileWebContainerBackend::viewClosed,
+                     &m_backend, [this](const QString& name) { dropWebSurface(name); });
+}
+
+void BundledSetShellHost::dropWebSurface(const QString& name)
+{
+    WebAppSurface* surface = m_webSurfaces.take(name);
+    if (!surface) return;
+    if (m_observer)
+        m_observer->onPluginWindowRemoveRequested(surface);
+    surface->deleteLater();
+    if (m_webVisible == name) m_webVisible.clear();
+    if (m_backend.currentVisibleApp() == name)
+        m_backend.setCurrentVisibleApp(QString());
+    m_backend.report(QStringLiteral("web app %1 has no page any more; its tab is closed")
+                         .arg(name));
+    // Whatever is left decides what is in front now, by the one rule that
+    // decides it everywhere else.
+    queueWebSync();
 }
 
 BundledSetShellHost::~BundledSetShellHost()
@@ -194,6 +222,34 @@ void BundledSetShellHost::unmountApp(const QString& name)
 void BundledSetShellHost::mountWebApp(const QString& name)
 {
     auto* web = basecamp::web::MobileWebContainerBackend::instance();
+
+    // THE MODULE MAY NOT BE RUNNING YET, and on the second launch of an app the
+    // user installed it never is: the core discovers the package and waits to
+    // be asked, because a Store shell's cold start deliberately does not ask
+    // (#123). The sidebar carries the tile anyway -- the package's manifest is
+    // what says it has a UI, not its page -- so the PRESS is what brings the
+    // module up, and the page it opens is what there is to show.
+    //
+    // Deliberately here rather than at startup: one page is 290 MB of QML
+    // runtime and seconds of it, and the container's budget is one live
+    // runtime, so an app loaded because the user asked for it is the only one
+    // that can be loaded without taking another's page away.
+    //
+    // BEFORE the docked-already branch, not after it: a module can lose its
+    // page while the Shell still holds its tab, and raising that tab without
+    // this would present an empty one.
+    if (!web->hasView(name)) {
+        if (!m_backend.ensureRunning(name)) {
+            m_backend.report(QStringLiteral("web app %1 is not on this device").arg(name));
+            return;
+        }
+        if (!web->hasView(name)) {
+            m_backend.report(QStringLiteral("web app %1 came up with no page; there is "
+                                            "nothing to put on screen").arg(name));
+            return;
+        }
+    }
+
     if (WebAppSurface* already = m_webSurfaces.value(name)) {
         m_backend.setCurrentVisibleApp(name);
         if (m_observer)

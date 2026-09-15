@@ -74,6 +74,10 @@ private:
     // a web app navigate like every other one: same dock, same tab, same close
     // button, and the page inset to the hole the workspace left.
     void mountWebApp(const QString& name);
+    // The container says a module's page is gone (unloaded, evicted, died).
+    // Takes its tab out of the Shell: a dock with no page behind it is a tab
+    // the Shell would raise onto nothing.
+    void dropWebSurface(const QString& name);
 
     // ONE PLACE DECIDES WHICH PAGE IS UP, on the turn after the Shell has laid
     // out. Deferred because a tab switch shows the incoming placeholder before
