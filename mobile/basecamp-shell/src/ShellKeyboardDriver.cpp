@@ -200,20 +200,30 @@ void ShellKeyboardDriver::askTheField(const FieldPath& path)
     // simulator in the fleet reports (logos-workspace#152, #170).
     using basecamp::shell::KeyboardPanel;
     const KeyboardPanel panel = basecamp::shell::panelDrawn(im->isVisible(), keyboard, screen);
-    if (panel == KeyboardPanel::ShortcutBar) {
+    switch (panel) {
+    case KeyboardPanel::ShortcutBar:
         emit log(QStringLiteral("keyboard: that is a shortcut bar, not a keyboard -- this "
                                 "device has a hardware keyboard connected, so iOS draws no "
                                 "panel. The input method is still ON the field"));
-    } else if (panel == KeyboardPanel::Keyboard) {
+        break;
+    case KeyboardPanel::Keyboard:
+        // Measured, so the screen has a height to divide by: anything else is
+        // Unmeasured.
         emit log(QStringLiteral("keyboard: that is a full software keyboard -- %1 of %2 "
                                 "points, %3% of the screen")
                      .arg(keyboard.height(), 0, 'f', 0).arg(screen.height(), 0, 'f', 0)
                      .arg(100.0 * keyboard.height() / screen.height(), 0, 'f', 0));
-    } else if (panel == KeyboardPanel::Unmeasured) {
+        break;
+    case KeyboardPanel::Unmeasured:
         emit log(QStringLiteral("keyboard: the platform says a panel is up and gave no "
                                 "geometry for it in %1 ms -- there is nothing here to tell "
                                 "a keyboard from a shortcut bar")
                      .arg(kKeyboardBudgetMs));
+        break;
+    case KeyboardPanel::None:
+        // Nothing was drawn, and the verdict below is the whole of what there
+        // is to say about that.
+        break;
     }
 
     if (!caret) {

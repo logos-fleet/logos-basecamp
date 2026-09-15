@@ -13,9 +13,10 @@
 //   iPad Air 11-inch simulator, hardware keyboard: 820x69  of 820x1180
 //   iPad Air (4th generation) device, keyboard:    820x337 of 820x1180
 //
-// A ratio rather than a height in points, because a third of a phone's screen
-// is half an iPad's number. Kept apart from ShellKeyboardDriver so that the
-// rule over those numbers is testable without a device, an app or a scene.
+// A ratio rather than a height in points, because the same keyboard covers far
+// fewer points on a phone than on an iPad. Kept apart from ShellKeyboardDriver
+// so that the rule over those numbers is testable without a device, an app or
+// a scene.
 #pragma once
 
 #include <QRectF>
