@@ -73,8 +73,8 @@ let
         (half: webAssetsPath:
           let runners = fixture "${name}-${half}" frameworks webAssetsPath; in
           [
-            { inherit frameworks; drv = runners.runSim; }
-            { inherit frameworks; drv = runners.runDevice; }
+            { inherit frameworks; kind = "sim"; drv = runners.runSim; }
+            { inherit frameworks; kind = "device"; drv = runners.runDevice; }
           ])
         webHalves)
     sizes);
@@ -85,14 +85,10 @@ let
   scriptOf = c: lib.getExe c.drv;
 
   # The DEVICE runners alone, for the launch-retry case below: the simulator
-  # half launches through simctl and has never shown the race.
-  deviceCases = lib.flatten (lib.mapAttrsToList
-    (name: frameworks:
-      lib.mapAttrsToList
-        (half: webAssetsPath:
-          (fixture "${name}-${half}" frameworks webAssetsPath).runDevice)
-        webHalves)
-    sizes);
+  # half launches through simctl and has never shown the race. Filtered out of
+  # `cases` rather than rendered a second time, so the two lists cannot drift
+  # into being different runners.
+  deviceCases = lib.filter (c: c.kind == "device") cases;
 in
 pkgs.runCommand "ios-runner-lint"
   {
@@ -104,7 +100,7 @@ pkgs.runCommand "ios-runner-lint"
     # not checked.
     expected = lib.concatMapStrings
       (c: "${scriptOf c} ${lib.concatStringsSep " " c.frameworks}\n") cases;
-    deviceScripts = lib.concatMapStrings (d: "${lib.getExe d}\n") deviceCases;
+    deviceScripts = lib.concatMapStrings (c: "${scriptOf c}\n") deviceCases;
     nativeBuildInputs = [ pkgs.bash ];
     passAsFile = [ "expected" "deviceScripts" ];
   } ''
@@ -187,6 +183,13 @@ STUB
     '
   }
 
+  # Both cases below start from an empty call count, count the stub's calls the
+  # same way, and owe the reader the same thing on a failure: what went wrong,
+  # and what the run actually said.
+  reset_run() { rm -rf run; mkdir -p run; : > run/count; }
+  launch_calls() { wc -c < run/count | tr -d ' '; }
+  fail_run() { echo "error: $1" >&2; cat run/out >&2; exit 1; }
+
   while read -r script; do
     [ -n "$script" ] || continue
     echo "==> launch retry: $(basename "$script")"
@@ -201,42 +204,31 @@ STUB
     fi
 
     # A transient failure, then a success: the run ends with a launched app,
-    # and it took more than one call to get there.
-    rm -rf run; mkdir -p run; : > run/count
+    # and it took more than one call to get there. LOGOS_IOS_LAUNCH_ATTEMPTS is
+    # left unset, so the runner's own default has to be enough on its own.
+    reset_run
     if ! STUB_COUNT="$PWD/run/count" STUB_FAILURES=2 \
          LOGOS_IOS_LAUNCH_RETRY_DELAY=0 \
          call_launch_console > run/out 2>&1; then
-      echo "error: launch_console gave up on a transient CoreDevice failure" >&2
-      cat run/out >&2
-      exit 1
+      fail_run "launch_console gave up on a transient CoreDevice failure"
     fi
-    tries=$(wc -c < run/count | tr -d ' ')
-    if [ "$tries" != 3 ]; then
-      echo "error: launch_console called devicectl $tries time(s), wanted 3" >&2
-      cat run/out >&2
-      exit 1
-    fi
-    grep -q 'Launched application with' run/out || {
-      echo "error: launch_console returned without the app's console output" >&2
-      cat run/out >&2
-      exit 1
-    }
+    calls=$(launch_calls)
+    [ "$calls" = 3 ] \
+      || fail_run "launch_console called devicectl $calls time(s), wanted 3"
+    grep -q 'Launched application with' run/out \
+      || fail_run "launch_console returned without the app's console output"
 
     # And it gives up: an app really can be unlaunchable, and a runner that
     # retries for ever is worse than one that fails.
-    rm -rf run; mkdir -p run; : > run/count
+    reset_run
     if STUB_COUNT="$PWD/run/count" STUB_FAILURES=99 \
        LOGOS_IOS_LAUNCH_RETRY_DELAY=0 LOGOS_IOS_LAUNCH_ATTEMPTS=3 \
        call_launch_console > run/out 2>&1; then
-      echo "error: launch_console reported success though nothing launched" >&2
-      cat run/out >&2
-      exit 1
+      fail_run "launch_console reported success though nothing launched"
     fi
-    tries=$(wc -c < run/count | tr -d ' ')
-    if [ "$tries" != 3 ]; then
-      echo "error: launch_console made $tries attempt(s), wanted 3" >&2
-      exit 1
-    fi
+    calls=$(launch_calls)
+    [ "$calls" = 3 ] \
+      || fail_run "launch_console made $calls attempt(s), wanted 3"
   done < "$deviceScriptsPath"
 
   echo "ios-runner-lint: ${toString (lib.length cases)} runner(s) lint clean, sizes ${

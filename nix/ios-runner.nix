@@ -229,9 +229,14 @@ let
           if grep -q 'Launched application with' "$build_dir/launch.log"; then
             return "$status"
           fi
-          echo "==> attempt $attempt did not start $bundle_id; retrying in ''${delay}s" >&2
+          # Silent on the last attempt: announcing a retry that is not coming,
+          # and then sleeping before the error below, is two ways of saying
+          # something untrue about what the runner is about to do.
+          if [ "$attempt" -lt "$attempts" ]; then
+            echo "==> attempt $attempt/$attempts did not start $bundle_id; retrying in ''${delay}s" >&2
+            sleep "$delay"
+          fi
           attempt=$(( attempt + 1 ))
-          sleep "$delay"
         done
         echo "error: $bundle_id did not launch in $attempts attempt(s)." >&2
         echo "       It IS installed on $device. To start it without a console:" >&2
