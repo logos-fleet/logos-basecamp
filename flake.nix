@@ -31,6 +31,15 @@
     logos-qt-sdk.inputs.logos-protocol.follows = "logos-protocol";
     logos-qt-sdk.inputs.logos-plugin-qt.follows = "logos-plugin-qt";
     logos-qt-sdk.inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
+    # ONE logos-nix, and therefore ONE iOS Qt and ONE Xcode, in the mobile
+    # chain. `lib.mkMobileChains` builds its own package set out of
+    # logos-liblogos's logos-nix, while the Shell's own images (shell-ui-ios,
+    # the version stage) come from this one -- so without this the app can
+    # stage archives from two Qt builds, and the xcode-wrapper version gate
+    # (logos-nix nix/ios/xcode-wrapper.nix) is declared twice: bumping the
+    # installed Xcode here left every `chain` derivation still asking for the
+    # old one (#142).
+    logos-liblogos.inputs.logos-nix.follows = "logos-nix";
     logos-liblogos.inputs.logos-protocol.follows = "logos-protocol";
     logos-liblogos.inputs.logos-plugin-qt.follows = "logos-plugin-qt";
     logos-liblogos.inputs.logos-qt-sdk.follows = "logos-qt-sdk";
