@@ -3,37 +3,22 @@
 // CLOSING AN APP MUST NOT ANNOUNCE A HALF-DESTROYED WIDGET (#139).
 //
 // The mobile Shell segfaulted on iOS every time a user left a web app, about
-// 19 s into every scripted run, and the fault was inside `~QDockWidget`:
+// 19 s into every scripted run, inside `~QDockWidget`: `QWidget::~QWidget()`
+// announces an `ObjectDestroyed` for every widget the accessibility cache still
+// holds, and Qt's iOS plugin answers that by asking the interface for its
+// `role()` -- which for one of the two `QDockWidgetTitleButton`s every dock owns
+// reads `isCheckable()` off the `QAbstractButton` half that ~QWidget is already
+// past. `forgetAccessibility()` in src/WorkspaceArea.cpp carries the full
+// mechanism and the backtrace.
 //
-//     QAbstractButton::isCheckable() const
-//     QAccessibleButton::role() const
-//     QIOSPlatformAccessibility::notifyAccessibilityUpdate(QAccessibleEvent*)
-//     QAccessibleCache::sendObjectDestroyedEvent(QObject*)
-//     QWidget::~QWidget()
-//     QDockWidgetTitleButton::~QDockWidgetTitleButton()
+// Only the last step is iOS-specific, and only the announcement is ours to
+// prevent: a widget the cache does not hold is never announced. So the Shell
+// drops a dock and everything under it from the accessibility cache at the last
+// instant before the dock is destroyed, and these cases assert the property
+// that makes the crash impossible -- NO `ObjectDestroyed` update is ever
+// delivered for an interface that is already invalid.
 //
-// The mechanism is entirely Qt's and has nothing to do with web apps:
-//
-//   1. `QDockWidget` always owns two `QDockWidgetTitleButton`s -- Qt creates
-//      the float and close buttons in `QDockWidgetPrivate::init()` whether or
-//      not a custom title bar hides them;
-//   2. iOS puts every visible widget into `QAccessibleCache` the first time
-//      UIKit asks a `QUIView` for its accessibility elements, which also
-//      switches accessibility ON for the rest of the process;
-//   3. `QWidget::~QWidget()` posts an `ObjectDestroyed` update for anything
-//      the cache holds -- and by then the `QAbstractButton` half of the button
-//      has already been destroyed;
-//   4. Qt's iOS plugin answers that update by asking the interface for its
-//      `role()`, which for a button reads `isCheckable()` off the corpse.
-//
-// Only step (4) is iOS-specific, and only step (3) is ours to prevent: a widget
-// the cache does not hold is never announced. So the Shell drops a dock and
-// everything under it from the accessibility cache at the last instant before
-// the dock is destroyed, and this asserts the property that makes the crash
-// impossible -- NO `ObjectDestroyed` update is ever delivered for an interface
-// that is already invalid.
-//
-// TWO CASES, because only one of them runs everywhere.
+// THREE CASES, because only one of them can be proven everywhere.
 //
 // `theAppsWidgetLeavesTheCacheBeforeItsDestructorRuns` is the mechanism, and it
 // needs nothing from the platform: a widget the app owns asks, from inside its
@@ -45,6 +30,9 @@
 // update handler in for the iOS plugin. That only works where the platform
 // plugin provides a QPlatformAccessibility -- Qt 6.11's default does, Qt 6.9's
 // offscreen does not -- so it skips rather than passing vacuously.
+//
+// `closingOneAppLeavesTheOtherReachable` is the other half of the fix: what the
+// dock that STAYS must keep.
 //
 //   nix build .#unit-tests -L
 #include "WorkspaceArea.h"
@@ -69,14 +57,9 @@ void processDeferred()
     QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 }
 
-// What the iOS plugin is handed. A file-static because
-// QAccessible::UpdateHandler is a plain function pointer.
-struct DestroyedUpdates
-{
-    int announced = 0;
-    QStringList invalid;   // the ones that would have crashed the phone
-};
-DestroyedUpdates g_updates;
+// The destroyed-widget announcements that would have crashed the phone. A
+// file-static because QAccessible::UpdateHandler is a plain function pointer.
+QStringList g_invalidAnnouncements;
 
 QString describe(QAccessibleInterface* iface)
 {
@@ -94,13 +77,12 @@ void recordUpdate(QAccessibleEvent* event)
     if (event->type() != QAccessible::ObjectDestroyed) return;
     QAccessibleInterface* iface = event->accessibleInterface();
     if (!iface) return;
-    ++g_updates.announced;
     // EXACTLY WHAT THE iOS PLUGIN SKIPS. It warns "invalid accessible
     // interface" and then calls role() on this same pointer anyway; role() on
     // a QAccessibleButton dereferences the QAbstractButton that ~QWidget is
     // already past. Asking isValid() here is reading the state that makes that
     // call fatal, without making the test itself crash.
-    if (!iface->isValid()) g_updates.invalid << describe(iface);
+    if (!iface->isValid()) g_invalidAnnouncements << describe(iface);
 }
 
 // Everything UIKit's first accessibility query puts in the cache: an interface
@@ -166,11 +148,11 @@ private:
 
 void DockCloseAccessibilityTest::init()
 {
-    g_updates = {};
-    // Step (3) of the note above: without this ~QWidget says nothing and the
-    // assertion below would pass for the wrong reason. There is always a
-    // QPlatformAccessibility (QPlatformIntegration::accessibility() creates a
-    // default one), so this holds on offscreen too.
+    g_invalidAnnouncements.clear();
+    // The announcing half of the crash: without it ~QWidget says nothing and
+    // closingAnAppAnnouncesNoDestroyedWidget would pass for the wrong reason.
+    // This only takes where the platform plugin provides a
+    // QPlatformAccessibility, which is why that case checks isActive() first.
     QAccessible::setActive(true);
     m_previousHandler = QAccessible::installUpdateHandler(recordUpdate);
 }
@@ -243,12 +225,12 @@ void DockCloseAccessibilityTest::closingAnAppAnnouncesNoDestroyedWidget()
     processDeferred();
     QVERIFY2(alive.isNull(), "the dock was not destroyed, so nothing was proven");
 
-    QVERIFY2(g_updates.invalid.isEmpty(),
+    QVERIFY2(g_invalidAnnouncements.isEmpty(),
              qPrintable(QStringLiteral("closing an app announced %1 destroyed widget(s) "
                                        "whose accessible interface was already invalid: %2 "
                                        "-- Qt's iOS plugin calls role() on each of these")
-                            .arg(g_updates.invalid.size())
-                            .arg(g_updates.invalid.join(QStringLiteral(", ")))));
+                            .arg(g_invalidAnnouncements.size())
+                            .arg(g_invalidAnnouncements.join(QStringLiteral(", ")))));
 }
 
 // The dock that STAYS keeps its accessibility. Dropping the whole cache, or
