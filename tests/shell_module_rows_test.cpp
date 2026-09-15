@@ -395,6 +395,93 @@ private slots:
         QVERIFY(!basecamp::shell::isWebContainerApp(facts, QStringLiteral("notes")));
         QVERIFY(!basecamp::shell::isWebContainerApp(facts, QStringLiteral("chat_ui")));
     }
+
+    // ── WHOSE Load/Unload button is it (#149) ────────────────────────────
+    //
+    // A `web` app's row is a `ui_qml` row -- it has a user interface and the
+    // sidebar carries a tile for it -- and its MODULE is the core's: the page
+    // lives in the Web container, and the container is a core container. A
+    // Bundled `ui_qml` member is the opposite: same type, and the host
+    // instantiates the framework in this process, so the core has no handle on
+    // it to unload (ADR 0006).
+    //
+    // Everything that asked this question by reading the TYPE therefore got a
+    // `web` app wrong. The Modules tab drew it an enabled Unload button, the
+    // acceptance driver skipped its row as "a view module's toggle is a no-op
+    // by design", and neither was talking about the same modules as the
+    // backend's own refusal, which reads the manifest. Hence one fact on the
+    // row, and one function behind it.
+
+    void aBundledViewModulesRowIsTheHostsToLoad()
+    {
+        const ModuleFacts facts = phone();
+        QVERIFY(rowNamed(basecamp::shell::moduleRows(facts), QStringLiteral("chat_ui"))
+                    .value(QStringLiteral("hostLoaded")).toBool());
+        QVERIFY(basecamp::shell::hostLoadedModule(facts, QStringLiteral("chat_ui")));
+    }
+
+    void aBundledCoreModulesRowIsTheCoresToLoad()
+    {
+        const ModuleFacts facts = phone();
+        QVERIFY(!rowNamed(basecamp::shell::moduleRows(facts),
+                          QStringLiteral("capability_module"))
+                     .value(QStringLiteral("hostLoaded")).toBool());
+        QVERIFY(!basecamp::shell::hostLoadedModule(facts,
+                                                   QStringLiteral("capability_module")));
+    }
+
+    void aShippedWebAppsRowSaysItIsAViewAndStillTheCoresToLoad()
+    {
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("web_counter") };
+        facts.known << QStringLiteral("web_counter");
+        facts.loaded << QStringLiteral("web_counter");
+        facts.openPages.insert(QStringLiteral("web_counter"));
+
+        const QVariantMap row =
+            rowNamed(basecamp::shell::moduleRows(facts), QStringLiteral("web_counter"));
+        // It IS a view -- the sidebar gives it a tile on this same rule...
+        QCOMPARE(row.value(QStringLiteral("type")).toString(), QStringLiteral("ui_qml"));
+        // ...and the Unload button on its row reaches the core all the same.
+        QVERIFY(!row.value(QStringLiteral("hostLoaded")).toBool());
+        QVERIFY(!basecamp::shell::hostLoadedModule(facts, QStringLiteral("web_counter")));
+    }
+
+    void anInstalledWebAppsRowIsTheCoresToLoadBeforeItEvenRuns()
+    {
+        ModuleFacts facts = phone();
+        facts.known << QStringLiteral("notes");
+        facts.uiPackages.insert(QStringLiteral("notes"));
+
+        const QVariantMap row =
+            rowNamed(basecamp::shell::moduleRows(facts), QStringLiteral("notes"));
+        QCOMPARE(row.value(QStringLiteral("type")).toString(), QStringLiteral("ui_qml"));
+        QVERIFY(!row.value(QStringLiteral("hostLoaded")).toBool());
+        QVERIFY(!basecamp::shell::hostLoadedModule(facts, QStringLiteral("notes")));
+    }
+
+    void everyRowTheHostOwnsIsOneTheSidebarMountsItself()
+    {
+        // The two rules that split the same set have to split it the SAME way,
+        // or a module is both the host's to mount and the core's to unload.
+        // Stated over every row rather than over one, because the set a build
+        // ships is data (ADR 0007).
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("web_counter") };
+        facts.known << QStringLiteral("web_counter") << QStringLiteral("notes");
+        facts.uiPackages.insert(QStringLiteral("web_counter"));
+        facts.uiPackages.insert(QStringLiteral("notes"));
+
+        for (const QVariant& value : basecamp::shell::moduleRows(facts)) {
+            const QVariantMap row = value.toMap();
+            const QString name = row.value(QStringLiteral("name")).toString();
+            const bool hostLoaded = row.value(QStringLiteral("hostLoaded")).toBool();
+            QCOMPARE(hostLoaded, basecamp::shell::hostLoadedModule(facts, name));
+            // A module the host owns is never one the container shows, and
+            // the other way round.
+            QVERIFY(!(hostLoaded && basecamp::shell::isWebContainerApp(facts, name)));
+        }
+    }
 };
 
 QTEST_MAIN(ShellModuleRowsTest)

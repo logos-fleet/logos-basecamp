@@ -51,6 +51,7 @@ QVariant ModuleInstanceModel::data(const QModelIndex& index, int role) const
     case CpuRole:             return r.cpu;
     case MemoryRole:          return r.memory;
     case StatsMeasuredRole:   return r.statsMeasured;
+    case IsHostLoadedRole:    return r.hostLoaded;
     }
     return {};
 }
@@ -73,6 +74,7 @@ QHash<int, QByteArray> ModuleInstanceModel::roleNames() const
         {CpuRole,             "cpu"},
         {MemoryRole,          "memory"},
         {StatsMeasuredRole,   "statsMeasured"},
+        {IsHostLoadedRole,    "hostLoaded"},
     };
 }
 
@@ -105,6 +107,9 @@ ModuleInstanceModel::Row ModuleInstanceModel::toRow(const QVariantMap& m)
     // predates the flag produces — and the honest reading of a row whose
     // figures are a coerced zero is that nothing measured it.
     r.statsMeasured = m.value(QStringLiteral("statsMeasured")).toBool();
+    // Absent means the core owns it -- the safe default, and what every caller
+    // of this model got before the role existed: the toggle reaches the core.
+    r.hostLoaded = m.value(QStringLiteral("hostLoaded")).toBool();
     return r;
 }
 
@@ -134,6 +139,7 @@ QList<int> ModuleInstanceModel::diffRoles(const Row& a, const Row& b)
     if (a.cpu    != b.cpu)    roles.append(CpuRole);
     if (a.memory != b.memory) roles.append(MemoryRole);
     if (a.statsMeasured != b.statsMeasured) roles.append(StatsMeasuredRole);
+    if (a.hostLoaded    != b.hostLoaded)    roles.append(IsHostLoadedRole);
     return roles;
 }
 

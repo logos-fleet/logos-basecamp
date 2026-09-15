@@ -61,7 +61,7 @@ private slots:
             "name", "label", "description", "category", "type",
             "version", "iconPath", "installType",
             "isLoaded", "isMainUi", "hasMissingDeps",
-            "statusText", "cpu", "memory",
+            "statusText", "cpu", "memory", "hostLoaded",
         };
         QHash<QByteArray, bool> seen;
         for (auto it = roles.cbegin(); it != roles.cend(); ++it)
@@ -95,6 +95,45 @@ private slots:
         QCOMPARE(fieldFor(model, 0, "installType").toString(), "user");
         QCOMPARE(fieldFor(model, 0, "isLoaded").toBool(),      true);
         QCOMPARE(fieldFor(model, 0, "statusText").toString(),  "Loaded");
+    }
+
+    // WHOSE Load/Unload button a row draws (logos-workspace#149). A row whose
+    // module the HOST instantiates is not one the core can load, and the two
+    // are told apart by this and not by `type` -- a `web` app's row is a
+    // `ui_qml` row whose module the core owns. Absent is the core's, which is
+    // every desktop row.
+    void hostLoaded_defaults_to_the_core_and_round_trips()
+    {
+        ModuleInstanceModel model;
+        model.replaceRows({
+            makeModule("waku", /*loaded=*/true, { {"type", "core"} }),
+            makeModule("chat_ui", /*loaded=*/true,
+                       { {"type", "ui_qml"}, {"hostLoaded", true} }),
+            makeModule("wallet_ui", /*loaded=*/true,
+                       { {"type", "ui_qml"}, {"hostLoaded", false} }),
+        });
+
+        QCOMPARE(fieldFor(model, 0, "hostLoaded").toBool(), false);
+        QCOMPARE(fieldFor(model, 1, "hostLoaded").toBool(), true);
+        // The row that is the whole issue: a view by type, the core's to unload.
+        QCOMPARE(fieldFor(model, 2, "type").toString(),     "ui_qml");
+        QCOMPARE(fieldFor(model, 2, "hostLoaded").toBool(), false);
+    }
+
+    // ...and a row that changes hands is PATCHED rather than left behind: the
+    // fast path only emits the roles diffRoles names, so one it forgets is a
+    // button that keeps reaching the wrong side until the table resets.
+    void hostLoaded_moves_on_the_patch_path()
+    {
+        ModuleInstanceModel model;
+        model.replaceRows({ makeModule("wallet_ui", true,
+                                       { {"type", "ui_qml"}, {"hostLoaded", true} }) });
+        QCOMPARE(fieldFor(model, 0, "hostLoaded").toBool(), true);
+
+        model.replaceRows({ makeModule("wallet_ui", true,
+                                       { {"type", "ui_qml"}, {"hostLoaded", false} }) });
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(fieldFor(model, 0, "hostLoaded").toBool(), false);
     }
 
     // displayName absent → label falls back to name (used everywhere QML
