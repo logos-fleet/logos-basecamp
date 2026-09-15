@@ -34,6 +34,7 @@
 #include "ShellModulesDriver.h"
 #include "ShellPackageSectionDriver.h"
 #include "ShellWebAppDriver.h"
+#include "ShellWebInputDriver.h"
 #include "ShellSections.h"
 #include "SmokeRunner.h"
 #include "web/LogosWebPaths.h"
@@ -327,6 +328,14 @@ int main(int argc, char* argv[])
     auto* webApps = new ShellWebAppDriver(&host, shellWidget, &app);
     QObject::connect(webApps, &ShellWebAppDriver::log, &console);
 
+    // AND TYPING INTO THAT PAGE, which is a second question and could not be
+    // asked at all until now: a `web` app's form is pixels in a canvas, and
+    // every way of putting a key in one from outside the app is gone (#174).
+    // It opens the app itself rather than inheriting one -- the pass in front
+    // of it closes what it opened -- and it is the pass that LEAVES the app up.
+    auto* webInput = new ShellWebInputDriver(&host, shellWidget, &app);
+    QObject::connect(webInput, &ShellWebInputDriver::log, &console);
+
     // THE CATALOG, if this launch was pointed at one. It has work only when the
     // command line named a repository (`--repository`, `--trust-signer`,
     // `--install`), which is a developer's run against a local catalog release
@@ -389,7 +398,7 @@ int main(int argc, char* argv[])
 
     // The passes that press things in the Shell's own rendered scene, in the
     // order above. Each one runs only if this run named it.
-    auto scenePasses = [&drive, network, driver, apps, webApps, packages, keyboard,
+    auto scenePasses = [&drive, network, driver, apps, webApps, webInput, packages, keyboard,
                         finishOnTheApp]() {
         // The CHAT half is what the app has to show, not the run's overall
         // verdict: the libp2p leg can fail on its own (an unanswered
@@ -421,6 +430,15 @@ int main(int argc, char* argv[])
             keyboard->run();
         if (drive.wants(DrivePass::WebApps) && webApps->hasWork())
             webApps->run();
+        // AFTER the web-app pass and BEFORE the Modules tab. After, because
+        // that pass ends with the app closed and the module still loaded --
+        // which is the cheap case for the tile press this one makes, and means
+        // neither pass has to account for the other's leftovers. Before,
+        // because the Modules tab unloads and reloads modules underneath
+        // whatever is on screen, and a form holding typed text is exactly the
+        // state that would not survive it.
+        if (drive.wants(DrivePass::WebInput) && webInput->hasWork())
+            webInput->run();
         if (drive.wants(DrivePass::Modules))
             driver->run();
         finishOnTheApp();
@@ -429,6 +447,7 @@ int main(int argc, char* argv[])
     const bool drivesAScene = drive.wants(DrivePass::Apps) || drive.wants(DrivePass::Packages)
                               || drive.wants(DrivePass::Keyboard)
                               || drive.wants(DrivePass::WebApps)
+                              || drive.wants(DrivePass::WebInput)
                               || drive.wants(DrivePass::Modules);
     // Nothing at all to do is the DEFAULT case, and it costs no timer: the app
     // comes up and waits for whoever is holding the phone.

@@ -33,7 +33,8 @@ class DriveScriptTest : public QObject
     static QList<DrivePass> allPasses()
     {
         return { DrivePass::Chat, DrivePass::Apps, DrivePass::Packages,
-                 DrivePass::Keyboard, DrivePass::WebApps, DrivePass::Modules };
+                 DrivePass::Keyboard, DrivePass::WebApps, DrivePass::WebInput,
+                 DrivePass::Modules };
     }
 
 private slots:
@@ -69,6 +70,7 @@ private slots:
         QVERIFY(s.wants(DrivePass::Modules));
         QVERIFY(!s.wants(DrivePass::Apps));
         QVERIFY(!s.wants(DrivePass::WebApps));
+        QVERIFY(!s.wants(DrivePass::WebInput));
         QVERIFY(!s.wants(DrivePass::Chat));
         QVERIFY(!s.wants(DrivePass::Packages));
         QVERIFY(!s.wants(DrivePass::Keyboard));
@@ -82,11 +84,12 @@ private slots:
         QVERIFY(parse({ "--drive", "packages" }).wants(DrivePass::Packages));
         QVERIFY(parse({ "--drive", "keyboard" }).wants(DrivePass::Keyboard));
         QVERIFY(parse({ "--drive", "web-apps" }).wants(DrivePass::WebApps));
+        QVERIFY(parse({ "--drive", "web-input" }).wants(DrivePass::WebInput));
         QVERIFY(parse({ "--drive", "modules" }).wants(DrivePass::Modules));
         // ...and the vocabulary says so, which is what a refusal quotes.
         QCOMPARE(DriveScript::knownPasses(),
                  (QStringList{ "chat", "apps", "packages", "keyboard", "web-apps",
-                               "modules" }));
+                               "web-input", "modules" }));
     }
 
     // Composable two ways, because an acceptance run names what it is proving
@@ -113,8 +116,9 @@ private slots:
     // state behind for what. So the console line is canonical, not as-written.
     void passesAreReportedInTheOrderTheyRun()
     {
-        const DriveScript s = parse({ "--drive", "modules,chat,keyboard,web-apps" });
-        QCOMPARE(s.passes(), (QStringList{ "chat", "keyboard", "web-apps", "modules" }));
+        const DriveScript s = parse({ "--drive", "modules,chat,web-input,keyboard,web-apps" });
+        QCOMPARE(s.passes(),
+                 (QStringList{ "chat", "keyboard", "web-apps", "web-input", "modules" }));
     }
 
     // The historic behaviour, for the runs that really do want all of it -- and
@@ -172,6 +176,18 @@ private slots:
         // ...and the flag it did not eat is still there for its own parser.
         QVERIFY(QStringList({ "BasecampShell", "--drive", "--call", "m.f" })
                     .contains("--call"));
+    }
+
+    // The two page passes are told apart by name and not by prefix: one opens
+    // an app and leaves again, the other types into the form it opens.
+    void thePagePassesAreDistinct()
+    {
+        const DriveScript apps = parse({ "--drive", "web-apps" });
+        QVERIFY(apps.wants(DrivePass::WebApps));
+        QVERIFY(!apps.wants(DrivePass::WebInput));
+        const DriveScript input = parse({ "--drive", "web-input" });
+        QVERIFY(input.wants(DrivePass::WebInput));
+        QVERIFY(!input.wants(DrivePass::WebApps));
     }
 
     // A name written the way a person writes it. The vocabulary is closed, so

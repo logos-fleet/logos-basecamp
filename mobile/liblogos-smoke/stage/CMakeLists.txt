@@ -171,6 +171,7 @@ install(FILES
         ${WEBVIEW}/MobileWebContainerBackend.h
         ${WEBVIEW}/LiveRuntimeBudget.h
         ${WEBVIEW}/WebPageProbe.h
+        ${WEBVIEW}/WebPageInput.h
         ${WEBVIEW}/AppMemory.h
         DESTINATION include/liblogos-smoke-host/webview)
 install(FILES ${BASECAMP_APP}/web/LogosWebPaths.h

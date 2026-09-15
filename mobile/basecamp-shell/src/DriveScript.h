@@ -21,6 +21,7 @@ namespace basecamp::shell {
 //             the one that leaves a platform panel over the Shell and the one
 //             that puts itself back where it started
 //   WebApps   the step that hands the window to a platform page
+//   WebInput  ...and typing into the form on that page, which needs one open
 //   Modules   last: it is the one that changes what is loaded
 enum class DrivePass {
     Chat,
@@ -28,6 +29,7 @@ enum class DrivePass {
     Packages,
     Keyboard,
     WebApps,
+    WebInput,
     Modules,
 };
 
