@@ -1,5 +1,6 @@
 #include "WorkspaceArea.h"
 
+#include <QAccessible>
 #include <QApplication>
 #include <QBoxLayout>
 #include <QDebug>
@@ -34,6 +35,57 @@
 #include <QWheelEvent>
 
 namespace {
+
+// A WIDGET THE ACCESSIBILITY CACHE DOES NOT HOLD IS NEVER ANNOUNCED (#139).
+//
+// Closing an app on iOS segfaulted inside the dock's own destructor, every
+// time, in code that is all Qt's:
+//
+//     QAbstractButton::isCheckable() const
+//     QAccessibleButton::role() const
+//     QIOSPlatformAccessibility::notifyAccessibilityUpdate(QAccessibleEvent*)
+//     QAccessibleCache::sendObjectDestroyedEvent(QObject*)
+//     QWidget::~QWidget()
+//     QDockWidgetTitleButton::~QDockWidgetTitleButton()
+//
+// `~QWidget()` announces an `ObjectDestroyed` for every widget the
+// accessibility cache holds -- by which point the QAbstractButton half of the
+// object is already destroyed -- and Qt's iOS plugin answers that by asking the
+// interface for its `role()`, which for a button reads `isCheckable()` off the
+// corpse. (It even warns "invalid accessible interface" one line earlier and
+// asks anyway.) Every QDockWidget owns two QDockWidgetTitleButtons whether or
+// not a title bar shows them, and iOS caches every visible widget the first
+// time UIKit asks a QUIView for its accessibility elements.
+//
+// Nothing here can stop the plugin dereferencing what it is handed, but the
+// hand-off only happens for a widget the cache HOLDS -- so the subtree is
+// dropped from the cache while it is still whole, and the dock then dies
+// silently. Accessibility stays on, and every widget that is still alive keeps
+// its interface: the next query re-creates one for anything that needs it.
+void forgetAccessibility(QWidget* root)
+{
+#if QT_CONFIG(accessibility)
+    // Nothing is cached while accessibility is off, and asking would be the
+    // only thing that created an interface.
+    if (!root || !QAccessible::isActive()) return;
+    QWidgetList subtree = root->findChildren<QWidget*>();
+    subtree.prepend(root);
+    for (QWidget* widget : std::as_const(subtree)) {
+        // Returns the CACHED interface, and only creates one when the widget
+        // has none -- so the subtree ends up out of the cache either way.
+        // Neither call announces anything: deleteAccessibleInterface() raises
+        // ObjectDestroyed only for an interface whose object is already gone,
+        // and these objects are all still alive.
+        if (QAccessibleInterface* iface = QAccessible::queryAccessibleInterface(widget)) {
+            if (const QAccessible::Id id = QAccessible::uniqueId(iface))
+                QAccessible::deleteAccessibleInterface(id);
+        }
+    }
+#else
+    Q_UNUSED(root);
+#endif
+}
+
 class ZeroTitleWidget : public QWidget {
 public:
     explicit ZeroTitleWidget(QWidget* parent = nullptr) : QWidget(parent) {
@@ -838,6 +890,15 @@ bool WorkspaceArea::eventFilter(QObject* watched, QEvent* event)
 {
     if (watched == this && event->type() == QEvent::ChildAdded) {
         QTimer::singleShot(0, this, [this]() { styleAllTabBars(); });
+    }
+
+    // THE LAST INSTANT BEFORE A DOCK DIES (#139). A filter sees DeferredDelete
+    // before QObject::event() acts on it, and nothing runs in between -- which
+    // is what makes the purge stick. Doing it back in removePluginDock() would
+    // leave a whole event-loop turn in which the platform can ask for the
+    // window's accessibility elements and cache the subtree all over again.
+    if (event->type() == QEvent::DeferredDelete) {
+        if (auto* widget = qobject_cast<QWidget*>(watched)) forgetAccessibility(widget);
     }
 
     if (auto* tabBar = qobject_cast<QTabBar*>(watched)) {
