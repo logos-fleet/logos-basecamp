@@ -62,12 +62,16 @@ namespace {
 // dropped from the cache while it is still whole, and the dock then dies
 // silently. Accessibility stays on, and every widget that is still alive keeps
 // its interface: the next query re-creates one for anything that needs it.
+//
+// UNCONDITIONAL, not `if (QAccessible::isActive())`. Whether accessibility is
+// on is the platform's decision and it is taken late -- on iOS the first UIKit
+// query switches it on for the rest of the process -- so a widget on its way
+// out leaves the cache either way. The cost when nothing is cached is one
+// interface created and destroyed per widget, on the close of one app.
 void forgetAccessibility(QWidget* root)
 {
 #if QT_CONFIG(accessibility)
-    // Nothing is cached while accessibility is off, and asking would be the
-    // only thing that created an interface.
-    if (!root || !QAccessible::isActive()) return;
+    if (!root) return;
     QWidgetList subtree = root->findChildren<QWidget*>();
     subtree.prepend(root);
     for (QWidget* widget : std::as_const(subtree)) {

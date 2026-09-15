@@ -33,10 +33,18 @@
 // impossible -- NO `ObjectDestroyed` update is ever delivered for an interface
 // that is already invalid.
 //
-// It runs on any platform: `QAccessible::setActive(true)` arms step (3)
-// everywhere, and an update handler stands in for the iOS plugin so the
-// assertion is about what Qt announces rather than about what UIKit does with
-// it.
+// TWO CASES, because only one of them runs everywhere.
+//
+// `theAppsWidgetLeavesTheCacheBeforeItsDestructorRuns` is the mechanism, and it
+// needs nothing from the platform: a widget the app owns asks, from inside its
+// own destructor, whether the cache still holds it. The answer is the whole fix
+// -- "no" means ~QWidget has nothing to announce a moment later.
+//
+// `closingAnAppAnnouncesNoDestroyedWidget` is the crash itself, one step
+// removed: it arms Qt's half with `QAccessible::setActive(true)` and stands an
+// update handler in for the iOS plugin. That only works where the platform
+// plugin provides a QPlatformAccessibility -- Qt 6.11's default does, Qt 6.9's
+// offscreen does not -- so it skips rather than passing vacuously.
 //
 //   nix build .#unit-tests -L
 #include "WorkspaceArea.h"
@@ -113,6 +121,31 @@ QWidget* makePluginWidget(const QString& label)
     return w;
 }
 
+// An app's widget that reports, FROM ITS OWN DESTRUCTOR, whether the
+// accessibility cache still holds it. That is the decisive moment and the only
+// one a test can stand in: a subclass destructor runs before ~QWidget, which is
+// where Qt announces whatever the cache still has -- so "not cached here" is
+// exactly "nothing to announce there".
+class ProbeWidget : public QLabel
+{
+public:
+    ProbeWidget(bool* cachedAtDestruction, QAccessible::Id* id)
+        : QLabel(QStringLiteral("probe")), m_cached(cachedAtDestruction), m_id(id)
+    {
+        setObjectName(QStringLiteral("pluginWidget_probe"));
+        setAttribute(Qt::WA_DontShowOnScreen);
+    }
+
+    ~ProbeWidget() override
+    {
+        *m_cached = QAccessible::accessibleInterface(*m_id) != nullptr;
+    }
+
+private:
+    bool* m_cached;
+    QAccessible::Id* m_id;
+};
+
 } // namespace
 
 class DockCloseAccessibilityTest : public QObject
@@ -123,6 +156,7 @@ private slots:
     void init();
     void cleanup();
 
+    void theAppsWidgetLeavesTheCacheBeforeItsDestructorRuns();
     void closingAnAppAnnouncesNoDestroyedWidget();
     void closingOneAppLeavesTheOtherReachable();
 
@@ -147,10 +181,49 @@ void DockCloseAccessibilityTest::cleanup()
     QAccessible::setActive(false);
 }
 
+// THE MECHANISM, on every platform. No announcement is needed to see it: the
+// widget asks about itself at the moment that decides whether there will be one.
+void DockCloseAccessibilityTest::theAppsWidgetLeavesTheCacheBeforeItsDestructorRuns()
+{
+    bool cachedAtDestruction = true;
+    QAccessible::Id id = 0;
+
+    WorkspaceArea area;
+    auto* probe = new ProbeWidget(&cachedAtDestruction, &id);
+    area.addPluginDock(probe, QStringLiteral("my_app"), QStringLiteral("My App"));
+    processDeferred();
+
+    QDockWidget* dock = area.dockFor(QStringLiteral("my_app"));
+    QVERIFY(dock);
+    // As UIKit would: an interface for everything in the window, the probe
+    // included. queryAccessibleInterface() caches whether or not accessibility
+    // is switched on, which is what makes this case platform-independent.
+    cacheInterfacesFor(&area);
+    QAccessibleInterface* iface = QAccessible::queryAccessibleInterface(probe);
+    QVERIFY(iface);
+    id = QAccessible::uniqueId(iface);
+    QVERIFY(id != 0);
+    QVERIFY2(QAccessible::accessibleInterface(id) != nullptr,
+             "the probe was not in the cache to begin with");
+
+    QPointer<QDockWidget> alive(dock);
+    area.removePluginDock(QStringLiteral("my_app"));
+    processDeferred();
+    QVERIFY2(alive.isNull(), "the dock was not destroyed, so nothing was proven");
+
+    QVERIFY2(!cachedAtDestruction,
+             "the app's widget was still in the accessibility cache when its destructor "
+             "ran -- ~QWidget will announce it, and Qt's iOS plugin will ask the "
+             "half-destroyed object for its role()");
+}
+
 void DockCloseAccessibilityTest::closingAnAppAnnouncesNoDestroyedWidget()
 {
-    QVERIFY2(QAccessible::isActive(),
-             "accessibility could not be armed -- the assertion below would be vacuous");
+    if (!QAccessible::isActive()) {
+        QSKIP("this platform plugin has no QPlatformAccessibility, so Qt announces "
+              "nothing and the assertion would be vacuous (Qt 6.9 offscreen); the "
+              "mechanism is covered by theAppsWidgetLeavesTheCacheBeforeItsDestructorRuns");
+    }
 
     WorkspaceArea area;
     area.addPluginDock(makePluginWidget("app"), QStringLiteral("my_app"),
