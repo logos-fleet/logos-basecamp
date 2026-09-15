@@ -117,6 +117,20 @@ let
       };
       inherit signingKey;
     };
+    # A MEMBER WHOSE DEPENDENCY IS THE APP IMAGE'S OTHER HALF (#183). Its
+    # `vault_web` is in no catalog and never will be: it reaches a phone as a
+    # `web` variant in the app's web assets, which is the arrangement the real
+    # `keystore_module` already has. Before #183 a Bundled member could not name
+    # one -- the closure reads the catalog index and only the catalog index --
+    # so this entry is what the two halves being resolved together is tested on.
+    vault_user = {
+      name = "vault_user";
+      version = "1.0.0";
+      type = "core";
+      dependencies = [ "counter" "vault_web" ];
+      variants = { ios-sim-arm64 = iosVariant { stem = "vault_user_bare"; }; };
+      inherit signingKey;
+    };
     stale_ui = {
       name = "stale_ui";
       version = "1.0.0";

@@ -146,6 +146,23 @@
     #     github:logos-fleet/logos-evm-token-list-module/<rev>
     logos-evm-token-list-module.url = "github:logos-co/logos-evm-token-list-module";
     logos-evm-token-list-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    # `railgun_module` is the FOURTH member (#183), and the first whose closure
+    # only resolves because the app image's `web` half is now part of the same
+    # resolution. Its metadata.json names `eth_rpc_module` and
+    # `keystore_module`; the first is the catalog member above, the second is a
+    # `web` variant this image ships (mobileWebVariantsFor) and has no Bare
+    # build on purpose -- putting a native keystore beside the idbfs one would
+    # be two vaults under one name. See nix/bundled-set.nix.
+    #
+    # LOCKED TO THE logos-fleet FORK, for the reason uniswap's note above gives:
+    # upstream publishes no mobile keys, so a bare `nix flake update` walks the
+    # lock back to logos-co and this catalog entry stops EVALUATING. Re-pin with
+    #   nix flake lock --override-input logos-evm-railgun-module \
+    #     github:logos-fleet/logos-evm-railgun-module/<rev>
+    logos-evm-railgun-module.url = "github:logos-co/logos-evm-railgun-module";
+    logos-evm-railgun-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-evm-railgun-module.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
+    logos-evm-railgun-module.inputs.keystore_module.follows = "logos-evm-keystore-module";
     logos-evm-wallet-ui.url = "github:logos-co/logos-evm-wallet-ui";
     logos-evm-wallet-ui.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-evm-wallet-ui.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
@@ -333,7 +350,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-token-list-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-token-list-module, logos-evm-railgun-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -782,6 +799,32 @@
               dependencies = logos-evm-token-list-module.config.dependencies;
             };
 
+            # ...AND THE FOURTH (#183), and the first whose closure is closed
+            # by the app image's OTHER half. `railgun_module` declares
+            # `eth_rpc_module` and `keystore_module`; the first is the entry
+            # three above, and the second reaches a phone as a `web` variant in
+            # this image's web assets (mobileWebVariantsFor), never as a Bundled
+            # Bare module. Before the closure was handed that list, this entry
+            # could not exist -- a member whose closure cannot resolve is a
+            # broken Bundled set rather than a missing one -- which is why #148
+            # left railgun out of the catalog after its Bare build landed.
+            #
+            # THE KEYSTORE STAYS ONE MODULE. A Bare keystore beside the `web`
+            # one would put two vaults in one app under one name -- a filesystem
+            # one and the idbfs one #147 proved a key survives a reload in --
+            # and which of them holds the user's keys is a question nobody has
+            # an answer to. A native member reaches the `web` one the way every
+            # other consumer does: the container registers a WebModuleGlue on
+            # the provider registry and the call is an ordinary one.
+            railgun_module = mkBareSpec {
+              name = "railgun_module";
+              version = logos-evm-railgun-module.config.version;
+              category = "wallet";
+              description = "RAILGUN private transactions: shield, private transfer, unshield";
+              module = logos-evm-railgun-module;
+              dependencies = logos-evm-railgun-module.config.dependencies;
+            };
+
             # ── the apps (slices 22 and 27) ──────────────────────────────
             # BOTH PHONES NOW. A `ui_qml` member used to be iOS-only here,
             # because logos-module-builder published a `view` output for the
@@ -891,59 +934,115 @@
           defaultApps = [ "view_counter" ];
         };
 
+      # `webModules` is THE OTHER HALF OF THE SAME IMAGE (#183): the `web`
+      # modules mobileWebVariantsFor can ship here. A Bundled member may name
+      # one in its `dependencies` -- the phone's `keystore_module` is a `web`
+      # variant, and `wallet_backend_module` / `railgun_module` are native and
+      # depend on it -- and until the closure was handed this list it refused
+      # them for a module that was running on the device. See nix/bundled-set.nix.
       mobileBundledSetFor = { system, androidBuildSystem }:
         let c = mobileCatalogFor { inherit system androidBuildSystem; }; in
         c.bundledSetLib.mkBundledSet {
           inherit (c) catalog target;
           apps = requestedBundle c.defaultApps;
+          webModules = builtins.attrNames (mobileWebModulesFor { inherit androidBuildSystem; });
           pname = "liblogos-smoke-bundled-set";
         };
+
+      # `set` is where the variant comes from, `name` is what the module is
+      # called on this device, `attr` is the output that holds it. Three
+      # arguments rather than two because the counters are FIXTURES of the
+      # builder and the keystore is a module in its own right -- and the package
+      # name and the output name stop coinciding the moment a real module
+      # arrives (`keystore_module` out of `web`).
+      webVariantFrom = set: name: attr:
+        nixpkgs.lib.optionalAttrs (set ? ${attr}) { ${name} = set.${attr}; };
+
+      # EVERY `web` MODULE THIS BUILD COULD SHIP, ungated by
+      # LOGOS_SHELL_WEB_MODULES. Split out of mobileWebAssetsFor because TWO
+      # stages of one image need it (#183): the assets stage picks from it, and
+      # the Bundled-set closure is resolved against the NAMES of the half below
+      # -- a native member whose dependency is in that list is satisfied by the
+      # image's web half rather than refused. Resolving them apart is what made
+      # the phone's `keystore_module` invisible to `wallet_backend_module`.
+      #
+      # `web-view-counter` and `web-view-counter-b` are the two `ui_qml` `web`
+      # variants -- the same instrumented fixture built twice under two names,
+      # which logos-module-builder exports precisely so a container with a
+      # live-runtime budget can be shown enforcing it. `keystore_module` is not
+      # a fixture: a `core` module with a durable store, which is the only kind
+      # whose criterion needs a SECOND LAUNCH of this app to ask.
+      #
+      # Each is absent while a pin predates the output it needs, which is a pin
+      # rollout rather than a defect -- the app then ships whichever exist, and
+      # the closure then refuses a member that named a missing one BY NAME.
+      mobileWebVariantsFor = { androidBuildSystem }:
+        let
+          builderPkgs = logos-module-builder.packages.${androidBuildSystem} or { };
+        in
+        webVariantFrom builderPkgs "web_counter" "web-view-counter"
+        // webVariantFrom builderPkgs "web_counter_b" "web-view-counter-b"
+        // mobileWebModulesFor { inherit androidBuildSystem; };
+
+      # THE HALF A BUNDLED MEMBER MAY DEPEND ON: the `web` variants that are
+      # MODULES rather than fixtures of the builder. The Bundled-set closure is
+      # resolved against these names and not the two counters above, for two
+      # reasons that happen to agree:
+      #
+      #   * a catalog member's `dependencies` names modules. `web_counter` and
+      #     `web_counter_b` are logos-module-builder's own instrumented
+      #     fixtures, published so a container with a live-runtime budget can be
+      #     shown enforcing it; nothing in a catalog can legitimately name one.
+      #
+      #   * probing the builder's package set for a FOREIGN system is not an
+      #     evaluation a Mac can finish -- its `web-view-counter-b` is a rename
+      #     fixture whose source is itself a derivation, so
+      #     `packages.x86_64-linux ? web-view-counter-b` wants an x86_64-linux
+      #     build. `packages.aarch64-ios-simulator.bundled-set` is exactly the
+      #     attribute `ws build --target ios-sim-arm64` uses FROM a Mac, so the
+      #     closure has to stay clear of it.
+      mobileWebModulesFor = { androidBuildSystem }:
+        let
+          keystorePkgs = logos-evm-keystore-module.packages.${androidBuildSystem} or { };
+          walletUiPkgs = logos-evm-wallet-ui.packages.${androidBuildSystem} or { };
+        in
+        webVariantFrom keystorePkgs "keystore_module" "web"
+        // webVariantFrom walletUiPkgs "wallet_ui" "web";
 
       # THE `web` HALF OF A PHONE APP: the Qt-wasm QML runtime and the
       # Downloaded `web` modules this build ships (nix/mobile-web-assets.nix).
       # Architecture-free wasm and JavaScript, so it is keyed off the BUILD
       # platform and both phones carry the same bytes.
       #
-      # `web-view-counter` and `web-view-counter-b` are the two `ui_qml` `web`
-      # variants -- the same instrumented fixture built twice under two names,
-      # which logos-module-builder exports precisely so a container with a
-      # live-runtime budget can be shown enforcing it. `keystore_module` is the
-      # third and is not a fixture: a `core` module with a durable store, which
-      # is the only kind whose criterion needs a SECOND LAUNCH of this app to
-      # ask. Each is absent while a pin predates the output it needs, which is a
-      # pin rollout rather than a defect -- the app then ships whichever exist.
-      mobileWebAssetsFor = { chain, androidBuildSystem }:
+      # `alsoShip` is what the Bundled closure resolved against this image's web
+      # half (#183) -- the names a native member depends on. They are shipped
+      # whether or not LOGOS_SHELL_WEB_MODULES names them, because the
+      # alternative is an app whose manifest promises a dependency the image
+      # does not carry: the env var widens what a developer asks for, it does
+      # not get to make the Bundled set incoherent.
+      mobileWebAssetsFor = { chain, androidBuildSystem, alsoShip ? [ ] }:
         let
-          builderPkgs = logos-module-builder.packages.${androidBuildSystem} or { };
-          keystorePkgs = logos-evm-keystore-module.packages.${androidBuildSystem} or { };
-          walletUiPkgs = logos-evm-wallet-ui.packages.${androidBuildSystem} or { };
-          wanted = requestedWebModules [ "web_counter" "web_counter_b" ];
-          # `set` is where the variant comes from, `name` is what the module is
-          # called on this device, `attr` is the output that holds it. Three
-          # arguments rather than two because the counters are FIXTURES of the
-          # builder and the keystore is a module in its own right -- and the
-          # package name and the output name stop coinciding the moment a real
-          # module arrives (`keystore_module` out of `web`).
-          from = set: name: attr:
-            nixpkgs.lib.optionalAttrs
-              (builtins.elem name wanted && set ? ${attr})
-              { ${name} = set.${attr}; };
+          available = mobileWebVariantsFor { inherit androidBuildSystem; };
+          wanted = requestedWebModules [ "web_counter" "web_counter_b" ] ++ alsoShip;
         in
         import ./nix/mobile-web-assets.nix {
           pkgs = chain.pkgs.pkgsBuildBuild;
           qmlRuntimeWasm =
             (logos-view-module-runtime.packages.${androidBuildSystem} or { }).qml-runtime-wasm
               or null;
-          webVariants = from builderPkgs "web_counter" "web-view-counter"
-                     // from builderPkgs "web_counter_b" "web-view-counter-b"
-                     // from keystorePkgs "keystore_module" "web"
-                     // from walletUiPkgs "wallet_ui" "web";
+          webVariants = nixpkgs.lib.filterAttrs (n: _: builtins.elem n wanted) available;
         };
 
       mkMobileSmoke = { androidBuildSystem ? "x86_64-linux" }:
         nixpkgs.lib.mapAttrs
           (system: chain:
-            let isAndroid = system == "aarch64-android"; in
+            let
+              isAndroid = system == "aarch64-android";
+              # ONE resolution for the whole image (#183): the Bundled set is
+              # resolved against the `web` modules this build can ship, and the
+              # web assets then carry the ones it actually leaned on.
+              bundledSet = mobileBundledSetFor { inherit system androidBuildSystem; };
+            in
             import (if isAndroid then ./nix/android-apps.nix else ./nix/ios-apps.nix) {
               inherit (chain) pkgs;
               inherit chain;
@@ -953,13 +1052,16 @@
               # laid out in the one directory this platform's loader will open
               # them from. The host reads bundled-set.json out of it and knows
               # nothing else about what it carries.
-              bundledSet = mobileBundledSetFor { inherit system androidBuildSystem; };
+              inherit bundledSet;
 
               # The app's `web` half: the bundled QML runtime and the
               # Downloaded `web` modules it ships. See mobileWebAssetsFor
               # above. Both phones, keyed off the build platform alone --
               # wasm and JavaScript are architecture-free.
-              webAssets = mobileWebAssetsFor { inherit chain androidBuildSystem; };
+              webAssets = mobileWebAssetsFor {
+                inherit chain androidBuildSystem;
+                alsoShip = bundledSet.webSatisfied;
+              };
 
               # LogosViewPlugin.h — the HOST side of the view-plugin
               # interface, header-only. The runtime's library and its ui-host

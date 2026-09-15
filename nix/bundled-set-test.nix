@@ -119,6 +119,80 @@ let
     inherit target;
   };
 
+  # ── the app image's OTHER HALF satisfies a dependency (#183) ──────────────
+  #
+  # `vault_user` names `vault_web`, which is in no catalog: it reaches a phone
+  # as a `web` variant in the app's web assets. That is the real
+  # `keystore_module`'s arrangement, and before this the closure -- which reads
+  # the catalog index and only the catalog index -- refused the member by name.
+  #
+  # THE WEB NAME IS SATISFIED, NOT BUNDLED. It is not a member: nothing about
+  # it is fetched, verified or embedded here, because the web half is built and
+  # laid into the image by a different stage entirely. What the closure does is
+  # stop refusing it, and RECORD it -- `webSatisfied` is the only place a
+  # reader can see that this set is complete only alongside those assets.
+  webResolved = bundledSet.resolveSet {
+    inherit (local) index;
+    inherit target;
+    apps = [ "vault_user" ];
+    webModules = [ "vault_web" ];
+  };
+
+  webMembers = map (e: e.name) webResolved.members;
+
+  webClosureOk =
+    let want = [ "capability_module" "counter" "vault_user" ]; in
+    if webMembers == want then true
+    else throw ("FAIL: closure of vault_user with a web half is "
+      + lib.concatStringsSep ", " webMembers + "; expected "
+      + lib.concatStringsSep ", " want);
+
+  webSatisfiedOk =
+    if webResolved.webSatisfied == [ "vault_web" ] then true
+    else throw ("FAIL: vault_user's web-satisfied names are "
+      + lib.concatStringsSep ", " webResolved.webSatisfied + "; expected vault_web");
+
+  # ...AND WITHOUT THE WEB HALF IT IS STILL REFUSED. The rule is that THIS
+  # build ships the name, not that any name outside the catalog is fine.
+  webUnsatisfiedRefused = evalFails
+    "a Bundled member whose dependency is in neither the catalog nor the web half"
+    (bundledSet.mkBundledSet {
+      catalog = local;
+      inherit target;
+      apps = [ "vault_user" ];
+    });
+
+  # ...AND A WEB NAME CANNOT BE BUNDLED. `--bundle` names members of the
+  # Bundled set; a `web` module is the other half of the image and has no
+  # variant to embed, so naming one is a mistake the build still has to catch.
+  webAppRefused = evalFails
+    "a --bundle naming a module that exists only in the web half"
+    (bundledSet.mkBundledSet {
+      catalog = local;
+      inherit target;
+      apps = [ "vault_web" ];
+      webModules = [ "vault_web" ];
+    });
+
+  webSatisfiedSet = bundledSet.mkBundledSet {
+    catalog = local;
+    inherit target;
+    apps = [ "vault_user" ];
+    webModules = [ "vault_web" ];
+    pname = "web-satisfied-bundled-set";
+  };
+
+  # The missing-dependency refusal names the web half it consulted, so a
+  # developer who shipped the wrong `web` module reads what the build had
+  # rather than only what it wanted.
+  missingText = bundledSet.refusals.missing {
+    release = "fixture";
+    catalogNames = [ "counter" ];
+    name = "vault_web";
+    via = [ "vault_user" ];
+    webModules = [ "web_counter" ];
+  };
+
   # ── the Platform floor (#169) ─────────────────────────────────────────────
   # DERIVED from this catalog and this closure, never listed: `counter` is a
   # Platform module the set carries, `desktop_only` is one it does not. The
@@ -162,9 +236,12 @@ let
     if reasonText == "requires desktop_only, not in this build" then true
     else throw "FAIL: the floor's refusal reads '${reasonText}'";
 
-  refusalNames = word:
-    if lib.hasInfix word refusalText then true
-    else throw "FAIL: the missing-variant refusal does not mention '${word}':\n${refusalText}";
+  mentions = what: text: word:
+    if lib.hasInfix word text then true
+    else throw "FAIL: the ${what} refusal does not mention '${word}':\n${text}";
+
+  refusalNames = mentions "missing-variant" refusalText;
+  missingNames = mentions "missing-module" missingText;
 
 in
 assert closureOk;
@@ -182,12 +259,19 @@ assert floorRefuses "stale_ui" "desktop_only";
 assert floorRefuses "stale_app" "desktop_only";
 assert floorRefuses "counter_ui" null;
 assert reasonIs;
+assert webClosureOk;
+assert webSatisfiedOk;
+assert webUnsatisfiedRefused;
+assert webAppRefused;
+assert missingNames "web_counter";
+assert missingNames "vault_web";
 pkgs.runCommand "bundled-set-tests"
   {
     nativeBuildInputs = [ lgx pkgs.python3 ];
     inherit target;
     set = "${set}";
     pinnedSet = "${pinnedSet}";
+    webSatisfiedSet = "${webSatisfiedSet}";
     catalogRoot = "${local.root}";
     verifyScript = "${./verify-lgx-member.sh}";
     goodSigner = testKey.did;
@@ -226,6 +310,25 @@ pkgs.runCommand "bundled-set-tests"
 
   print("manifest: %s" % ", ".join(got))
   PY
+
+  # ── the web half is RECORDED in the manifest, and embeds nothing ─────────
+  # The device reads bundled-set.json and nothing else, so a set that is
+  # complete only alongside the app's web assets has to say so there.
+  python3 - <<'PY'
+  import json, os
+  m = json.load(open(os.path.join(os.environ["webSatisfiedSet"], "bundled-set.json")))
+  want = ["capability_module", "counter", "vault_user"]
+  got = [x["name"] for x in m["modules"]]
+  assert got == want, "web-satisfied manifest lists %s, expected %s" % (got, want)
+  assert m["webSatisfied"] == ["vault_web"], m["webSatisfied"]
+  print("web-satisfied manifest: %s + web %s"
+        % (", ".join(got), ", ".join(m["webSatisfied"])))
+  PY
+  ls "$webSatisfiedSet/Frameworks" | sort > got-web-fw.txt
+  printf '%s\n' capability_module_bare.framework counter_bare.framework vault_user_bare.framework \
+    | sort > want-web-fw.txt
+  diff -u want-web-fw.txt got-web-fw.txt \
+    || fail "the web-satisfied set embedded something for the web half"
 
   # ── the Frameworks directory matches it, exactly ─────────────────────────
   # "Exactly" is the assertion: an app that carries a framework its manifest

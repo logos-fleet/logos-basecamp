@@ -36,6 +36,13 @@ signature and Merkle root, extracts the `--target` variant and writes a
 `bundled-set.json` beside the images. The host reads that manifest and nothing
 else — which is why adding a module to `--bundle` changes no source file here.
 
+A member may also depend on a module the image carries in its OTHER half — a
+`web` variant in the app's web assets, which is how `keystore_module` reaches a
+phone (#183, ADR 0010). Those names are resolved in the same pass, are not
+embedded here, and are recorded in the manifest under `webSatisfied`; the web
+assets stage then ships them whether or not `LOGOS_SHELL_WEB_MODULES` names
+them.
+
 The catalog the smoke host builds against is local (`mobileCatalogFor` in
 `flake.nix`), signed with the test key in `mobile/catalog/keys/`. It carries
 this repo's own two mobile modules, the three networking ones, the real Chat

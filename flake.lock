@@ -18968,6 +18968,32 @@
         "type": "github"
       }
     },
+    "logos-evm-railgun-module": {
+      "inputs": {
+        "eth_rpc_module": [
+          "logos-evm-eth-rpc-module"
+        ],
+        "keystore_module": [
+          "logos-evm-keystore-module"
+        ],
+        "logos-module-builder": [
+          "logos-module-builder"
+        ]
+      },
+      "locked": {
+        "lastModified": 1789506369,
+        "narHash": "sha256-lDiFxw/rb6986HANb7vTb0kUiWFkEOZkLEisFwVcSEA=",
+        "owner": "logos-fleet",
+        "repo": "logos-evm-railgun-module",
+        "rev": "44ec398725691b94f5a67b0dc8a175738d01fdc3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-evm-railgun-module",
+        "type": "github"
+      }
+    },
     "logos-evm-token-list-module": {
       "inputs": {
         "logos-module-builder": [
@@ -231828,6 +231854,7 @@
         "logos-design-system": "logos-design-system",
         "logos-evm-eth-rpc-module": "logos-evm-eth-rpc-module",
         "logos-evm-keystore-module": "logos-evm-keystore-module",
+        "logos-evm-railgun-module": "logos-evm-railgun-module",
         "logos-evm-token-list-module": "logos-evm-token-list-module",
         "logos-evm-uniswap-module": "logos-evm-uniswap-module",
         "logos-evm-wallet-ui": "logos-evm-wallet-ui",

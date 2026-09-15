@@ -699,6 +699,14 @@ would be indistinguishable from not installing at all. The default build is
 unchanged -- `getEnv` is `""` in a pure evaluation, exactly as with
 `LOGOS_BUNDLE_APPS`.
 
+IT DOES NOT GET TO MAKE THE BUNDLED SET INCOHERENT (#183). A Bundled member may
+depend on a `web` module this image carries -- `railgun_module` names
+`keystore_module`, which reaches a phone only as a `web` variant -- so the
+Bundled closure is resolved against the `web` modules this build can ship, and
+the ones it leaned on are added to the assets whether or not this variable names
+them. `bundled-set.json` records them under `webSatisfied`. The variable widens
+what a developer asks for; the closure decides what the image must carry.
+
 A `core` module's `web` variant installs the same way and ends differently, and
 that difference is a criterion rather than a gap: it has no view, so it gets no
 sidebar tile, and the run says so --
