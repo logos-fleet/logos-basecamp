@@ -11,6 +11,8 @@
 #include <QQuickItem>
 #include <QWidget>
 
+#include <utility>
+
 namespace {
 // How long a `web` module gets to open its page. A phone's wasm image and the
 // app's 26 MB QML runtime are seconds of work, and the page is loaded
@@ -97,17 +99,18 @@ void ShellWebAppDriver::run()
         emit log(QStringLiteral("web app: no `web` module in this build has a UI page"));
         return;
     }
-    // A Downloaded one first, and one that is not running before one that is:
-    // an app the user installed in an earlier launch is the case #123 is about,
-    // and a build that ships a `web` module in its own tree has the same shape
-    // one step less far from the image.
+    // NOT RUNNING BEFORE RUNNING, then a Downloaded one before a shipped one:
+    // an app the user installed in an earlier launch is the case #123 is
+    // about, and a build that ships a `web` module in its own tree has the same
+    // shape one step less far from the image. Read as a pair so the order of
+    // the two keys is the order they are written in.
     const QStringList downloaded = m_host->backend()->downloadedModules();
-    const auto rank = [&](const QString& name) {
-        return (web->hasView(name) ? 0 : 2) + (downloaded.contains(name) ? 1 : 0);
+    const auto preference = [&](const QString& name) {
+        return std::make_pair(!web->hasView(name), downloaded.contains(name));
     };
     QString app = apps.first();
     for (const QString& name : apps) {
-        if (rank(name) > rank(app)) app = name;
+        if (preference(name) > preference(app)) app = name;
     }
     const bool wasRunning = web->hasView(app);
     emit log(wasRunning
