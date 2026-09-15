@@ -29,6 +29,7 @@
 #include "ShellCatalogDriver.h"
 #include "ShellConsentDriver.h"
 #include "ShellModulesDriver.h"
+#include "ShellPackageSectionDriver.h"
 #include "ShellWebAppDriver.h"
 #include "ShellSections.h"
 #include "SmokeRunner.h"
@@ -262,6 +263,13 @@ int main(int argc, char* argv[])
     auto* apps = new ShellAppDriver(&host, shellWidget, &app);
     QObject::connect(apps, &ShellAppDriver::log, &console);
 
+    // AND THE PACKAGE MANAGER SECTION, which is not an app at all: it is the
+    // one page of the Shell that waits for a widget, and on a Store shell that
+    // widget never comes. #145 left it on "Loading Package Manager…" for the
+    // session, and nothing that ran here could see it.
+    auto* packages = new ShellPackageSectionDriver(shellWidget, &app);
+    QObject::connect(packages, &ShellPackageSectionDriver::log, &console);
+
     // AND THE WEB APP, opened and LEFT AGAIN. A `web` module's UI is a platform
     // page rather than a widget, and the tile-press check above is satisfied by
     // a page that covers the Shell whole -- which is how a user ended up inside
@@ -329,8 +337,8 @@ int main(int argc, char* argv[])
         catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app, [network, driver, apps, webApps, catalog, calls, consent,
-                                 finishOnTheApp]() {
+    QTimer::singleShot(0, &app, [network, driver, apps, webApps, packages, catalog, calls,
+                                 consent, finishOnTheApp]() {
         // The catalog FIRST when there is one: the module it installs is what
         // the Modules tab and the sidebar then have to account for, and a run
         // pointed at a catalog is a developer's rather than a cold-start
@@ -361,6 +369,11 @@ int main(int argc, char* argv[])
             // local-network prompt on a device) with the group exchange
             // perfectly fine.
             apps->run(network->madeConversation());
+            // BEFORE the web app, which is the step that hands the window to a
+            // platform page: the Package Manager section is the Shell's own
+            // chrome, and it is only the Shell's to show while the Shell still
+            // has the window.
+            packages->run();
             if (webApps->hasWork()) webApps->run();
             driver->run();
             finishOnTheApp();
@@ -369,8 +382,10 @@ int main(int argc, char* argv[])
             // Nothing ran ahead of it, so the tab needs its own settle: a QML
             // item has no geometry until the scene has painted, and a press
             // at the centre of a zero-sized button lands on nothing.
-            QTimer::singleShot(2500, driver, [driver, apps, webApps, finishOnTheApp]() {
+            QTimer::singleShot(2500, driver, [driver, apps, webApps, packages,
+                                              finishOnTheApp]() {
                 apps->run();
+                packages->run();
                 if (webApps->hasWork()) webApps->run();
                 driver->run();
                 finishOnTheApp();

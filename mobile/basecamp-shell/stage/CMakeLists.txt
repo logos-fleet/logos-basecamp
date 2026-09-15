@@ -48,6 +48,8 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.cpp
     ${SRC}/ShellModulesDriver.h
+    ${SRC}/ShellPackageSectionDriver.cpp
+    ${SRC}/ShellPackageSectionDriver.h
     ${SRC}/ShellAppDriver.cpp
     ${SRC}/ShellAppDriver.h
     ${SRC}/ShellWebAppDriver.cpp
@@ -109,6 +111,7 @@ install(FILES
     ${SRC}/WebAppSurface.h
     ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.h
+    ${SRC}/ShellPackageSectionDriver.h
     ${SRC}/ShellAppDriver.h
     ${SRC}/ShellWebAppDriver.h
     ${SRC}/ShellCatalogDriver.h

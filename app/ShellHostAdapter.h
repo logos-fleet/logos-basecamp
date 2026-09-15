@@ -10,7 +10,7 @@ class MainUIBackend;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ShellHostAdapter — the host's side of the shell boundary. Implements
-// IShellHost over MainUIBackend and translates its five signals into
+// IShellHost over MainUIBackend and translates its six signals into
 // IShellObserver calls; every operation is a one-line delegation.
 //
 // It exists so the shell never names MainUIBackend, whose header pulls in

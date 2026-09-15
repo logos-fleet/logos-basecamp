@@ -1,4 +1,5 @@
 #include "MainContainer.h"
+#include "PackageManagerPane.h"
 #include "ShellSections.h"
 #include "AppsFilterProxy.h"
 #include "InstallEnums.h"
@@ -12,7 +13,6 @@
 #include <QQuickStyle>
 #include <qqml.h>
 #include <QVBoxLayout>
-#include <QLabel>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -28,22 +28,9 @@ constexpr int kAppsStackIndex     = 0;  // WorkspaceArea (QDockWidget-based)
 constexpr int kContentStackIndex  = 1;  // ContentViews.qml (App Manager + Settings)
 constexpr int kModulesStackIndex  = 2;  // package_manager_ui (sandboxed QQuickWidget)
 
-// The Package Manager page before package_manager_ui arrives -- and again after
-// it goes away. Built in two places, so it lives here: the stack must keep all
-// three pages at all times, because every section switch below indexes into it
-// by constant.
-QWidget* makePmuiPlaceholder(QWidget* parent)
-{
-    QWidget* ph = new QWidget(parent);
-    ph->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    QVBoxLayout* phLayout = new QVBoxLayout(ph);
-    phLayout->setAlignment(Qt::AlignCenter);
-    QLabel* loadingLabel = new QLabel(QStringLiteral("Loading Package Manager…"), ph);
-    loadingLabel->setAlignment(Qt::AlignCenter);
-    loadingLabel->setStyleSheet(QStringLiteral("color: #a0a0a0; font-size: 14px;"));
-    phLayout->addWidget(loadingLabel);
-    return ph;
-}
+// The one UI module this class hoists into a page of its own rather than
+// docking. Named here because three different sites branch on it.
+const QLatin1String kPackageManagerUi("package_manager_ui");
 
 // DEV_QML_PATH: when set, load QML view entry files from the filesystem source
 // tree instead of the embedded qrc resource
@@ -115,7 +102,7 @@ MainContainer::MainContainer(IShellHost* host, QWidget* parent)
                 [this](const QString&) { m_shortcutBridge->rebindDeferred(); });
     }
 
-    // Subscribe to the host. These five arrive as IShellObserver virtual calls
+    // Subscribe to the host. These six arrive as IShellObserver virtual calls
     // rather than signals: a signal/slot connection would make both sides agree
     // on a metaobject, which is the coupling this boundary exists to avoid.
     // Detached again in detachFromHost().
@@ -303,10 +290,12 @@ void MainContainer::setupUi()
         QStringLiteral("qrc:/qt/qml/Basecamp/Shell/Basecamp/Shell/ContentViews.qml")));
     m_contentStack->addWidget(m_contentWidget);
 
-    // Index 2: placeholder for package_manager_ui — shows a centered
-    // "Loading…" label until PMUI's QQuickWidget arrives via the
-    // pluginWindowRequested intercept
-    m_contentStack->addWidget(makePmuiPlaceholder(m_contentStack));
+    // Index 2: the Package Manager page until PMUI's QQuickWidget arrives via
+    // the pluginWindowRequested intercept. The stack must keep all three pages
+    // at all times -- every section switch indexes into it by constant -- so
+    // whatever takes PMUI's place out of the stack puts one of these back.
+    m_pmuiPane = new PackageManagerPane(m_contentStack);
+    m_contentStack->addWidget(m_pmuiPane);
 
     // Content stack fills the content area — the version footer that
     // used to live in a QML bottom toolbar is now inside SidebarPanel.qml.
@@ -431,7 +420,13 @@ void MainContainer::onSectionIndexChanged(int index)
         break;
     case ShellSection::PackageManager:
         if (!m_pmuiWidget) {
-            m_host->loadUiModule(QStringLiteral("package_manager_ui"));
+            // The pane starts its own clock here rather than in loadUiModule's
+            // wake, because THIS is the request. A host that answers
+            // immediately -- refusing the mount, as a Store shell's does --
+            // lands in onUiModuleUnavailable() before the call returns and
+            // stops the clock again.
+            if (m_pmuiPane) m_pmuiPane->beginLoading();
+            m_host->loadUiModule(kPackageManagerUi);
         }
         m_contentStack->setCurrentIndex(kModulesStackIndex);
         break;
@@ -460,7 +455,7 @@ void MainContainer::onPluginWindowRequested(QWidget* widget, const QString& titl
 {
     // package_manager_ui is not a dock: it becomes the Package Manager page of
     // the content stack, replacing the placeholder that sits there at startup.
-    if (title == QStringLiteral("package_manager_ui") && !m_pmuiWidget) {
+    if (title == kPackageManagerUi && !m_pmuiWidget) {
         m_pmuiWidget = widget;
         QWidget* placeholder = m_contentStack->widget(kModulesStackIndex);
         widget->setParent(m_contentStack);
@@ -496,8 +491,10 @@ void MainContainer::onPluginWindowRemoveRequested(QWidget* widget)
         // that every `setCurrentIndex(kModulesStackIndex)` then indexes past the
         // end of, and the section is dead for the rest of the session.
         m_contentStack->removeWidget(widget);
-        m_contentStack->insertWidget(kModulesStackIndex,
-                                     makePmuiPlaceholder(m_contentStack));
+        // Idle, not loading: nothing has asked for the plugin again. The next
+        // visit to the section does, and that is what starts the clock.
+        m_pmuiPane = new PackageManagerPane(m_contentStack);
+        m_contentStack->insertWidget(kModulesStackIndex, m_pmuiPane);
         m_pmuiWidget = nullptr;
         return;
     }
@@ -522,6 +519,18 @@ void MainContainer::onPresentAppRequested(QWidget* widget)
     // whatever the user is actually looking at.
     onNavigateToApps();
     m_workspaceArea->activatePluginDock(widget);
+}
+
+void MainContainer::onUiModuleUnavailable(const QString& name, const QString& reason)
+{
+    if (name != kPackageManagerUi) return;
+    qWarning().noquote() << "MainContainer: package_manager_ui is not available:"
+                         << reason;
+    // A widget that is already mounted outranks a late refusal: the host can
+    // report a failed RE-load of a module whose page is still on screen, and
+    // replacing a working page with an error message would be the worse bug.
+    if (m_pmuiWidget) return;
+    if (m_pmuiPane) m_pmuiPane->showUnavailable(reason);
 }
 
 
