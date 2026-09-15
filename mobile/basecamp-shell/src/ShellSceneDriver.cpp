@@ -9,6 +9,7 @@
 #include <QVariant>
 #include <QQuickItem>
 #include <QQuickWidget>
+#include <QQuickWindow>
 #include <QScreen>
 #include <QUrl>
 #include <QWidget>
@@ -51,6 +52,18 @@ void walkItems(QQuickItem* item, const std::function<void(QQuickItem*)>& visit)
     const QList<QQuickItem*> children = item->childItems();
     for (QQuickItem* child : children)
         walkItems(child, visit);
+}
+
+// Where a walk of one surface starts. The quick window's contentItem is the
+// WHOLE scene -- the root object AND the Overlay a Popup (a menu, a dialog) is
+// parented to; the root object alone is only what the view draws. Only a lookup
+// that has to reach inside a popup asks for the wider one, because everything
+// else is better off not seeing an item a closed popup still holds.
+QQuickItem* walkRoot(QQuickWidget* surface, bool withOverlays)
+{
+    if (withOverlays && surface->quickWindow())
+        return surface->quickWindow()->contentItem();
+    return surface->rootObject();
 }
 
 // The display `w` is on, in the global coordinates mapToGlobal() answers in.
@@ -102,7 +115,10 @@ void ShellSceneDriver::dumpNames(const QString& why)
                           root ? root->objectName() : QStringLiteral("<none>")));
         if (!root) continue;
         QStringList named;
-        walkItems(root, [&named](QQuickItem* item) {
+        // The whole scene, overlays included: a handle a driver could not find
+        // because it is inside a menu that never opened is a different bug
+        // from one that is spelled differently, and this is where that is told.
+        walkItems(walkRoot(surface, /*withOverlays=*/true), [&named](QQuickItem* item) {
             if (!item->objectName().isEmpty())
                 named << item->objectName();
         });
@@ -112,20 +128,21 @@ void ShellSceneDriver::dumpNames(const QString& why)
     }
 }
 
-void ShellSceneDriver::forEachItem(const std::function<void(QQuickItem*)>& visit) const
+void ShellSceneDriver::forEachItem(const std::function<void(QQuickItem*)>& visit,
+                                   Scope scope) const
 {
     if (!m_shell) return;
     for (QQuickWidget* surface : m_shell->findChildren<QQuickWidget*>())
-        walkItems(surface->rootObject(), visit);
+        walkItems(walkRoot(surface, scope == Scope::WithOverlays), visit);
 }
 
-QQuickItem* ShellSceneDriver::find(const QString& objectName) const
+QQuickItem* ShellSceneDriver::find(const QString& objectName, Scope scope) const
 {
     QQuickItem* found = nullptr;
     forEachItem([&found, &objectName](QQuickItem* item) {
         if (!found && item->objectName() == objectName)
             found = item;
-    });
+    }, scope);
     return found;
 }
 
@@ -152,12 +169,13 @@ void ShellSceneDriver::settle(int ms)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 }
 
-QQuickItem* ShellSceneDriver::waitFor(const QString& objectName, int timeoutMs)
+QQuickItem* ShellSceneDriver::waitFor(const QString& objectName, int timeoutMs,
+                                      Scope scope)
 {
     QElapsedTimer t;
     t.start();
     for (;;) {
-        if (QQuickItem* item = find(objectName))
+        if (QQuickItem* item = find(objectName, scope))
             return item;
         if (t.elapsed() >= timeoutMs)
             return nullptr;

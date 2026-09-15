@@ -25,10 +25,12 @@
 #include "IShellView.h"
 #include "NetworkSmokeRunner.h"
 #include "PlatformConsole.h"
+#include "QuickWidgetKeyboardFocus.h"
 #include "ShellAppDriver.h"
 #include "ShellCallDriver.h"
 #include "ShellCatalogDriver.h"
 #include "ShellConsentDriver.h"
+#include "ShellKeyboardDriver.h"
 #include "ShellModulesDriver.h"
 #include "ShellPackageSectionDriver.h"
 #include "ShellWebAppDriver.h"
@@ -110,6 +112,17 @@ int main(int argc, char* argv[])
 
     QElapsedTimer sinceMain;
     sinceMain.start();
+
+    // THE ON-SCREEN KEYBOARD, BEFORE ANY SCENE EXISTS. The Shell's QML and a
+    // mounted app's both live in QQuickWidgets, whose focus is the offscreen
+    // window's and not the one the platform input context is told about -- and
+    // on iOS nothing ever hands the widget the window's focus, so a tapped
+    // field took a caret and no keyboard (logos-workspace#152). This watches
+    // every QQuickWidget in the process, including the one an app is mounted
+    // into long after startup, which is why it is installed here rather than
+    // handed a list of surfaces.
+    auto* keyboardFocus = new QuickWidgetKeyboardFocus(&app);
+    keyboardFocus->watchEverything();
 
     SmokeRunner runner;
     QObject::connect(&runner, &SmokeRunner::log, &console);
@@ -296,6 +309,15 @@ int main(int argc, char* argv[])
     auto* packages = new ShellPackageSectionDriver(shellWidget, &app);
     QObject::connect(packages, &ShellPackageSectionDriver::log, &console);
 
+    // AND THE KEYBOARD, for the app's own input fields: the app's "+", its New
+    // DM entry, the address field in the dialog that opens -- and then the
+    // three facts the platform reads before it raises a keyboard. Asked from
+    // in-process because nothing outside can ask it any more: Xcode 27 removed
+    // SimulatorKit, so `idb ui tap` refuses HID and `simctl` has no input verb
+    // at all (#152). Where it sits in the order is at its call site below.
+    auto* keyboard = new ShellKeyboardDriver(&host, shellWidget, &app);
+    QObject::connect(keyboard, &ShellKeyboardDriver::log, &console);
+
     // AND THE WEB APP, opened and LEFT AGAIN. A `web` module's UI is a platform
     // page rather than a widget, and the tile-press check above is satisfied by
     // a page that covers the Shell whole -- which is how a user ended up inside
@@ -365,9 +387,10 @@ int main(int argc, char* argv[])
         catalog->openLinks();
     };
 
-    // The four passes that press things in the Shell's own rendered scene, in
-    // the order above. Each one runs only if this run named it.
-    auto scenePasses = [&drive, network, driver, apps, webApps, packages, finishOnTheApp]() {
+    // The passes that press things in the Shell's own rendered scene, in the
+    // order above. Each one runs only if this run named it.
+    auto scenePasses = [&drive, network, driver, apps, webApps, packages, keyboard,
+                        finishOnTheApp]() {
         // The CHAT half is what the app has to show, not the run's overall
         // verdict: the libp2p leg can fail on its own (an unanswered
         // local-network prompt on a device) with the group exchange perfectly
@@ -381,6 +404,21 @@ int main(int argc, char* argv[])
         // has the window.
         if (drive.wants(DrivePass::Packages))
             packages->run();
+        // AND THE KEYBOARD, last of the passes that press the Shell's own
+        // scene and still ahead of the web app. Both ends of that are about
+        // what a pass leaves behind. It goes AFTER the package-manager section
+        // because it is the only one that leaves a PLATFORM panel over the
+        // Shell -- the keyboard, or the shortcut bar that stands in for one --
+        // and run the other way round the section pass would be pressing a
+        // sidebar it does not fully own and holding a page for a screenshot
+        // with a keyboard across the bottom of it. It goes BEFORE the web app
+        // for the reason every scene pass does: opening a page hands the
+        // workspace to a platform view, and the question here is about the
+        // Shell's own focus chain. Nothing is owed to it by the pass in front
+        // either way -- it switches back to the workspace and finds the app's
+        // "+" itself, and closes again whatever it opened (#152).
+        if (drive.wants(DrivePass::Keyboard) && keyboard->hasWork())
+            keyboard->run();
         if (drive.wants(DrivePass::WebApps) && webApps->hasWork())
             webApps->run();
         if (drive.wants(DrivePass::Modules))
@@ -389,6 +427,7 @@ int main(int argc, char* argv[])
     };
 
     const bool drivesAScene = drive.wants(DrivePass::Apps) || drive.wants(DrivePass::Packages)
+                              || drive.wants(DrivePass::Keyboard)
                               || drive.wants(DrivePass::WebApps)
                               || drive.wants(DrivePass::Modules);
     // Nothing at all to do is the DEFAULT case, and it costs no timer: the app

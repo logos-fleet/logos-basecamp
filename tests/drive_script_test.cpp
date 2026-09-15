@@ -33,7 +33,7 @@ class DriveScriptTest : public QObject
     static QList<DrivePass> allPasses()
     {
         return { DrivePass::Chat, DrivePass::Apps, DrivePass::Packages,
-                 DrivePass::WebApps, DrivePass::Modules };
+                 DrivePass::Keyboard, DrivePass::WebApps, DrivePass::Modules };
     }
 
 private slots:
@@ -71,6 +71,7 @@ private slots:
         QVERIFY(!s.wants(DrivePass::WebApps));
         QVERIFY(!s.wants(DrivePass::Chat));
         QVERIFY(!s.wants(DrivePass::Packages));
+        QVERIFY(!s.wants(DrivePass::Keyboard));
         QCOMPARE(s.passes(), QStringList{ "modules" });
     }
 
@@ -79,11 +80,13 @@ private slots:
         QVERIFY(parse({ "--drive", "chat" }).wants(DrivePass::Chat));
         QVERIFY(parse({ "--drive", "apps" }).wants(DrivePass::Apps));
         QVERIFY(parse({ "--drive", "packages" }).wants(DrivePass::Packages));
+        QVERIFY(parse({ "--drive", "keyboard" }).wants(DrivePass::Keyboard));
         QVERIFY(parse({ "--drive", "web-apps" }).wants(DrivePass::WebApps));
         QVERIFY(parse({ "--drive", "modules" }).wants(DrivePass::Modules));
         // ...and the vocabulary says so, which is what a refusal quotes.
         QCOMPARE(DriveScript::knownPasses(),
-                 (QStringList{ "chat", "apps", "packages", "web-apps", "modules" }));
+                 (QStringList{ "chat", "apps", "packages", "keyboard", "web-apps",
+                               "modules" }));
     }
 
     // Composable two ways, because an acceptance run names what it is proving
@@ -110,8 +113,8 @@ private slots:
     // state behind for what. So the console line is canonical, not as-written.
     void passesAreReportedInTheOrderTheyRun()
     {
-        const DriveScript s = parse({ "--drive", "modules,chat,web-apps" });
-        QCOMPARE(s.passes(), (QStringList{ "chat", "web-apps", "modules" }));
+        const DriveScript s = parse({ "--drive", "modules,chat,keyboard,web-apps" });
+        QCOMPARE(s.passes(), (QStringList{ "chat", "keyboard", "web-apps", "modules" }));
     }
 
     // The historic behaviour, for the runs that really do want all of it -- and

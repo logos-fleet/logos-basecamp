@@ -57,6 +57,16 @@ signals:
     void log(const QString& line);
 
 protected:
+    // How much of a scene a lookup covers. A QtQuick.Controls Popup -- a menu,
+    // a dialog -- is NOT a child of the view's root object: it is parented to
+    // an Overlay beside it, under the quick window's contentItem. So a menu's
+    // entries and a dialog's fields are invisible to a walk that starts at
+    // rootObject, and a driver that has to reach one says so.
+    enum class Scope {
+        Views,          // from each scene's root object, what the view draws
+        WithOverlays,   // ...and what is layered over it
+    };
+
     // Every item in every scene the shell owns. Several scenes, because
     // MainContainer puts the sidebar, the content stack and the overlay layer
     // in separate QQuickWidgets -- and a mounted app's view is a fourth.
@@ -66,9 +76,10 @@ protected:
     // delegate model rather than by the contentItem -- so QObject::findChild
     // reaches `moduleInspector.table` and never reaches a single one of its
     // rows. Most handles a driver wants are delegates.
-    void forEachItem(const std::function<void(QQuickItem*)>& visit) const;
+    void forEachItem(const std::function<void(QQuickItem*)>& visit,
+                     Scope scope = Scope::Views) const;
     // The item with this objectName in any of those scenes, or nullptr.
-    QQuickItem* find(const QString& objectName) const;
+    QQuickItem* find(const QString& objectName, Scope scope = Scope::Views) const;
     // Every named item in every scene, for when a lookup failed.
     void dumpNames(const QString& why);
     QQuickWidget* surfaceOf(QQuickItem* item) const;
@@ -91,7 +102,8 @@ protected:
     // Spin the event loop until `item` exists or the deadline passes. Delegate
     // creation is asynchronous -- the rows of a view that just became visible
     // do not exist in the same tick.
-    QQuickItem* waitFor(const QString& objectName, int timeoutMs);
+    QQuickItem* waitFor(const QString& objectName, int timeoutMs,
+                        Scope scope = Scope::Views);
     // Turn the event loop for `ms`, so what just happened is on screen long
     // enough to be seen -- and so the work it queued actually runs.
     void settle(int ms);

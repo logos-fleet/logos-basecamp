@@ -61,7 +61,7 @@ reason.
 
 ## Driving is a per-run choice
 
-The Shell knows how to drive itself through five acceptance passes, and it runs
+The Shell knows how to drive itself through six acceptance passes, and it runs
 **none of them** unless the launch asks:
 
 ```
@@ -71,6 +71,8 @@ The Shell knows how to drive itself through five acceptance passes, and it runs
                     app's OWN handles are on screen
 --drive packages    open the Package Manager section and report what the page
                     says (#145)
+--drive keyboard    open the app's own new-conversation field and report whether
+                    the on-screen keyboard reaches it (#152)
 --drive web-apps    open a `web` app, check its page is inset to the workspace,
                     and LEAVE it again (#110)
 --drive modules     the Modules tab: the rows, their install type, their stats,
@@ -323,6 +325,91 @@ acquired with `acquireModel()`. `ui-host` does that scan on the desktop;
 other half. Without it chat_ui renders with three empty lists and nothing says
 why. view_counter never needed it: it has no models.
 
+## Typing into the app
+
+An app's fields have to raise a keyboard, and on an iPad none of chat_ui's did
+(logos-workspace#152): the field took the caret and nothing came up. The two
+focus notions an embedded QML scene has are why.
+
+A `QQuickWidget` renders into an **offscreen** `QQuickWindow`. That scene has
+its own focus object — the `TextArea` with `activeFocus` and a blinking cursor
+— while the platform input context is only ever told about
+`QGuiApplication::focusObject()`, which for a widget window is its focus
+**widget**. `QQuickWidget` bridges the two, answering `Qt::ImEnabled` and every
+other input-method query out of its scene, so the chain works as soon as the
+widget holds the window's focus. Nothing on iOS ever gives it that from a
+touch:
+
+* `QIOSIntegration` reports `SetFocusOnTouchRelease = true`, so
+  `giveFocusAccordingToFocusPolicy` defers on `TouchBegin` and waits for the
+  release;
+* `QApplication::notify` only applies that policy on touch **begin** — there is
+  no `TouchEnd` case — so the release never comes;
+* and the synthesised mouse press that would otherwise have carried the click
+  focus never happens, because `QQuickWidget` sets `WA_AcceptTouchEvents` and
+  accepts the touch itself.
+
+`QInputMethod::show()`, which `QQuickTextInput` calls on focus-in, is documented
+as a no-op on iOS ("keyboard controlled fully by platform based on focus"), so
+there is no second route. `QIOSInputContext::update()` reads
+`inputMethodAccepted()` off the focus object, finds a widget that wants no
+keyboard, and resigns its text responder.
+
+`QuickWidgetKeyboardFocus` restores the missing half. It is installed on the
+**application** in `main.cpp`, before any scene exists, and watches every
+`QQuickWidget` in the process — including the one an app is mounted into long
+after startup, which is why it is not handed a list of surfaces. Whenever a
+scene focuses something that answers `Qt::ImEnabled`, its widget takes the
+window's focus. It follows the SCENE's focus change rather than the tap on
+purpose: chat_ui's New DM dialog focuses its address field from `onOpened`,
+with no tap on the field at all.
+
+`ShellKeyboardDriver` is the `--drive keyboard` pass. It asks the question from
+inside the app, because there is no way to ask it from outside — Xcode 27 removed `SimulatorKit`, so `idb ui tap`
+refuses HID on a modern simulator and `simctl` has no input verb. It walks the
+operator's path (the app's "+", New DM, the address field) and prints the three
+facts the platform reads, in order:
+
+```
+[shell] keyboard: 'newDmMenuItem' opened the dialog holding 'convAddressField'
+[shell] drive: press 'convAddressField' at (362, 560) in 723x1116
+[shell] keyboard: 'convAddressField' activeFocus=true
+[shell] keyboard: app focus object QQuickWidget(-) over scene ChatView.qml, focusing LogosTextArea(convAddressField), accepts input method: yes
+[shell] keyboard: QInputMethod isVisible=true, panel 820x69 of a 820x1180 screen after 799 ms
+[shell] keyboard: that is a shortcut bar, not a keyboard -- this device has a
+        hardware keyboard connected, so iOS draws no panel. The input method is
+        still ON the field
+[shell] KEYBOARD REACHES THE FIELD
+```
+
+Those three also settle what #152 asks to rule out first, and the run above is
+the answer for a simulator: 69 points of panel on a 1180-point screen is the
+**shortcut bar** iOS draws instead of a keyboard while a hardware keyboard is
+connected, which the Simulator does by default. That is a setting, not a
+defect — and reaching it at all is the fix, because the same iPad printed this
+before:
+
+```
+[shell] keyboard: 'convAddressField' activeFocus=true
+[shell] keyboard: app focus object QQuickWidget(-), accepts input method: no
+[shell] keyboard: QInputMethod isVisible=false, panel 0x0 after 3001 ms
+[shell] WRONG: the caret is in 'convAddressField' and the object the input
+        context is handed is QQuickWidget(-), which wants no keyboard --
+        nothing the user does can raise one
+```
+
+The menu entries and the dialog's field are inside `Popup`s, which QtQuick
+parents to the scene's `Overlay` beside the view's root object rather than under
+it. `ShellSceneDriver`'s lookups therefore take a `Scope`: every existing driver
+keeps the narrow walk, and only one that has to reach into a menu asks for the
+wider one.
+
+The rule is stated without a phone in
+[`tests/quick_widget_keyboard_focus_test.cpp`](../../tests/quick_widget_keyboard_focus_test.cpp),
+which sets up the state an iOS tap leaves behind — an item with `activeFocus`
+inside a surface that is not the window's focus widget — and asserts the focus
+widget and that the object handed to the input context answers `Qt::ImEnabled`.
+
 ## The Settings page at a phone's width
 
 The Shell's Settings page used to be the desktop's at any size: a 200-px
@@ -412,12 +499,19 @@ src/WebAppSurface.*         the placeholder a `web` app is DOCKED as, so the
 src/DriveScript.*           which acceptance passes THIS RUN asked for, off
                             the command line. Nothing, unless it said so (#155)
 src/ShellSceneDriver.*      finding, settling and pressing in the Shell's
-                            rendered scenes -- shared by the four drivers below
+                            rendered scenes -- shared by the drivers below
 src/ShellModulesDriver.*    the acceptance pass: open the tab, check the rows,
                             their install type and their stats, press the
                             toggle twice
 src/ShellAppDriver.*        the other half: press the sidebar tile and check
                             the app's OWN handles are on screen
+src/QuickWidgetKeyboardFocus.*
+                            the fix: a scene that focuses a text item gives its
+                            QQuickWidget the window's focus, which is the only
+                            focus the platform input context is told about (#152)
+src/ShellKeyboardDriver.*   and the pass that asks it on the device: the app's
+                            "+", New DM, the field -- then the three facts the
+                            platform reads, in order
 src/ShellWebAppDriver.*     the same for a `web` app, plus the step that check
                             could never make: LEAVE it again. The page is inset
                             to the workspace, navigating away puts the Shell

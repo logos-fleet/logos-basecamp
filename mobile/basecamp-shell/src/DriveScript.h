@@ -17,12 +17,16 @@ namespace basecamp::shell {
 //   Apps      then the app, opened from the sidebar -- before the Modules tab,
 //             which unloads and reloads a core module underneath it
 //   Packages  the Shell's own chrome, while the Shell still has the window
+//   Keyboard  the app's input fields -- after the section pass, because it is
+//             the one that leaves a platform panel over the Shell and the one
+//             that puts itself back where it started
 //   WebApps   the step that hands the window to a platform page
 //   Modules   last: it is the one that changes what is loaded
 enum class DrivePass {
     Chat,
     Apps,
     Packages,
+    Keyboard,
     WebApps,
     Modules,
 };
