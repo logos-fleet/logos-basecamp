@@ -93,6 +93,17 @@
     # eth_rpc through the container. Its whole dependency tree is followed onto
     # this flake's copies so the lock carries one of each rather than six
     # module-builder subtrees; only their published `.lidl` contracts are read.
+    #
+    # ITS LOCK IS WHAT uniswap COMPILES AGAINST, which is why #148 had to move it.
+    # `eth_rpc_module.call` grew a third argument (`deadline_ms`), uniswap's glue
+    # passes it, and the typed client uniswap compiles against is generated from
+    # the contract of THIS input -- so a lock one revision behind failed the
+    # Bundled set's cross build with `this method takes 2 arguments but 3
+    # arguments were supplied`, pointing at uniswap's source and caused by the
+    # eth_rpc pin beside it. Invisible through the workspace flake, which follows
+    # its own newer eth_rpc onto this one; visible the moment this flake is
+    # evaluated on its own lock, which is what `ws test logos-basecamp` and CI do.
+    # Two members of one catalog have to be pinned as a PAIR.
     logos-evm-eth-rpc-module.url = "github:logos-co/logos-evm-eth-rpc-module";
     logos-evm-eth-rpc-module.inputs.logos-module-builder.follows = "logos-module-builder";
     # `uniswap_module` is the SECOND member of the catalog the wallet reaches
