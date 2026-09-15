@@ -1334,6 +1334,13 @@
                     type = "core";
                     category = "wallet";
                     description = "Keystore: scrypt vaults, secp256k1 signing, as a `web` variant";
+                    # ITS OWN metadata.json answer, not a list written here
+                    # (#169). A Store shell decides whether it may offer this row
+                    # by walking these names against its Platform floor, so a
+                    # package published with an empty list is one the floor
+                    # cannot judge -- and the judgement is the whole point.
+                    dependencies =
+                      (logos-evm-keystore-module.config or { }).dependencies or [ ];
                   };
                 };
             prebuilt.desktop_only = bundledSetFixture.drvs.desktop_only;
