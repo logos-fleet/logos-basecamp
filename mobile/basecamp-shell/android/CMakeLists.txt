@@ -53,6 +53,7 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/main.cpp
     ${LOGOS_HOST_SOURCES}
     ${SMOKE_SRC}/ViewModuleRunner.cpp ${SMOKE_SRC}/ViewModuleRunner.h
+    ${SHELL_SRC}/DriveScript.cpp ${SHELL_SRC}/DriveScript.h
     ${SHELL_SRC}/ShellModuleRows.cpp ${SHELL_SRC}/ShellModuleRows.h
     ${SHELL_SRC}/InstalledPackages.cpp ${SHELL_SRC}/InstalledPackages.h
     ${SHELL_SRC}/ShellModulesBackend.cpp ${SHELL_SRC}/ShellModulesBackend.h
@@ -61,6 +62,7 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/QuickWidgetKeyboardFocus.cpp ${SHELL_SRC}/QuickWidgetKeyboardFocus.h
     ${SHELL_SRC}/ShellSceneDriver.cpp ${SHELL_SRC}/ShellSceneDriver.h
     ${SHELL_SRC}/ShellModulesDriver.cpp ${SHELL_SRC}/ShellModulesDriver.h
+    ${SHELL_SRC}/ShellPackageSectionDriver.cpp ${SHELL_SRC}/ShellPackageSectionDriver.h
     ${SHELL_SRC}/ShellAppDriver.cpp ${SHELL_SRC}/ShellAppDriver.h
     ${SHELL_SRC}/ShellKeyboardDriver.cpp ${SHELL_SRC}/ShellKeyboardDriver.h
     ${SHELL_SRC}/ShellWebAppDriver.cpp ${SHELL_SRC}/ShellWebAppDriver.h

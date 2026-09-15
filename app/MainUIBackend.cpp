@@ -123,6 +123,17 @@ MainUIBackend::MainUIBackend(LogosAPI* logosAPI, ICoreRuntime* core, QObject* pa
             this,              &MainUIBackend::installFailureNoticeRequested);
     connect(m_uiPluginManager, &UIPluginManager::missingDepsPopupRequested,
             this,              &MainUIBackend::missingDepsPopupRequested);
+    // The two edges on which a load ends with NO WIDGET. Both already had
+    // consumers -- a notice, a popup -- and neither reached the shell, which
+    // has a page that does nothing but wait for package_manager_ui's widget
+    // (logos-workspace#145). The lambda is only here to drop `blockers`: the
+    // shell wants the summary, which is the part meant to be shown.
+    connect(m_uiPluginManager, &UIPluginManager::missingDepsPopupRequested,
+            this, [this](const QString& name, const QVariantList&, const QString& summary) {
+                emit uiModuleUnavailable(name, summary);
+            });
+    connect(m_uiPluginManager, &UIPluginManager::pluginLoadFailedNotice,
+            this,              &MainUIBackend::uiModuleUnavailable);
     connect(m_uiPluginManager, &UIPluginManager::unloadCascadeConfirmationRequested,
             this,              &MainUIBackend::unloadCascadeConfirmationRequested);
     connect(m_uiPluginManager, &UIPluginManager::pluginWindowRequested,

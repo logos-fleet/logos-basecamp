@@ -10,6 +10,7 @@
 class QQuickWidget;
 class WorkspaceArea;
 class ShortcutBridge;
+class PackageManagerPane;
 
 // MainContainer — the UI shell. Holds exactly one host-side pointer, an
 // IShellHost*: no LogosAPI*, no QtLogosCore*, no MainUIBackend*. QML reaches
@@ -40,6 +41,11 @@ public:
     // Presentation seam. Branches on the widget pointer because this class
     // decided where each widget was mounted.
     void onPresentAppRequested(QWidget* widget) override;
+    // Only package_manager_ui is acted on: it is the one module this class
+    // mounts into a page of its own, so it is the one whose absence leaves a
+    // page with nothing on it. Every other UI module goes into a dock, and a
+    // dock that never appears is not a screen the user is stuck on.
+    void onUiModuleUnavailable(const QString& name, const QString& reason) override;
 
 protected:
     // Keeps the overlay sized to the full MainContainer: it floats over both
@@ -77,6 +83,10 @@ private:
     // forever, so the Package Manager section could never reload. Same guard the
     // host applies to its own widget maps.
     QPointer<QWidget> m_pmuiWidget;
+    // The page that sits in slot 2 while m_pmuiWidget is null. QPointer for the
+    // same reason: the stack owns it and it is deleteLater()'d as soon as the
+    // real widget takes its place.
+    QPointer<PackageManagerPane> m_pmuiPane;
     bool m_suppressNextNavToApps = false;
 
     // Content views (QML for Dashboard, Modules, PackageManager, Settings)

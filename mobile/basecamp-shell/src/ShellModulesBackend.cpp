@@ -13,6 +13,8 @@
 
 #include <QFileInfo>
 
+#include <utility>
+
 namespace {
 
 // The caller name this shell introspects modules under. Not "basecamp": the
@@ -275,13 +277,10 @@ QString ShellModulesBackend::buildVersion() const
 
 bool ShellModulesBackend::isViewModule(const QString& name) const
 {
-    for (const QVariant& row : m_core->bundledSet()) {
-        const QVariantMap entry = row.toMap();
-        if (entry.value(QStringLiteral("name")).toString() == name)
-            return entry.value(QStringLiteral("type")).toString()
-                       == basecamp::shell::kViewModuleType;
-    }
-    return false;
+    // The SAME rule the Modules tab's rows carry as `hostLoaded`. It used to be
+    // spelled out again here, which is how the tab's toggle and this refusal
+    // came to disagree about a `web` app (#149).
+    return basecamp::shell::hostLoadedModule(facts(), name);
 }
 
 basecamp::shell::ModuleFacts ShellModulesBackend::facts() const
@@ -328,6 +327,18 @@ QVariantList ShellModulesBackend::snapshot() const
 void ShellModulesBackend::rebuildRows()
 {
     m_coreModulesModel->replaceRows(snapshot());
+    // AND THE SIDEBAR, when the same facts moved its tiles. A tile carries
+    // whether its app is running, and that is a function of the core's loaded
+    // set -- so an app unloaded from the Modules tab left a tile still drawn as
+    // up until something else happened to announce one (#149).
+    //
+    // Compared rather than announced: this runs on every stats tick, and a
+    // sidebar told to rebuild every two seconds is a sidebar that flickers.
+    QVariantList tiles = basecamp::shell::launcherApps(facts());
+    if (tiles != m_announcedApps) {
+        m_announcedApps = std::move(tiles);
+        emit launcherAppsChanged();
+    }
 }
 
 QStringList ShellModulesBackend::bundledSetNames() const
@@ -472,12 +483,17 @@ void ShellModulesBackend::refreshCoreModules()
 void ShellModulesBackend::loadCoreModule(const QString& moduleName)
 {
     if (isViewModule(moduleName)) {
-        // Not a refusal to be fixed: a view module's image is a Qt-backed
-        // framework this process instantiates itself, so the core has no
-        // handle on it to load (ADR 0006). It is in the set and in this list,
-        // and its state is the host's.
-        emit log(QStringLiteral("%1 is a view module: host-loaded, not the core's to load")
-                     .arg(moduleName));
+        // A view module's image is a Qt-backed framework this process
+        // instantiates itself, so the core has no handle on it to load (ADR
+        // 0006) -- and this used to stop there, at a log line, leaving the row
+        // an enabled button that could not move the state it was drawn from.
+        //
+        // The HOST can. The row reads as loaded exactly when the host has the
+        // framework mounted, so mounting it is what its Load button means; the
+        // sidebar tile's press is the same call (#149).
+        emit log(QStringLiteral("%1 is a view module: mounting it is the host's, not the "
+                                "core's, to do").arg(moduleName));
+        loadUiModule(moduleName);
         return;
     }
     emit log(QStringLiteral("load %1").arg(moduleName));
@@ -488,8 +504,9 @@ void ShellModulesBackend::loadCoreModule(const QString& moduleName)
 void ShellModulesBackend::unloadCoreModule(const QString& moduleName)
 {
     if (isViewModule(moduleName)) {
-        emit log(QStringLiteral("%1 is a view module: host-loaded, not the core's to unload")
-                     .arg(moduleName));
+        emit log(QStringLiteral("%1 is a view module: unmounting it is the host's, not "
+                                "the core's, to do").arg(moduleName));
+        unloadUiModule(moduleName);
         return;
     }
     emit log(QStringLiteral("unload %1").arg(moduleName));

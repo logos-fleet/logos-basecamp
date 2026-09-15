@@ -97,7 +97,33 @@ QStringList downloadedModules(const ModuleFacts& facts);
 // the manifest's order, then the Downloaded modules. The manifest's order is
 // the closure's LOAD order, so a Downloaded row spliced into it by name would
 // read as part of that closure.
+//
+// Each row carries `hostLoaded`: see hostLoadedModule below, the fact its
+// Load/Unload button is a function of.
 QVariantList moduleRows(const ModuleFacts& facts);
+
+// WHO BRINGS THIS MODULE UP -- the host, in this process, or the core.
+//
+// It reads like `type == "ui_qml"` and it is NOT that, which is the whole of
+// logos-workspace#149. A row's type says what a module IS; this says who owns
+// its lifecycle, and for a `web` app the two answers differ:
+//
+//                              type      hostLoaded   Load/Unload reaches
+//   a Bundled `ui_qml` member   ui_qml    true         the host (ADR 0006:
+//                                                      the framework is
+//                                                      instantiated here)
+//   a `web` app, shipped or     ui_qml    false        the CORE -- its page
+//   Downloaded                                         lives in the Web
+//                                                      container, which is a
+//                                                      core container
+//   anything else               core      false        the core
+//
+// Reading the type instead cost a `web` app its Unload: the Modules tab's
+// toggle, the acceptance driver and the backend's own refusal all asked "is
+// this a view module", and only the last of the three was asking it of the
+// Bundled-set manifest. So the button called itself a no-op by design on a
+// module the core would have unloaded perfectly well.
+bool hostLoadedModule(const ModuleFacts& facts, const QString& name);
 
 // The sidebar's tiles, in UIPluginManager::buildAppRow's shape: the Bundled
 // set's `ui_qml` members, then every module whose UI is a page in the Web

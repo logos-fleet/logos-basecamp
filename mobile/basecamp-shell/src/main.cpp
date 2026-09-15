@@ -20,6 +20,7 @@
 #include "appmanager/ConsentScript.h"
 #include "appmanager/ModuleCallScript.h"
 #include "appmanager/ModuleDirectories.h"
+#include "DriveScript.h"
 #include "IShellHost.h"
 #include "IShellView.h"
 #include "NetworkSmokeRunner.h"
@@ -31,6 +32,7 @@
 #include "ShellConsentDriver.h"
 #include "ShellKeyboardDriver.h"
 #include "ShellModulesDriver.h"
+#include "ShellPackageSectionDriver.h"
 #include "ShellWebAppDriver.h"
 #include "ShellSections.h"
 #include "SmokeRunner.h"
@@ -245,15 +247,40 @@ int main(int argc, char* argv[])
     window.showFullScreen();
     console(QStringLiteral("COLD START: Shell shown at %1 ms").arg(sinceMain.elapsed()));
 
-    // ── the two things the Shell is driven through, in the order a user
-    // meets them ─────────────────────────────────────────────────────────
+    // ── WHAT THIS RUN ASKED THE SHELL TO DRIVE ────────────────────────────
+    //
+    // Nothing, unless it said so (#155). A plain launch is a plain app, on a
+    // phone as on the desktop: the passes below exist, print exactly what they
+    // have always printed, and run only when `--drive` names them. DriveScript.h
+    // holds the account of why driving stopped being automatic, and of why
+    // `--repository`/`--install`, `--call` and `--consent` are not passes.
+    using basecamp::shell::DrivePass;
+    const basecamp::shell::DriveScript drive =
+        basecamp::shell::DriveScript::fromArguments(app.arguments());
+    const QStringList wantedPasses = drive.passes();
+    for (const QString& refusal : drive.refusals())
+        console(QStringLiteral("drive: %1").arg(refusal));
+    console(wantedPasses.isEmpty()
+                ? QStringLiteral("drive: nothing -- a plain launch. --drive %1 (or all)")
+                      .arg(basecamp::shell::DriveScript::knownPasses().join(QLatin1Char(',')))
+                : QStringLiteral("drive: %1").arg(wantedPasses.join(QStringLiteral(", "))));
+
+    // ── the passes, constructed whether or not they run ───────────────────
+    //
+    // Constructing one costs a QObject; what a pass costs is running it. They
+    // are built here so the console wiring is in one place and so a pass that
+    // has to LISTEN from startup (the consent one) can.
+    //
+    // The order below is the order they run in when a run asks for several,
+    // and it is a set of decisions about what leaves state behind for what --
+    // DrivePass records the same order so `drive:` above reads as the run.
     //
     // Chat FIRST, and that ordering is the measurement: "cold start to Chat
     // usable" is how long the user waits before they can type, and putting
     // the Modules tab's own settle in front of it would report that delay as
     // part of the chat bring-up.
     //
-    // Both run off the event loop rather than before it: a QML item has no
+    // They run off the event loop rather than before it: a QML item has no
     // geometry until the first frame, and the chat bring-up spends its wait
     // in nested event loops, so the Shell stays on screen and painting
     // throughout.
@@ -275,10 +302,29 @@ int main(int argc, char* argv[])
     auto* apps = new ShellAppDriver(&host, shellWidget, &app);
     QObject::connect(apps, &ShellAppDriver::log, &console);
 
-    // AND THE KEYBOARD, for the app's own input fields. Straight after the app
-    // driver, because it needs the app on screen and it must not run behind the
-    // web-app driver: opening a page hands the workspace to a platform view and
-    // the question here is about the Shell's own focus chain.
+    // AND THE PACKAGE MANAGER SECTION, which is not an app at all: it is the
+    // one page of the Shell that waits for a widget, and on a Store shell that
+    // widget never comes. #145 left it on "Loading Package Manager…" for the
+    // session, and nothing that ran here could see it.
+    auto* packages = new ShellPackageSectionDriver(shellWidget, &app);
+    QObject::connect(packages, &ShellPackageSectionDriver::log, &console);
+
+    // AND THE KEYBOARD, for the app's own input fields (#152). LAST of the
+    // passes that press the Shell's own scene, and still ahead of the web app.
+    // Both ends of that are about what a pass leaves behind:
+    //
+    //   it goes AFTER the package-manager section because it is the only pass
+    //   that leaves a PLATFORM panel over the Shell -- the keyboard, or the
+    //   shortcut bar that stands in for one -- and it is also the only one that
+    //   restores its own starting state, switching back to the workspace and
+    //   finding the app's "+" again, so nothing is owed to it by the pass in
+    //   front. Run the other way round, the section pass would be pressing a
+    //   sidebar it does not fully own and holding a page for a screenshot with
+    //   a keyboard across the bottom of it;
+    //
+    //   it goes BEFORE the web app for the reason every scene pass does:
+    //   opening a page hands the workspace to a platform view, and the question
+    //   here is about the Shell's own focus chain.
     auto* keyboard = new ShellKeyboardDriver(&host, shellWidget, &app);
     QObject::connect(keyboard, &ShellKeyboardDriver::log, &console);
 
@@ -334,12 +380,14 @@ int main(int argc, char* argv[])
                                      .arg(name).arg(elapsedMs));
                      });
 
-    // Where the run LEAVES the user: on the app, not on the Settings page the
-    // last check happened to end on. It is also what makes a screen recording
-    // of the run worth anything -- the Modules tab's pass is three console
-    // lines, and the app being on screen is the thing you would want to see.
-    auto finishOnTheApp = [&host, apps, catalog]() {
-        if (apps->hasWork() || catalog->hasWork())
+    // Where a DRIVEN run leaves the user: on the app, not on the Settings page
+    // the last check happened to end on. It is also what makes a screen
+    // recording of the run worth anything -- the Modules tab's pass is three
+    // console lines, and the app being on screen is the thing you would want to
+    // see. A run that drove no app moves nobody: an undriven Shell is already
+    // where the user put it.
+    auto finishOnTheApp = [&host, &drive, apps, catalog]() {
+        if ((drive.wants(DrivePass::Apps) && apps->hasWork()) || catalog->hasWork())
             host.setCurrentSectionIndex(ShellSection::Workspace);
         // AND THE LAST THING OF ALL, after every driver: opening a catalog
         // row's links hands a URL to the platform, which puts a browser over
@@ -349,57 +397,97 @@ int main(int argc, char* argv[])
         catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app, [network, driver, apps, keyboard, webApps, catalog,
-                                 calls, consent, finishOnTheApp]() {
-        // The catalog FIRST when there is one: the module it installs is what
-        // the Modules tab and the sidebar then have to account for, and a run
-        // pointed at a catalog is a developer's rather than a cold-start
-        // measurement.
-        if (catalog->hasWork()) {
-            catalog->configure();
-            catalog->run();
-        }
-        // AND THE CALLS AFTER IT, because the module a call names may be the one
-        // the catalog just installed -- and BEFORE the chat bring-up, which
-        // spends a minute and a half waiting for a group to commit and would
-        // put that between a device and its answer.
-        calls->run();
-        // AND THE CONSENT ANSWERS AFTER THEM. The pair being decided is usually
-        // the module the catalog just installed, and its first call is refused
-        // while the page is still coming up -- so this waits on a page that has
-        // already started rather than on one that has not.
-        consent->run();
-        if (network->hasWork()) {
-            const bool ok = network->run();
-            console(ok ? QStringLiteral("networking modules: PASS")
-                       : QStringLiteral("networking modules: FAIL"));
-            // The chat bring-up has just spent seconds turning the event
-            // loop, so the scene has had far more than the one frame the
-            // driver needs.
-            // The CHAT half is what the app has to show, not the run's overall
-            // verdict: the libp2p leg can fail on its own (an unanswered
-            // local-network prompt on a device) with the group exchange
-            // perfectly fine.
+    // The passes that press things in the Shell's own rendered scene, in the
+    // order above. Each one runs only if this run named it.
+    auto scenePasses = [&drive, network, driver, apps, webApps, packages, keyboard,
+                        finishOnTheApp]() {
+        // The CHAT half is what the app has to show, not the run's overall
+        // verdict: the libp2p leg can fail on its own (an unanswered
+        // local-network prompt on a device) with the group exchange perfectly
+        // fine. A run that did not drive chat made no conversation, and says so
+        // by passing false.
+        if (drive.wants(DrivePass::Apps))
             apps->run(network->madeConversation());
-            if (keyboard->hasWork()) keyboard->run();
-            if (webApps->hasWork()) webApps->run();
+        // BEFORE the web app, which is the step that hands the window to a
+        // platform page: the Package Manager section is the Shell's own
+        // chrome, and it is only the Shell's to show while the Shell still
+        // has the window.
+        if (drive.wants(DrivePass::Packages))
+            packages->run();
+        // AND THE KEYBOARD, last of the scene passes and still ahead of the web
+        // app: it is the one that leaves a platform panel over the Shell, and
+        // the one that puts itself back where it started (#152).
+        if (drive.wants(DrivePass::Keyboard) && keyboard->hasWork())
+            keyboard->run();
+        if (drive.wants(DrivePass::WebApps) && webApps->hasWork())
+            webApps->run();
+        if (drive.wants(DrivePass::Modules))
             driver->run();
-            finishOnTheApp();
-        } else {
-            console(QStringLiteral("networking modules: none in this Bundled set"));
-            // Nothing ran ahead of it, so the tab needs its own settle: a QML
-            // item has no geometry until the scene has painted, and a press
-            // at the centre of a zero-sized button lands on nothing.
-            QTimer::singleShot(2500, driver, [driver, apps, keyboard, webApps,
-                                              finishOnTheApp]() {
-                apps->run();
-                if (keyboard->hasWork()) keyboard->run();
-                if (webApps->hasWork()) webApps->run();
-                driver->run();
+        finishOnTheApp();
+    };
+
+    const bool drivesAScene = drive.wants(DrivePass::Apps) || drive.wants(DrivePass::Packages)
+                              || drive.wants(DrivePass::Keyboard)
+                              || drive.wants(DrivePass::WebApps)
+                              || drive.wants(DrivePass::Modules);
+    // Nothing at all to do is the DEFAULT case, and it costs no timer: the app
+    // comes up and waits for whoever is holding the phone.
+    const bool anythingToDo = !wantedPasses.isEmpty() || catalog->hasWork()
+                              || calls->hasWork() || consent->hasWork();
+
+    if (anythingToDo) {
+        QTimer::singleShot(0, &app, [&drive, network, driver, catalog, calls, consent,
+                                     drivesAScene, scenePasses, finishOnTheApp]() {
+            // The catalog FIRST when there is one: the module it installs is
+            // what the Modules tab and the sidebar then have to account for,
+            // and a run pointed at a catalog is a developer's rather than a
+            // cold-start measurement.
+            if (catalog->hasWork()) {
+                catalog->configure();
+                catalog->run();
+            }
+            // AND THE CALLS AFTER IT, because the module a call names may be the
+            // one the catalog just installed -- and BEFORE the chat bring-up,
+            // which spends a minute and a half waiting for a group to commit and
+            // would put that between a device and its answer.
+            calls->run();
+            // AND THE CONSENT ANSWERS AFTER THEM. The pair being decided is
+            // usually the module the catalog just installed, and its first call
+            // is refused while the page is still coming up -- so this waits on a
+            // page that has already started rather than on one that has not.
+            consent->run();
+
+            // Whether anything has already turned the event loop for long
+            // enough that the scene has painted.
+            bool settled = false;
+            if (drive.wants(DrivePass::Chat)) {
+                if (network->hasWork()) {
+                    const bool ok = network->run();
+                    console(ok ? QStringLiteral("networking modules: PASS")
+                               : QStringLiteral("networking modules: FAIL"));
+                    // The chat bring-up has just spent seconds turning the event
+                    // loop, so the scene has had far more than the one frame the
+                    // scene passes need.
+                    settled = true;
+                } else {
+                    console(QStringLiteral("networking modules: none in this Bundled set"));
+                }
+            }
+
+            if (!drivesAScene) {
                 finishOnTheApp();
-            });
-        }
-    });
+                return;
+            }
+            if (settled) {
+                scenePasses();
+            } else {
+                // Nothing ran ahead of them, so the scene needs its own settle:
+                // a QML item has no geometry until the scene has painted, and a
+                // press at the centre of a zero-sized button lands on nothing.
+                QTimer::singleShot(2500, driver, scenePasses);
+            }
+        });
+    }
 
     auto shutdown = [&]() {
         runner.stop();

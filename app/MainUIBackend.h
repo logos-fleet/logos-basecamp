@@ -349,6 +349,12 @@ signals:
     void missingDepsPopupRequested(const QString& name,
                                    const QVariantList& blockers,
                                    const QString& summary);
+
+    // A UI module the shell asked for will not produce a widget. `reason` is
+    // meant to be SHOWN, so it carries the plugin loader's error or the
+    // dependency summary rather than a code. Forwarded to the shell by
+    // ShellHostAdapter as IShellObserver::onUiModuleUnavailable.
+    void uiModuleUnavailable(const QString& name, const QString& reason);
     void unloadCascadeConfirmationRequested(const QString& name, const QStringList& loadedDependents);
     // Single uninstall-confirmation trigger for all four initiators — pure
     // re-emit of PackageCoordinator::uninstallPlanRequested, whose comment

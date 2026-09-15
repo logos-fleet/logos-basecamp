@@ -101,7 +101,10 @@ QVariantMap discoveredRow(const ModuleFacts& facts, const QString& name, bool em
     row[QStringLiteral("installType")] =
         embedded ? QStringLiteral("embedded") : QStringLiteral("downloaded");
     // Unlike a Bundled VIEW module, this one is the CORE's whatever its type:
-    // its page lives in the Web container, which is a core container.
+    // its page lives in the Web container, which is a core container. So its
+    // Load/Unload button is the core's too -- said here rather than inferred
+    // from the type above, which says only that the module HAS a UI (#149).
+    row[QStringLiteral("hostLoaded")] = false;
     row[QStringLiteral("isLoaded")] = facts.loaded.contains(name);
     // It is in this list BECAUSE the core discovered it, so there is nothing
     // here that a missing dependency could mean.
@@ -136,6 +139,9 @@ QVariantList moduleRows(const ModuleFacts& facts)
         // shows what is running.
         row[QStringLiteral("isLoaded")] =
             isView ? facts.mountedViews.contains(name) : facts.loaded.contains(name);
+        // ...and it is the HOST that put it there, which is the one thing its
+        // Load/Unload button has to know (#149).
+        row[QStringLiteral("hostLoaded")] = isView;
         // A Bundled member the core never registered has something wrong with
         // its image -- the closure was resolved and verified at build time, so
         // there is no missing dependency to install. Saying so in the one
@@ -156,6 +162,19 @@ QVariantList moduleRows(const ModuleFacts& facts)
         rows.append(discoveredRow(facts, name, /*embedded=*/false));
 
     return rows;
+}
+
+bool hostLoadedModule(const ModuleFacts& facts, const QString& name)
+{
+    // The Bundled-set manifest and nothing else. A module the core discovered
+    // is the core's whether or not it draws a user interface, so there is no
+    // second place this could be true.
+    for (const QVariant& value : facts.bundledSet) {
+        const QVariantMap entry = value.toMap();
+        if (entry.value(QStringLiteral("name")).toString() == name)
+            return entry.value(QStringLiteral("type")).toString() == kViewModuleType;
+    }
+    return false;
 }
 
 QVariantList launcherApps(const ModuleFacts& facts)

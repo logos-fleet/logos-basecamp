@@ -84,5 +84,16 @@ struct ModuleInstanceRoles {
         // measurement that was never made (#86). False makes the cells show
         // the same em dash an unloaded row gets.
         StatsMeasuredRole,
+        // WHO BRINGS THIS MODULE UP. True only for a module the HOST
+        // instantiates in its own process -- a Bundled `ui_qml` member on a
+        // Store shell (ADR 0006) -- and the core has no handle on one of those
+        // to load or unload. NOT the same question as `type`: a `web` app's row
+        // is a `ui_qml` row whose module the CORE owns, because its page lives
+        // in the Web container (logos-workspace#149).
+        //
+        // False wherever nothing sets it, which is every desktop row: there the
+        // Modules tab lists core modules and the Apps tab lists plugins, and
+        // neither has a row whose owner is in doubt.
+        IsHostLoadedRole,
     };
 };

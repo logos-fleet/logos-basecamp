@@ -42,6 +42,8 @@ set(SOURCES
     MainShellView.cpp
     MainContainer.h
     MainContainer.cpp
+    PackageManagerPane.h
+    PackageManagerPane.cpp
     WorkspaceArea.h
     WorkspaceArea.cpp
     ShellWindowFloor.h

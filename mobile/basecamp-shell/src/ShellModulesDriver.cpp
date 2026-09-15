@@ -2,6 +2,7 @@
 
 #include "BundledSetShellHost.h"
 #include "ShellSections.h"
+#include "webview/MobileWebContainerBackend.h"
 
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -13,6 +14,51 @@ ShellModulesDriver::ShellModulesDriver(BundledSetShellHost* host, QWidget* shell
     : ShellSceneDriver(shellWidget, parent)
     , m_host(host)
 {
+}
+
+// WHAT AN UNLOADED `web` APP LEAVES BEHIND, checked between the two presses.
+//
+// The Modules tab's Unload is the core's, and for an app whose UI is a page it
+// has three consequences outside the core -- one in the container, one in the
+// Shell's own docks, one on the sidebar. The row going to "Not loaded" says
+// nothing about any of them, and the sidebar tile surviving an unload was half
+// of what #149 reported.
+void ShellModulesDriver::checkUnloadedWebApp(const QString& name)
+{
+    if (basecamp::web::MobileWebContainerBackend::instance()->hasView(name)) {
+        emit log(QStringLiteral("WRONG: %1 is unloaded and the container still has its "
+                                "page").arg(name));
+        return;
+    }
+    if (m_host->webSurface(name)) {
+        emit log(QStringLiteral("WRONG: %1 is unloaded and the Shell still holds a tab "
+                                "onto its page").arg(name));
+        return;
+    }
+    // AND THE TILE STAYS, which is not the same claim. The app is installed
+    // whether or not it is running, so the sidebar carries it and the press is
+    // what loads it (#123) -- but it must not go on claiming to be up.
+    QVariantMap tile;
+    for (const QVariant& value : m_host->backend()->launcherApps()) {
+        const QVariantMap candidate = value.toMap();
+        if (candidate.value(QStringLiteral("name")).toString() == name) {
+            tile = candidate;
+            break;
+        }
+    }
+    if (tile.isEmpty()) {
+        emit log(QStringLiteral("WRONG: unloading %1 took its tile off the sidebar -- the "
+                                "app is still installed and pressing it is what loads it")
+                     .arg(name));
+        return;
+    }
+    if (tile.value(QStringLiteral("isLoaded")).toBool()) {
+        emit log(QStringLiteral("WRONG: %1 is unloaded and its sidebar tile still reads "
+                                "as running").arg(name));
+        return;
+    }
+    emit log(QStringLiteral("drive modules: %1 unloaded -- no page, no tab, and its tile "
+                            "is on the sidebar and not claiming to be up").arg(name));
 }
 
 void ShellModulesDriver::run()
@@ -98,10 +144,17 @@ void ShellModulesDriver::run()
         QQuickItem* badge = find(QStringLiteral("moduleInspector.status.%1").arg(name));
         return badge ? badge->property("row").value<QObject*>() : nullptr;
     };
-    // A view module is mounted by the host rather than run by the core (ADR
-    // 0006), so its row says nothing about the Native container.
-    const auto isViewRow = [](QObject* row) {
-        return row && row->property("type").toString() == QLatin1String("ui_qml");
+    // WHOSE MODULE THIS ROW IS. A Bundled `ui_qml` member is mounted by the
+    // host rather than run by the core (ADR 0006), so its row says nothing
+    // about the Native container.
+    //
+    // OFF THE ROW'S OWN `hostLoaded`, not off its type, and that is #149: a
+    // `web` app's row is a `ui_qml` row whose module the CORE owns -- its page
+    // lives in the Web container -- so reading the type here skipped exactly
+    // the rows whose Unload the user was complaining about, and called the
+    // skip a design decision on the way past.
+    const auto isHostRow = [](QObject* row) {
+        return row && row->property("hostLoaded").toBool();
     };
     const auto isLoaded = [&modelRow](const QString& name) {
         QObject* row = modelRow(name);
@@ -160,18 +213,28 @@ void ShellModulesDriver::run()
     // And "at least one" was too weak for what #86 was actually about. Every
     // Bundled module is loaded into the host's own process, so all of them
     // reported the same zero; one row with a figure was enough to pass while
-    // the rest showed 0.0 MB. So each LOADED CORE row owes its own figure now.
-    // A view module is exempt: it is mounted by the host rather than run by the
-    // core (ADR 0006), and the core has no stats for something it never loaded.
+    // the rest showed 0.0 MB. So each LOADED BUNDLED row owes its own figure
+    // now.
+    //
+    // BUNDLED, which is narrower than "not the host's", and both exclusions
+    // are about a container that cannot account for the module. A host-mounted
+    // row is instantiated by the host rather than run by the core (ADR 0006).
+    // A `web` row's module runs in the Web container, whose page is the
+    // platform's process and not something the Native container measures -- so
+    // it renders the em dash it is supposed to, and demanding a figure of it
+    // fails a row that is behaving perfectly (seen on the iPad Air 13-inch
+    // sim, #149). What is left is exactly the set #86 was about: the Bare
+    // frameworks in the manifest, all of them in this process.
+    const QStringList bundled = backend->bundledSetNames();
     QStringList stats;
     QStringList missingFigure;
-    int loadedCoreRows = 0;
+    int loadedBundledRows = 0;
     for (const QString& name : rows) {
         QObject* row = modelRow(name);
         const bool loaded = row && row->property("isLoaded").toBool();
-        const bool owesAFigure = loaded && !isViewRow(row);
+        const bool owesAFigure = loaded && !isHostRow(row) && bundled.contains(name);
         if (owesAFigure)
-            ++loadedCoreRows;
+            ++loadedBundledRows;
 
         QQuickItem* cpu = find(QStringLiteral("moduleInspector.cpu.%1").arg(name));
         QQuickItem* memory = find(QStringLiteral("moduleInspector.memory.%1").arg(name));
@@ -216,19 +279,27 @@ void ShellModulesDriver::run()
                      .arg(missingFigure.join(QStringLiteral(", "))));
         return;
     }
-    emit log(loadedCoreRows > 0
-                 ? QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS (%1 loaded row(s), "
-                                  "each with a figure)").arg(loadedCoreRows)
+    emit log(loadedBundledRows > 0
+                 ? QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS (%1 loaded "
+                                  "Bundled row(s), each with a figure)").arg(loadedBundledRows)
                  : QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS "
-                                  "(no core module is loaded, so every row is an em dash)"));
+                                  "(no Bundled core module is loaded, so every row it "
+                                  "could measure is an em dash)"));
 
     // ── 3. every row's own Load/Unload button, twice ──
     //
     // EVERY row the CORE is in charge of, not just the first one with a usable
-    // toggle — and only those. A view module is mounted by the host rather than
-    // run by the core (ADR 0006), so its row says nothing about the Native
-    // container; it is skipped here for the same reason it is exempt from the
-    // stats check above.
+    // toggle — and only those. A row the HOST mounts is instantiated in this
+    // process rather than run by the core (ADR 0006), so it says nothing about
+    // the Native container; it is skipped here for the same reason it is exempt
+    // from the stats check above.
+    //
+    // WHICH NOW INCLUDES THE `web` APPS, and that is #149. They were skipped for
+    // as long as this asked for the row's TYPE: a `web` app's row is a `ui_qml`
+    // row, so the check that meant "the host mounts this one" caught every app
+    // whose UI is a page in the Web container -- which the core loads and
+    // unloads like any other module. The Unload nobody could get to work was
+    // also the Unload nothing had ever pressed.
     //
     // One row used to be enough, because the property under test was the
     // SHELL's wiring — the button, the MouseArea, the backend call — and one
@@ -242,7 +313,7 @@ void ShellModulesDriver::run()
     QStringList wrong;
     for (const QString& name : rows) {
         QObject* row = modelRow(name);
-        if (!row || isViewRow(row))
+        if (!row || isHostRow(row))
             continue;
 
         QQuickItem* toggle =
@@ -250,12 +321,40 @@ void ShellModulesDriver::run()
         if (!toggle || !toggle->isEnabled() || !toggle->isVisible())
             continue;
 
+        // Asked once: it is the row's kind, and the three things below that
+        // turn on it happen inside a single press-wait-press.
+        const bool webApp = backend->isWebContainerApp(name);
         const bool before = isLoaded(name);
+        // NOT DOCKED FIRST, and that is a deliberate omission with a reason.
+        // The state #149 was reported in is a `web` app the user has OPENED,
+        // unloaded from the Modules tab while the Shell still holds the tab its
+        // page sits in -- and driving exactly that (m_host->loadUiModule(name)
+        // here, then this press) works and then kills the app: the unload's
+        // dropWebSurface destroys a QDockWidget, and iOS Qt faults tearing its
+        // accessibility cache down. That is #139, which ShellWebAppDriver's
+        // close already meets, and it would end every acceptance run one row
+        // short. Measured on the iPad Air 13-inch (M2) sim, 2026-09-15: with
+        // the dock, `web app web_counter_b has no page any more; its tab is
+        // closed` is the last line the process prints; without it, the same
+        // unload round-trips.
         if (!tap(toggle)) return;
+        // A `web` module's unload tears a page down and its load brings 290 MB
+        // of QML runtime back up, and both are announced rather than awaited by
+        // the press -- so the row is given a moment to follow the core. A Bare
+        // module's toggle has already settled and pays nothing for this.
+        if (webApp) settle(1500);
         QQuickItem* afterFirstToggle =
             waitFor(QStringLiteral("moduleRow.loadToggle.%1").arg(name), 3000);
         const bool afterFirst = isLoaded(name);
+        // WHAT UNLOADING AN APP HAS TO DO TO THE REST OF THE SHELL (#149).
+        // Between the two presses, with the module down: the container must
+        // have let its page go, the Shell must not still be holding a tab onto
+        // it, and the sidebar must still carry its tile -- the app is installed
+        // either way, and pressing that tile is what brings it back (#123).
+        if (before && !afterFirst && webApp)
+            checkUnloadedWebApp(name);
         if (!afterFirstToggle || !tap(afterFirstToggle)) return;
+        if (webApp) settle(1500);
         const bool afterSecond = isLoaded(name);
 
         emit log(QStringLiteral("drive modules: %1 %2 -> %3 -> %4")

@@ -6,21 +6,29 @@ Modules tab lists the set, and its Load/Unload buttons go through the Native
 container.
 
 ```bash
+# A PLAIN LAUNCH DRIVES NOTHING. The app comes up and waits for whoever is
+# holding the phone -- which is what makes it worth testing by hand.
 ws run logos-basecamp --target ios-sim-arm64 --bundle view_counter --app shell
+
+# ...and a run that is proving something says so (see "Driving is a per-run
+# choice" below).
+ws run logos-basecamp --target ios-sim-arm64 --bundle view_counter --app shell \
+  -- --drive apps,modules
 
 # ...the milestone's own set: the real Chat app over the networking modules,
 # against a desktop peer (see the section below)
 LOGOS_IOS_TEAM_ID=<team> LOGOS_IOS_DEVICE=<udid> \
   ws run logos-basecamp --target ios-arm64 --app shell \
   --bundle capability_module,libp2p_module,chat_ui \
-  -- --chat-peer <the desktop installation's get_address>
+  -- --drive chat,apps --chat-peer <the desktop installation's get_address>
 
 # ...and the same Shell on Android. No `chat_ui`: the mobile catalog
 # publishes no ui_qml variant for this platform, so the set is the four core
 # modules and the sidebar carries no app tile (see "One Shell, two phones").
 ws run logos-basecamp --target android-arm64 --app shell \
   --bundle capability_module,libp2p_module,delivery_module,chat_module \
-  -- --peer <the desktop libp2p peer's multiaddr> \
+  -- --drive chat,modules \
+     --peer <the desktop libp2p peer's multiaddr> \
      --chat-peer <the desktop installation's get_address>
 ```
 
@@ -51,14 +59,59 @@ host with different UIs on top, which is what makes the probe useful when the
 Shell cannot see a module: it says whether the module or the Shell is the
 reason.
 
+## Driving is a per-run choice
+
+The Shell knows how to drive itself through six acceptance passes, and it runs
+**none of them** unless the launch asks:
+
+```
+--drive chat        bring chat up over the set's networking modules and report
+                    the two cold-start numbers
+--drive apps        press the sidebar tile of a `ui_qml` member and check the
+                    app's OWN handles are on screen
+--drive packages    open the Package Manager section and report what the page
+                    says (#145)
+--drive keyboard    open the app's own new-conversation field and report whether
+                    the on-screen keyboard reaches it (#152)
+--drive web-apps    open a `web` app, check its page is inset to the workspace,
+                    and LEAVE it again (#110)
+--drive modules     the Modules tab: the rows, their install type, their stats,
+                    and a Load/Unload round trip
+--drive all         every pass, in the order above
+```
+
+Composable, on one flag or several: `--drive apps,modules` and `--drive apps
+--drive modules` are the same run. An unknown name is refused on the console,
+by name, and the passes beside it still run.
+
+**Why it is not the default.** It used to be: every launch fired all of them
+from one timer, gated only by whether the BUILD carried something drivable, so
+a build carrying everything drove everything. That manufactured state before
+anyone looked at the app -- a hand-driven build had an app loaded and a web app
+opened *and closed* before the tester reached it, and several defects reported
+from manual testing turned out to be driver aftermath rather than the app's
+resting state. It also made every device run pay for every pass, including an
+agent that wanted one measurement, and it created failures of its own timing.
+`src/DriveScript.h` carries the whole account (logos-workspace#155).
+
+The passes themselves are unchanged and print exactly what they printed before,
+because roughly ten issues quote their assertions as on-device evidence. What
+an acceptance run names on `--drive` is now also what the command says it is
+proving.
+
+`--repository` / `--trust-signer` / `--install`, `--call` and `--consent` are
+**not** passes and are not listed above: each is its own script with work to do
+only when a flag asked for some, which is the shape this generalises.
+
 ## What the run prints
 
-The host drives the Modules tab once, after the first frame, and an automated
-run reads the verdicts off the console:
+With `--drive modules` the host drives the Modules tab once, after the first
+frame, and an automated run reads the verdicts off the console:
 
 ```
 [shell] shell: IShellHost ABI 3 (host 3)
 [shell] COLD START: Shell shown at 812 ms
+[shell] drive: modules
 [shell] shell: Settings -> Module Inspector is on screen
 [shell] modules tab rows: bare_counter, capability_module, view_counter
 [shell] app ships:        bare_counter, capability_module, view_counter
@@ -73,10 +126,27 @@ run reads the verdicts off the console:
 [shell] SHELL MODULES TAB ROUND TRIP OK (bare_counter)
 ```
 
-Every row the CORE is in charge of is driven, not just the first — a view
-module is mounted by the host rather than run by the core (ADR 0006), so its
-row is skipped. The names are printed rather than a count because which modules
-were actually unloaded is the whole of what #96 was about.
+Every row the CORE is in charge of is driven, not just the first — a row the
+HOST mounts is instantiated in this process rather than run by the core (ADR
+0006), so it is skipped. The names are printed rather than a count because which
+modules were actually unloaded is the whole of what #96 was about.
+
+**Which row is whose** is the row's own `hostLoaded`, not its type, and the two
+are different questions (logos-workspace#149). A `web` app's row is a `ui_qml`
+row — it has a user interface and the sidebar carries a tile for it — and its
+MODULE is the core's, because its page lives in the Web container. Asking for
+the type here skipped every `web` app, so the one Unload a user complained
+about was also the one nothing had ever pressed. A `web` row's unload is
+checked further than a Bare one's: the container must have let its page go, the
+Shell must not still hold a tab onto it, and its tile must stay on the sidebar
+— the app is installed either way, and pressing the tile is what brings it back
+(#123).
+
+One thing this deliberately does NOT drive: unloading a `web` app while the
+Shell still holds its tab. It works — `web app <name> has no page any more; its
+tab is closed` — and then the app dies tearing the QDockWidget's accessibility
+cache down, which is #139 and not this. ShellWebAppDriver's close already meets
+it.
 
 The rows are counted off the **scene**, not off the model: each row's status
 badge carries its module's name, so a filter proxy that dropped a row or a
@@ -282,8 +352,8 @@ window's focus. It follows the SCENE's focus change rather than the tap on
 purpose: chat_ui's New DM dialog focuses its address field from `onOpened`,
 with no tap on the field at all.
 
-`ShellKeyboardDriver` asks the question from inside the app, because there is no
-way to ask it from outside — Xcode 27 removed `SimulatorKit`, so `idb ui tap`
+`ShellKeyboardDriver` is the `--drive keyboard` pass. It asks the question from
+inside the app, because there is no way to ask it from outside — Xcode 27 removed `SimulatorKit`, so `idb ui tap`
 refuses HID on a modern simulator and `simctl` has no input verb. It walks the
 operator's path (the app's "+", New DM, the address field) and prints the three
 facts the platform reads, in order:
@@ -414,13 +484,22 @@ src/BundledSetShellHost.*   IShellHost over it
 src/WebAppSurface.*         the placeholder a `web` app is DOCKED as, so the
                             Shell's chrome ends up beside its page rather than
                             under it (#110)
+src/DriveScript.*           which acceptance passes THIS RUN asked for, off
+                            the command line. Nothing, unless it said so (#155)
 src/ShellSceneDriver.*      finding, settling and pressing in the Shell's
-                            rendered scenes -- shared by the four drivers below
+                            rendered scenes -- shared by the drivers below
 src/ShellModulesDriver.*    the acceptance pass: open the tab, check the rows,
                             their install type and their stats, press the
                             toggle twice
 src/ShellAppDriver.*        the other half: press the sidebar tile and check
                             the app's OWN handles are on screen
+src/QuickWidgetKeyboardFocus.*
+                            the fix: a scene that focuses a text item gives its
+                            QQuickWidget the window's focus, which is the only
+                            focus the platform input context is told about (#152)
+src/ShellKeyboardDriver.*   and the pass that asks it on the device: the app's
+                            "+", New DM, the field -- then the three facts the
+                            platform reads, in order
 src/ShellWebAppDriver.*     the same for a `web` app, plus the step that check
                             could never make: LEAVE it again. The page is inset
                             to the workspace, navigating away puts the Shell
