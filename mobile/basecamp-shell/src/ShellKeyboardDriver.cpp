@@ -14,6 +14,7 @@
 #include <QQuickWidget>
 #include <QQuickWindow>
 #include <QRectF>
+#include <QScreen>
 #include <QStringList>
 #include <QUrl>
 
@@ -137,10 +138,15 @@ void ShellKeyboardDriver::run()
     if (!tap(field)) return;
 
     // ── 3. the three facts, in the order the platform reads them ──
+    // BOTH, and the rectangle is not implied by the flag: isVisible() turns
+    // true on the platform's will-show notification and the geometry arrives
+    // with it, so reading the rectangle in the same turn reports 0x0 for a
+    // panel that is on its way up.
     QInputMethod* im = QGuiApplication::inputMethod();
     QElapsedTimer waiting;
     waiting.start();
-    while (!im->isVisible() && waiting.elapsed() < kKeyboardBudgetMs)
+    while ((!im->isVisible() || im->keyboardRectangle().isEmpty())
+           && waiting.elapsed() < kKeyboardBudgetMs)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
     QObject* focusObject = QGuiApplication::focusObject();
@@ -153,10 +159,29 @@ void ShellKeyboardDriver::run()
     emit log(QStringLiteral("keyboard: app focus object %1, accepts input method: %2")
                  .arg(describe(focusObject),
                       accepted ? QStringLiteral("yes") : QStringLiteral("no")));
-    emit log(QStringLiteral("keyboard: QInputMethod isVisible=%1, panel %2x%3 after %4 ms")
+    // The DISPLAY, not field->window(): a QQuickWidget's items live in an
+    // offscreen window whose geometry is the widget's, and the panel is
+    // measured against the phone.
+    const QScreen* display = QGuiApplication::primaryScreen();
+    const QRectF screen = display ? QRectF(display->geometry()) : QRectF();
+    emit log(QStringLiteral("keyboard: QInputMethod isVisible=%1, panel %2x%3 of a %4x%5 "
+                            "screen after %6 ms")
                  .arg(im->isVisible() ? QStringLiteral("true") : QStringLiteral("false"))
                  .arg(keyboard.width(), 0, 'f', 0).arg(keyboard.height(), 0, 'f', 0)
+                 .arg(screen.width(), 0, 'f', 0).arg(screen.height(), 0, 'f', 0)
                  .arg(waiting.elapsed()));
+    // A panel this short is not a keyboard: it is the shortcut bar iOS draws
+    // INSTEAD of one while a hardware keyboard is connected -- which on a
+    // simulator is a setting, and is the thing logos-workspace#152 asks to rule
+    // out. Named here rather than left as a number, because "isVisible=true and
+    // nothing to type on" is the confusing case.
+    const bool panelIsABarOnly =
+        im->isVisible() && !screen.isEmpty() && keyboard.height() < screen.height() / 6;
+    if (panelIsABarOnly) {
+        emit log(QStringLiteral("keyboard: that is a shortcut bar, not a keyboard -- this "
+                                "device has a hardware keyboard connected, so iOS draws no "
+                                "panel. The input method is still ON the field"));
+    }
 
     if (!caret) {
         emit log(QStringLiteral("WRONG: '%1' took no focus at all from the tap -- the "
@@ -171,9 +196,10 @@ void ShellKeyboardDriver::run()
         // Everything Qt owns is right and the platform is still not drawing a
         // panel. On a simulator that is the hardware keyboard being connected,
         // which is the first thing logos-workspace#152 asks to rule out.
-        emit log(QStringLiteral("keyboard: the input method is ON the field and no panel "
-                                "is shown -- a connected hardware keyboard does exactly "
-                                "this; on a device this would be a platform fault"));
+        emit log(QStringLiteral("keyboard: the input method is ON the field and the "
+                                "platform drew no panel of any kind -- a connected "
+                                "hardware keyboard does exactly this; on a device it "
+                                "would be a platform fault"));
         emit log(QStringLiteral("KEYBOARD REACHES THE FIELD (no panel drawn)"));
     } else {
         emit log(QStringLiteral("KEYBOARD REACHES THE FIELD"));
