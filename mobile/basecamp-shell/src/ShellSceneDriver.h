@@ -13,6 +13,7 @@
 // UI automation. No host type is named on the QML side.
 #pragma once
 
+#include <QImage>
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
@@ -44,6 +45,23 @@ namespace basecamp::shell {
 // An empty `screen` (nothing to ask) leaves (1) as the whole answer.
 bool pressIsReachable(const QPointF& inSurface, const QSizeF& surface,
                       const QPointF& onScreen, const QRectF& screen);
+
+// Whether a scene is one a finger could reach: shown, and with an area to be
+// shown in.
+//
+// THE SHELL CAN HOLD TWO COPIES OF ONE APP'S SCENE (logos-workspace#187).
+// Closing a Bundled app takes its widget out of the dock and `deleteLater()`s
+// it, and a deferred delete is never delivered while the drivers run -- they
+// work off processEvents() inside a QTimer::singleShot and never return to the
+// event loop that posted it. So the closed app's surface is still a child of
+// the Shell, off screen, with its whole QML scene alive: same handles, same
+// bindings, same geometry. A lookup that took the first match took THAT one,
+// and the "+" menu it opened, the dialog behind it and the iOS keyboard the
+// dialog's field raised were all real and none of them were on the screen.
+//
+// So every lookup a driver makes is filtered through this. Off screen is not a
+// weaker kind of present; it is absent.
+bool sceneIsOnScreen(const QQuickWidget* surface);
 
 } // namespace basecamp::shell
 
@@ -107,6 +125,31 @@ protected:
     // Turn the event loop for `ms`, so what just happened is on screen long
     // enough to be seen -- and so the work it queued actually runs.
     void settle(int ms);
+
+    // ── DOES WHAT THE DRIVER PRESSED REACH THE SCREEN? ────────────────────
+    //
+    // logos-workspace#187: on the venue's physical iPad chat_ui's "+" menu and
+    // its New DM dialog are found, pressed, focused and raise the keyboard, and
+    // a photograph of the device shows NEITHER of them. Every assertion in this
+    // host was about properties, so the whole path reported green while the
+    // user saw nothing -- the two below are the pixels.
+    //
+    // A QQuickWidget's grab RE-RENDERS the scene, so it answers "is this in the
+    // frame the surface draws", which is not the same question as "is that
+    // frame on the display" and is the half a process can answer about itself.
+    QImage frameOf(QQuickWidget* surface) const;
+    // Pixels under `item` that differ between two grabs of its surface, and
+    // how many were looked at. `looked` is 0 when there was nothing to compare
+    // -- no frames, or an item with no area -- which is not the same as "not
+    // one pixel changed".
+    int pixelsChangedUnder(QQuickItem* item, const QImage& before, const QImage& after,
+                           int* looked) const;
+    // Every item from `item` up to its scene's root, with the four things that
+    // keep one from being drawn: a zero size, `visible`, `opacity` and a
+    // clipping ancestor. Printed when an item that should be on screen is not,
+    // and it is the whole diagnosis -- the level where the width becomes 0 is
+    // the level with the bug.
+    void dumpAncestry(QQuickItem* item, const QString& why);
 
     QWidget* m_shell;  // not owned
 };

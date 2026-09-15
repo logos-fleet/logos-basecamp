@@ -71,8 +71,12 @@ The Shell knows how to drive itself through seven acceptance passes, and it runs
                     app's OWN handles are on screen
 --drive packages    open the Package Manager section and report what the page
                     says (#145)
+--drive popups      open a Popup, a modal Dialog and a Menu in EVERY scene the
+                    Shell has on screen, and read the pixels: does the surface
+                    draw them? (#187) Needs no module and no network
 --drive keyboard    open the app's own new-conversation field and report whether
-                    the on-screen keyboard reaches it (#152)
+                    the on-screen keyboard reaches it (#152), and whether the
+                    menu and the dialog on the way to it are drawn at all (#187)
 --drive web-apps    open a `web` app, check its page is inset to the workspace,
                     and LEAVE it again (#110)
 --drive web-input   open a `web` app and TYPE into its form, with real pointer
@@ -365,6 +369,29 @@ scene focuses something that answers `Qt::ImEnabled`, its widget takes the
 window's focus. It follows the SCENE's focus change rather than the tap on
 purpose: chat_ui's New DM dialog focuses its address field from `onOpened`,
 with no tap on the field at all.
+
+### A driver only ever presses a scene that is on screen (#187)
+
+The Shell can hold **two copies of one app's scene**. `--drive apps` closes a
+Bundled app and opens it again to prove the second mount is live; closing takes
+the widget out of its dock and `deleteLater()`s it, and a deferred delete is
+never delivered while the drivers run -- they work off `processEvents()` inside
+a `QTimer::singleShot` and never return to the event loop that posted it. So
+the closed app's `QQuickWidget` is still a child of the Shell, off screen, with
+its whole QML scene alive in it.
+
+On the venue's physical iPad the keyboard pass found the dead copy's
+`newMenuButton` -- `findChildren` answers in construction order -- and every
+step after it succeeded on a scene nobody could see: the menu opened, the dialog
+opened, the address field took `activeFocus` and iOS drew a full software
+keyboard over a conversations pane that never changed.
+
+`basecamp::shell::sceneIsOnScreen()` is the rule that came out of it, and every
+lookup in `ShellSceneDriver` goes through it. An off-screen scene is not a
+weaker kind of present, it is absent: a control whose only copy is in one is not
+found at all. `dumpNames()` still lists those scenes, marked `NOT ON SCREEN`, so
+a lookup that fails for this reason says so in the same breath. Covered by
+`tests/shell_scene_scope_test.cpp`.
 
 `ShellKeyboardDriver` is the `--drive keyboard` pass. It asks the question from
 inside the app, because there is no way to ask it from outside — Xcode 27 removed `SimulatorKit`, so `idb ui tap`
