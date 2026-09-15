@@ -164,6 +164,24 @@ QVariantList moduleRows(const ModuleFacts& facts)
     return rows;
 }
 
+QVariantList appRows(const ModuleFacts& facts)
+{
+    // The tiles decide membership; the rows carry the facts. Asked in that
+    // order because `launcherApps` is the rule the sidebar is made by, and a
+    // pane that re-derived "is this an app" would be free to answer it
+    // differently.
+    QSet<QString> apps;
+    for (const QVariant& tile : launcherApps(facts))
+        apps.insert(tile.toMap().value(QStringLiteral("name")).toString());
+
+    QVariantList out;
+    for (const QVariant& value : moduleRows(facts)) {
+        if (apps.contains(value.toMap().value(QStringLiteral("name")).toString()))
+            out.append(value);
+    }
+    return out;
+}
+
 bool hostLoadedModule(const ModuleFacts& facts, const QString& name)
 {
     // The Bundled-set manifest and nothing else. A module the core discovered

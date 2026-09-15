@@ -16,6 +16,8 @@
 
 #include "ShellSceneDriver.h"
 
+#include <QStringList>
+
 class BundledSetShellHost;
 
 class ShellModulesDriver : public ShellSceneDriver
@@ -33,6 +35,16 @@ public:
     void run();
 
 private:
+    // The names a pane has rows on screen for, sorted and de-duplicated; see
+    // the definition for what `firstExpected` is waited for.
+    QStringList rowNamesOnScreen(const QString& prefix, const QString& firstExpected);
+
+    // Settings -> Apps Inspector checked against the sidebar's tiles, which is
+    // THE OTHER PANE the acceptance pass never read (logos-workspace#146).
+    //
+    // Read-only, and first: everything after it changes what is loaded.
+    void checkAppsInspector();
+
     // The three things outside the core that unloading a `web` app has to
     // move: its page, the Shell's tab onto it, and what its sidebar tile
     // claims. Reported as one line when they all hold, and named one at a time

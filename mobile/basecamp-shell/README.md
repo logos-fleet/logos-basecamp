@@ -114,6 +114,10 @@ frame, and an automated run reads the verdicts off the console:
 [shell] shell: IShellHost ABI 3 (host 3)
 [shell] COLD START: Shell shown at 812 ms
 [shell] drive: modules
+[shell] shell: Settings -> Apps Inspector is on screen
+[shell] apps tab rows:   view_counter
+[shell] sidebar tiles:   view_counter
+[shell] SHELL APPS TAB LISTS THE APPS (view_counter), EACH ALSO KNOWN TO THE RUNTIME
 [shell] shell: Settings -> Module Inspector is on screen
 [shell] modules tab rows: bare_counter, capability_module, view_counter
 [shell] app ships:        bare_counter, capability_module, view_counter
@@ -127,6 +131,15 @@ frame, and an automated run reads the verdicts off the console:
 [shell] drive modules: bare_counter not loaded -> loaded -> not loaded
 [shell] SHELL MODULES TAB ROUND TRIP OK (bare_counter)
 ```
+
+Settings draws **two** inspectors and the pass reads both (#146). Apps Inspector
+is "UI plugins available in this installation" and had nothing behind it on a
+phone -- a Store shell has no UI-plugin directory to scan (ADR 0003) -- so a
+`web` app was listed under Modules and nowhere else while the same Shell drew it
+a sidebar tile and mounted it in the dock. The apps pane now lists exactly the
+apps the sidebar carries tiles for, and the Modules pane still lists everything
+the core knows, apps included: it is titled *Core modules known to the runtime*
+and that is the set it is for.
 
 Every row the CORE is in charge of is driven, not just the first — a row the
 HOST mounts is instantiated in this process rather than run by the core (ADR

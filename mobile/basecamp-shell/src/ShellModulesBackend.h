@@ -13,6 +13,9 @@
 // desktop's, and what changed underneath is only which ICoreRuntime is
 // answering: BundledSetCoreRuntime, over the set the build embedded.
 //
+// `uiModulesModel` is the same model again, narrowed to the apps -- Settings
+// draws TWO inspectors and the second of them was empty on a phone (#146).
+//
 // The inert three are stubs and not omissions. QML resolves `backend.foo(...)`
 // at call time, so a missing method is a TypeError inside one signal handler
 // and the rest of the shell carries on looking fine -- the failure would show
@@ -67,8 +70,17 @@ class ShellModulesBackend : public QObject
     // this facade would put the rules behind a core.
     Q_PROPERTY(QObject* appManager READ appManagerObject CONSTANT)
 
-    // ── inert: nothing on a phone answers these yet ──
+    // ── live: the Apps Inspector ──
+    // The SAME rows as the Modules tab, for the apps only (#146). Settings has
+    // two inspectors -- "Core modules known to the runtime" and "UI plugins
+    // available in this installation" -- and this one used to be null here,
+    // because a Store shell has no UI-plugin directory to scan (ADR 0003). So a
+    // `web` app appeared under Modules and nowhere else, while the same Shell
+    // drew it a tile and mounted it in the dock. What a phone's apps ARE is the
+    // sidebar's rule, and ShellModuleRows::appRows is that rule.
     Q_PROPERTY(QAbstractItemModel* uiModulesModel READ uiModulesModel CONSTANT)
+
+    // ── inert: nothing on a phone answers these yet ──
     Q_PROPERTY(QAbstractItemModel* appsModel READ appsModel CONSTANT)
     Q_PROPERTY(QVariantList requiredPackages READ requiredPackages NOTIFY requiredPackagesChanged)
     Q_PROPERTY(QStringList loadingModules READ loadingModules NOTIFY loadingModulesChanged)
@@ -158,10 +170,11 @@ public:
     // what actually decides, and this adds no policy to it.
     void installFromCatalog(const QString& packageName);
 
-    // nullptr, deliberately: an EMPTY model of the wrong shape would answer
-    // the Apps Inspector's role names with nothing and look like a working
-    // view with no rows. `null` is what the QML already guards for.
-    QAbstractItemModel* uiModulesModel() const { return nullptr; }
+    // One row per app, in the same ModuleInstanceModel the Modules tab binds.
+    QAbstractItemModel* uiModulesModel() const;
+    // nullptr, deliberately: an EMPTY model of the wrong shape would answer the
+    // App Manager's role names with nothing and look like a working view with
+    // no rows. `null` is what the QML already guards for.
     QAbstractItemModel* appsModel() const { return nullptr; }
 
     int currentActiveSectionIndex() const { return m_sectionIndex; }
@@ -331,7 +344,10 @@ private:
     // the names are unchanged, which is what keeps the table from flickering
     // every two seconds.
     void rebuildRows();
-    QVariantList snapshot() const;
+    // What the Native container is measuring for each of these, added to rows
+    // that are otherwise a pure function of `facts()`. One decoration for both
+    // panes, so an app's figure cannot differ between them.
+    QVariantList withStats(QVariantList rows) const;
     // The four facts every row and every tile is derived from. One place, so
     // the tab and the sidebar cannot disagree about what is installed.
     basecamp::shell::ModuleFacts facts() const;
@@ -340,6 +356,11 @@ private:
     LogosAPI*              m_api;     // owned
     CoreModuleManager*     m_modules; // owned (parent = this)
     ModuleInstanceModel*   m_coreModulesModel;
+    // The Apps Inspector's rows -- see `uiModulesModel` above. Its own model
+    // rather than a QML-side filter, because the two panes bind the same view
+    // type and a proxy would need a role that says "this row is an app" --
+    // which is a fact about the SET, not about a row.
+    ModuleInstanceModel*   m_uiModulesModel;
     // AFTER m_api and m_modules, and that is not cosmetic: members are
     // initialised in DECLARATION order regardless of what the constructor's
     // initialiser list says, and this one is constructed FROM those two. Declared
