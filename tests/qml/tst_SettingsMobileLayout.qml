@@ -46,6 +46,18 @@ TestCase {
             isLoaded: true; isMainUi: true; cpu: 3.0; memory: 40.0
             statsMeasured: true
         }
+        // LOADED, AND NOTHING COULD ACCOUNT FOR IT -- the third state, and the
+        // one that had no fixture. A `web` module's page is the platform's
+        // process, so the Native container has no reading to give and liblogos
+        // reports null rather than 0 (logos-workspace#86). Its row is loaded
+        // and still owes no figure, which is exactly the case the Shell's iOS
+        // driver was asserting against (logos-workspace#159).
+        ListElement {
+            name: "web_counter"; label: "Web Counter"; statusText: "Loaded"
+            description: "A counter whose UI is a page"; version: "1.0.0"
+            isLoaded: true; isMainUi: false; cpu: 0.0; memory: 0.0
+            statsMeasured: false
+        }
     }
 
     ListModel {
@@ -289,6 +301,104 @@ TestCase {
         }, 3000, "the compact row still carries moduleInspector.status.<name>");
         verify(findChild(host.settings, "moduleInspector.status.view_counter"),
                "for every row, not just the first");
+
+        host.destroy();
+    }
+
+    // ─── the stats the compact row shows, and the ones it must not ───
+    //
+    // WHY THIS IS A TEST AND NOT A DEVICE RUN. The rule was only ever asserted
+    // by ShellModulesDriver on a booted simulator, and every part of it has
+    // been wrong at least once: the cells read 0.0% / 0.0 MB for modules
+    // nothing had measured (#86), the driver demanded a figure of rows that
+    // legitimately had none and of only one row that did (#149, #172), and
+    // #159 was filed against the assertion rather than the UI. Three states,
+    // three rows, one width -- no simulator.
+    //
+    // ONE LINE, NOT TWO CELLS, at a phone's width: CPU and Memory fold into
+    // the module cell there (#84), which is why the driver has to know both
+    // handles.
+    function test_the_compact_row_shows_a_figure_only_where_there_is_one_data() {
+        return [
+            { tag: "iphone-16-pro",        width: 306, height: 834  },
+            { tag: "ipad-air-13-portrait", width: 928, height: 1326 },
+        ];
+    }
+
+    function test_the_compact_row_shows_a_figure_only_where_there_is_one(data) {
+        var host = hostComp.createObject(null, { width: data.width, height: data.height });
+        waitForRendering(host.contentItem);
+        openSection(host, "module_inspector", "moduleInspectorView",
+                    "moduleInspector.table");
+
+        tryVerify(function() {
+            return findChild(host.settings, "moduleInspector.stats.view_counter") !== null;
+        }, 3000, "the compact row carries moduleInspector.stats.<name>");
+
+        // MEASURED AND LOADED: the line is on screen and it is a figure. The
+        // driver reads the rendered text, so "1.5%  ·  12.5 MB" is the claim.
+        var measured = findChild(host.settings, "moduleInspector.stats.view_counter");
+        verify(measured.visible, data.tag + ": a measured loaded row shows its stats line");
+        verify(measured.text.indexOf(" MB") !== -1,
+               data.tag + ": ...and the line carries a memory figure, not '"
+               + measured.text + "'");
+        verify(measured.text.indexOf("12.5") !== -1,
+               data.tag + ": ...the row's own figure, not another row's: " + measured.text);
+
+        // NOT LOADED: no line. An unloaded module has nothing to report and a
+        // row claiming 0.0 MB for it is making a measurement up.
+        var unloaded = findChild(host.settings, "moduleInspector.stats.bare_counter");
+        verify(unloaded, data.tag + ": the unloaded row still carries the handle");
+        verify(!unloaded.visible, data.tag + ": an unloaded row shows no stats line");
+
+        // LOADED, UNMEASURED: no line either, and this is the one #172 turned
+        // the driver's expectation around. The binding still evaluates while
+        // the line is hidden, so `visible` is the only thing that can be asked
+        // -- reading `text` here would report "0.0%  ·  0.0 MB" for a row that
+        // is rendering nothing at all.
+        var unmeasured = findChild(host.settings, "moduleInspector.stats.web_counter");
+        verify(unmeasured, data.tag + ": the unmeasured row still carries the handle");
+        verify(!unmeasured.visible,
+               data.tag + ": a loaded row nothing measured shows no stats line");
+
+        host.destroy();
+    }
+
+    // The desktop half of the same rule: two cells rather than one line, and an
+    // em dash rather than a hidden item, because the column has to stay
+    // aligned. Same three rows, so a fix applied to one layout and not the
+    // other fails here.
+    function test_the_desktop_cells_em_dash_what_was_never_measured() {
+        var host = hostComp.createObject(null, { width: 1440, height: 900 });
+        waitForRendering(host.contentItem);
+        openSection(host, "module_inspector", "moduleInspectorView",
+                    "moduleInspector.table");
+
+        tryVerify(function() {
+            return findChild(host.settings, "moduleInspector.memory.view_counter") !== null;
+        }, 3000, "the desktop row carries moduleInspector.memory.<name>");
+
+        var dash = "\u2014";
+        var cases = [
+            { row: "view_counter", measured: true  },
+            { row: "bare_counter", measured: false },
+            { row: "web_counter",  measured: false },
+        ];
+        for (var i = 0; i < cases.length; ++i) {
+            var cpu = findChild(host.settings, "moduleInspector.cpu." + cases[i].row);
+            var mem = findChild(host.settings, "moduleInspector.memory." + cases[i].row);
+            verify(cpu && mem, cases[i].row + " has both desktop stats cells");
+            compare(cpu.hasFigure, cases[i].measured, cases[i].row + ": cpu cell hasFigure");
+            compare(mem.hasFigure, cases[i].measured, cases[i].row + ": memory cell hasFigure");
+            if (cases[i].measured) {
+                verify(mem.text.indexOf(" MB") !== -1,
+                       cases[i].row + ": a measured memory cell reads a figure, got '"
+                       + mem.text + "'");
+            } else {
+                compare(cpu.text, dash, cases[i].row + ": cpu cell is an em dash");
+                compare(mem.text, dash, cases[i].row + ": memory cell is an em dash");
+            }
+        }
 
         host.destroy();
     }
