@@ -460,6 +460,117 @@ private slots:
         QVERIFY(!basecamp::shell::hostLoadedModule(facts, QStringLiteral("notes")));
     }
 
+    // ── the Apps Inspector (#146) ────────────────────────────────────────
+    //
+    // TWO PANES, TWO QUESTIONS. Settings has a Module Inspector titled "Core
+    // modules known to the runtime" and an Apps Inspector titled "UI plugins
+    // available in this installation", and on a phone only the first of them
+    // had anything behind it: the Shell's `uiModulesModel` was null, because
+    // a Store shell has no UI-plugin directory to scan (ADR 0003).
+    //
+    // So a `web` app was reported as listed under Modules and nowhere else,
+    // while the same Shell drew it a sidebar tile and mounted it in the dock.
+    // The Modules pane is not wrong -- it is "everything the core knows", and
+    // that is what its title says -- the Apps pane was EMPTY.
+    //
+    // The set it shows is the set the SIDEBAR shows, derived from the very
+    // same rule: a row here for every tile and a tile for every row, or the
+    // two panes disagree again about what an app is. And each row is that
+    // module's Modules-tab row, unchanged -- the same version, the same
+    // installType, the same `hostLoaded` -- so the Load/Unload button in
+    // either pane is the same button.
+
+    void theAppsInspectorListsTheBundledSetsViewModules()
+    {
+        QCOMPARE(namesOf(basecamp::shell::appRows(phone())),
+                 QStringList{ QStringLiteral("chat_ui") });
+    }
+
+    void aWebAppIsAnAppsInspectorRowLikeAnyOtherApp()
+    {
+        // wallet_ui as the phone carries it: a `web` variant the app image
+        // ships, whose package declares a UI and which nothing has loaded yet.
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("wallet_ui") };
+        facts.known << QStringLiteral("wallet_ui");
+        facts.uiPackages.insert(QStringLiteral("wallet_ui"));
+
+        QCOMPARE(namesOf(basecamp::shell::appRows(facts)),
+                 (QStringList{ QStringLiteral("chat_ui"), QStringLiteral("wallet_ui") }));
+    }
+
+    void aCoreModuleIsNeverAnAppsInspectorRow()
+    {
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("web_indexer") };
+        facts.known << QStringLiteral("web_indexer") << QStringLiteral("notes");
+
+        const QStringList apps = namesOf(basecamp::shell::appRows(facts));
+        // Neither the Bundled core modules, nor a `web` variant of a headless
+        // one, nor an installed module whose package declares no UI.
+        QVERIFY(!apps.contains(QStringLiteral("capability_module")));
+        QVERIFY(!apps.contains(QStringLiteral("package_manager")));
+        QVERIFY(!apps.contains(QStringLiteral("web_indexer")));
+        QVERIFY(!apps.contains(QStringLiteral("notes")));
+    }
+
+    void theAppsPaneAndTheSidebarShowTheSameSet()
+    {
+        // The claim the two panes could not make before: an app the Shell
+        // draws a tile for is an app the Apps Inspector lists, and nothing
+        // else is.
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("wallet_ui") };
+        facts.known << QStringLiteral("wallet_ui") << QStringLiteral("notes")
+                    << QStringLiteral("web_counter");
+        facts.loaded << QStringLiteral("web_counter");
+        facts.uiPackages.insert(QStringLiteral("wallet_ui"));
+        facts.openPages.insert(QStringLiteral("web_counter"));
+        facts.mountedViews.insert(QStringLiteral("chat_ui"));
+
+        QStringList apps = namesOf(basecamp::shell::appRows(facts));
+        QStringList tiles = namesOf(basecamp::shell::launcherApps(facts));
+        apps.sort();
+        tiles.sort();
+        QCOMPARE(apps, tiles);
+    }
+
+    void anAppsInspectorRowIsThatModulesRow()
+    {
+        // Same row, out of the same builder: whatever the Modules tab says
+        // about an app, the Apps pane says too. A second shape here would be
+        // a second answer to "is it loaded" and to "whose button is this".
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("wallet_ui") };
+        facts.known << QStringLiteral("wallet_ui");
+        facts.loaded << QStringLiteral("wallet_ui");
+        facts.openPages.insert(QStringLiteral("wallet_ui"));
+        facts.mountedViews.insert(QStringLiteral("chat_ui"));
+
+        const QVariantList rows = basecamp::shell::moduleRows(facts);
+        for (const QVariant& value : basecamp::shell::appRows(facts)) {
+            const QVariantMap app = value.toMap();
+            QCOMPARE(app, rowNamed(rows, app.value(QStringLiteral("name")).toString()));
+        }
+    }
+
+    void aWebAppsRowInTheAppsPaneIsStillTheCoresToLoad()
+    {
+        // #149, restated for the pane that did not exist then: the Apps
+        // Inspector's toggle is the same button, so it must carry the same
+        // answer to whose module it is.
+        ModuleFacts facts = phone();
+        facts.shipped = { QStringLiteral("wallet_ui") };
+        facts.known << QStringLiteral("wallet_ui");
+        facts.uiPackages.insert(QStringLiteral("wallet_ui"));
+
+        const QVariantList apps = basecamp::shell::appRows(facts);
+        QVERIFY(rowNamed(apps, QStringLiteral("chat_ui"))
+                    .value(QStringLiteral("hostLoaded")).toBool());
+        QVERIFY(!rowNamed(apps, QStringLiteral("wallet_ui"))
+                     .value(QStringLiteral("hostLoaded")).toBool());
+    }
+
     void everyRowTheHostOwnsIsOneTheSidebarMountsItself()
     {
         // The two rules that split the same set have to split it the SAME way,

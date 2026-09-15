@@ -102,6 +102,27 @@ QStringList downloadedModules(const ModuleFacts& facts);
 // Load/Unload button is a function of.
 QVariantList moduleRows(const ModuleFacts& facts);
 
+// THE APPS, as Settings' Apps Inspector lists them: the subset of `moduleRows`
+// whose modules the SIDEBAR draws a tile for, each row exactly as the Modules
+// tab has it.
+//
+// Two panes, two questions (logos-workspace#146). Module Inspector is titled
+// "Core modules known to the runtime" and shows everything the core knows --
+// which is right, and which is why an app appears there too. Apps Inspector is
+// "UI plugins available in this installation", and on a phone it had nothing
+// behind it at all: a Store shell has no UI-plugin directory to scan (ADR
+// 0003), so `uiModulesModel` was null and the pane was empty. A `web` app was
+// then listed under Modules and nowhere else, while the same Shell gave it a
+// tile and mounted it in the dock.
+//
+// DERIVED, not built again, and both halves of that matter. The set is
+// `launcherApps`' set, so a row here exists for every tile and a tile for every
+// row -- the two panes cannot disagree about what an app is. And a row is the
+// module's OWN row, so its version, its installType and its `hostLoaded` are
+// the ones the Modules tab shows: the Load/Unload button in either pane is the
+// same button, reaching the same owner (#149).
+QVariantList appRows(const ModuleFacts& facts);
+
 // WHO BRINGS THIS MODULE UP -- the host, in this process, or the core.
 //
 // It reads like `type == "ui_qml"` and it is NOT that, which is the whole of

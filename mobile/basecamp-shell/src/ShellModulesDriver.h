@@ -33,6 +33,22 @@ public:
     void run();
 
 private:
+    // Settings -> Apps Inspector, before anything is loaded or unloaded.
+    //
+    // THE OTHER PANE (logos-workspace#146). Settings draws two inspectors and
+    // the acceptance pass only ever read one of them, so nothing noticed that
+    // on a phone the Apps one was EMPTY: `uiModulesModel` was null, a `web` app
+    // was listed under Modules and nowhere else, and the same Shell was drawing
+    // it a sidebar tile and mounting it in the dock.
+    //
+    // Read off the SCENE and compared with the TILES, for the reason the
+    // Modules check is: the two panes are two answers to "what is an app", and
+    // the sidebar is the third. A model compared with itself would prove only
+    // that this host can copy a list.
+    //
+    // Read-only, and first: everything after it changes what is loaded.
+    void checkAppsInspector();
+
     // The three things outside the core that unloading a `web` app has to
     // move: its page, the Shell's tab onto it, and what its sidebar tile
     // claims. Reported as one line when they all hold, and named one at a time

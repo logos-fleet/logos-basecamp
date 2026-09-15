@@ -79,9 +79,104 @@ void ShellModulesDriver::checkUnloadedWebApp(const QString& name)
                  .arg(name).arg(web->budget().live().size()));
 }
 
+// WHICH PANE LISTS AN APP (#146).
+//
+// Settings has a Module Inspector -- "Core modules known to the runtime", which
+// is every module the core has, apps included -- and an Apps Inspector, "UI
+// plugins available in this installation". On a phone the second had nothing
+// behind it, so a `web` app appeared under Modules only, and a user looking for
+// the app they can see a tile for found it filed as a core module.
+//
+// The tiles are the answer this compares against, because they are what the
+// Shell ALREADY acts on: a tile is drawn, pressed and mounted, so a pane that
+// lists a different set is the pane that is wrong.
+void ShellModulesDriver::checkAppsInspector()
+{
+    ShellModulesBackend* backend = m_host->backend();
+
+    m_host->setCurrentSectionIndex(ShellSection::Settings);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    QQuickItem* section = waitFor(QStringLiteral("settings.section.apps_inspector"), 5000);
+    if (!section) {
+        dumpNames(QStringLiteral("no Apps Inspector section in the Settings view"));
+        return;
+    }
+    scrollIntoView(section);
+    if (!tap(section)) return;
+
+    QQuickItem* view = waitFor(QStringLiteral("appsInspectorView"), 5000);
+    if (!view || !view->isVisible()) {
+        emit log(QStringLiteral("drive: the Apps Inspector did not come to the front"));
+        return;
+    }
+    emit log(QStringLiteral("shell: Settings -> Apps Inspector is on screen"));
+
+    QStringList apps;
+    for (const QVariant& value : backend->launcherApps())
+        apps << value.toMap().value(QStringLiteral("name")).toString();
+    apps.sort();
+
+    QStringList rows;
+    {
+        const QString prefix = QStringLiteral("appsInspector.status.");
+        // One delegate at a time, as the Modules tab does: cacheBuffer keeps
+        // every row instantiated but not necessarily by the tick the view
+        // appeared in.
+        waitFor(prefix + apps.value(0), 5000);
+        forEachItem([&rows, &prefix](QQuickItem* item) {
+            if (item->objectName().startsWith(prefix))
+                rows << item->objectName().mid(prefix.size());
+        });
+        rows.removeDuplicates();
+        rows.sort();
+    }
+    emit log(QStringLiteral("apps tab rows:   %1")
+                 .arg(rows.isEmpty() ? QStringLiteral("(none)")
+                                     : rows.join(QStringLiteral(", "))));
+    emit log(QStringLiteral("sidebar tiles:   %1")
+                 .arg(apps.isEmpty() ? QStringLiteral("(none)")
+                                     : apps.join(QStringLiteral(", "))));
+    if (rows != apps) {
+        emit log(QStringLiteral("WRONG: the Apps Inspector does not list the apps the "
+                                "Shell carries tiles for"));
+        return;
+    }
+    if (apps.isEmpty()) {
+        // Legitimate: `--bundle capability_module,chat_module` is a set with no
+        // app in it, and an empty pane is the right answer for one.
+        emit log(QStringLiteral("SHELL APPS TAB LISTS THE APPS (none: this set has no app)"));
+        return;
+    }
+
+    // ...AND UNDER MODULES TOO, which is the other half of what #146 settled.
+    // The Modules pane is titled "Core modules known to the runtime" and shows
+    // exactly that; an app IS a module the core knows, so it belongs in both
+    // lists and the defect was only ever the one that was empty. Asserted
+    // rather than assumed, because "fix the Apps pane" and "move the apps out
+    // of the Modules pane" are the two readings of the report and this is the
+    // one that was chosen.
+    QStringList missingFromModules;
+    for (const QString& name : apps) {
+        if (!backend->shippedModuleNames().contains(name)
+            && !backend->downloadedModules().contains(name))
+            missingFromModules << name;
+    }
+    if (!missingFromModules.isEmpty()) {
+        emit log(QStringLiteral("WRONG: app(s) the Modules pane does not account for: %1")
+                     .arg(missingFromModules.join(QStringLiteral(", "))));
+        return;
+    }
+    emit log(QStringLiteral("SHELL APPS TAB LISTS THE APPS (%1), EACH ALSO KNOWN TO THE "
+                            "RUNTIME").arg(apps.join(QStringLiteral(", "))));
+}
+
 void ShellModulesDriver::run()
 {
     ShellModulesBackend* backend = m_host->backend();
+
+    // ── 0. the OTHER inspector, while nothing has moved yet ──
+    checkAppsInspector();
 
     // ── 1. open Settings -> Module Inspector ──
     // The top-level section is the HOST's to set: that is what IShellHost's

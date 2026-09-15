@@ -30,6 +30,7 @@ ShellModulesBackend::ShellModulesBackend(BundledSetCoreRuntime* core, QObject* p
     , m_api(new LogosAPI(QString::fromUtf8(kApiName)))
     , m_modules(new CoreModuleManager(m_api, core, this))
     , m_coreModulesModel(new ModuleInstanceModel(this))
+    , m_uiModulesModel(new ModuleInstanceModel(this))
     , m_storeBackend(new ShellStoreBackend(m_api, m_modules))
     , m_appManager(new basecamp::appmanager::StoreAppManager(m_storeBackend, this))
 {
@@ -270,6 +271,11 @@ QAbstractItemModel* ShellModulesBackend::coreModulesModel() const
     return m_coreModulesModel;
 }
 
+QAbstractItemModel* ShellModulesBackend::uiModulesModel() const
+{
+    return m_uiModulesModel;
+}
+
 QString ShellModulesBackend::buildVersion() const
 {
     return QStringLiteral("mobile");
@@ -303,8 +309,17 @@ basecamp::shell::ModuleFacts ShellModulesBackend::facts() const
 
 QVariantList ShellModulesBackend::snapshot() const
 {
-    QVariantList rows = basecamp::shell::moduleRows(facts());
-    // The only thing the rule above cannot answer: what each module is costing
+    return withStats(basecamp::shell::moduleRows(facts()));
+}
+
+QVariantList ShellModulesBackend::appSnapshot() const
+{
+    return withStats(basecamp::shell::appRows(facts()));
+}
+
+QVariantList ShellModulesBackend::withStats(QVariantList rows) const
+{
+    // The only thing the rules above cannot answer: what each module is costing
     // right now. It is a live reading rather than a fact about the set, and it
     // moves every two seconds -- ModuleInstanceModel patches those two roles in
     // place, which is what keeps the table from flickering on every tick.
@@ -327,6 +342,12 @@ QVariantList ShellModulesBackend::snapshot() const
 void ShellModulesBackend::rebuildRows()
 {
     m_coreModulesModel->replaceRows(snapshot());
+    // AND THE APPS PANE, off the same facts in the same tick (#146). Two models
+    // rather than one filtered in QML: the Apps Inspector binds the same view
+    // type as the Modules tab and would otherwise need a role meaning "this row
+    // is an app" -- which is a fact about the SET, decided by the sidebar's
+    // rule, and not something a row carries.
+    m_uiModulesModel->replaceRows(appSnapshot());
     // AND THE SIDEBAR, when the same facts moved its tiles. A tile carries
     // whether its app is running, and that is a function of the core's loaded
     // set -- so an app unloaded from the Modules tab left a tile still drawn as
@@ -480,6 +501,14 @@ void ShellModulesBackend::refreshCoreModules()
     m_modules->refresh();
 }
 
+// Settings -> Apps Inspector became visible, or its Reload was pressed. The
+// rows are derived from the core's own set, so this is the Modules tab's
+// refresh: one scan answers both panes (#146).
+void ShellModulesBackend::refreshUiModules()
+{
+    m_modules->refresh();
+}
+
 void ShellModulesBackend::loadCoreModule(const QString& moduleName)
 {
     if (isViewModule(moduleName)) {
@@ -608,7 +637,7 @@ void ShellModulesBackend::respondToShellIntent(const QString&, bool, const QVari
 {
     emit log(notHere("app-to-app intents"));
 }
-void ShellModulesBackend::refreshUiModules()   { }
+
 void ShellModulesBackend::refreshRepositories() { emit repositoriesChanged(); }
 void ShellModulesBackend::refreshAppCatalog()   { m_appManager->refreshCatalog(); }
 void ShellModulesBackend::addRepository(const QString& url)

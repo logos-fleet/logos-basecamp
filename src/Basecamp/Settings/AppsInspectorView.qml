@@ -44,6 +44,15 @@ Item {
     readonly property int desktopColumnsWidth: 880
     readonly property bool compact: root.width > 0 && root.width < desktopColumnsWidth
 
+    // The per-row automation handle, in both layouts — the badge is the one
+    // cell every row has, whichever column set is up, so it IS the rendered
+    // list as far as a driver is concerned. Same shape as the Module
+    // Inspector's `moduleInspector.status.<name>` (ShellModulesDriver reads
+    // both, and #146 is about the two panes disagreeing).
+    function statusObjectName(name) {
+        return "appsInspector.status." + (name || "")
+    }
+
     // The app's icon, or the first two letters of its module name when the
     // plugin ships none. Both the desktop and the compact app cell open with
     // one.
@@ -266,7 +275,11 @@ Item {
                             Layout.fillWidth: true
                             spacing: Theme.spacing.small
 
-                            ModuleStatusBadge { row: rowItem }
+                            ModuleStatusBadge {
+                                objectName: root.statusObjectName(
+                                                rowItem ? rowItem.name : "")
+                                row: rowItem
+                            }
 
                             LogosText {
                                 Layout.fillWidth: true
@@ -303,6 +316,8 @@ Item {
 
                 Item {
                     ModuleStatusBadge {
+                        objectName: root.statusObjectName(
+                                        rowItem ? rowItem.name : "")
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
                         row: rowItem
