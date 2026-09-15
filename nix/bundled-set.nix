@@ -80,10 +80,13 @@ let
   # an eval-failure test alone cannot tell "counter ships no ios-sim-arm64" from
   # a typo in the thrower.
   refusals = {
-    missing = { release, catalogNames, name, via }: ''
+    missing = { release, catalogNames, name, via, webModules ? [ ] }: ''
       logos-basecamp: no module '${name}' in catalog '${release}'.
       ${if via == [ ] then "It was named on --bundle." else "It is a dependency of ${lib.concatStringsSep " -> " via}."}
       The catalog holds: ${lib.concatStringsSep ", " catalogNames}
+      ${if webModules == [ ]
+        then "This build ships no `web` modules, so there was no second half to look in."
+        else "The app image's `web` half ships: ${lib.concatStringsSep ", " webModules}"}
     '';
 
     noVariant = { entry, via, target }: ''
@@ -114,7 +117,41 @@ let
   # leaf, which is the difference between "counter ships no ios-sim-arm64" and
   # "you asked for counter_ui; it needs counter; counter ships no
   # ios-sim-arm64".
-  resolveClosure = { index, target, apps }:
+  # THE APP IMAGE HAS TWO HALVES, AND ONLY ONE OF THEM IS THIS CATALOG (#183).
+  #
+  # Beside the Bundled set an app carries `web` modules -- wasm and JavaScript
+  # laid out as lgpm installs them (nix/mobile-web-assets.nix), discovered by the
+  # core and run in the Web container. A page cannot be registered on the host's
+  # provider registry, so the container registers a WebModuleGlue instead: an
+  # ordinary provider object that relays to the page. Every consumer -- another
+  # module included -- reaches a `web` module exactly as it reaches a subprocess
+  # one, and nothing above the container learns it is JavaScript.
+  #
+  # So a Bundled member CAN depend on one, and `keystore_module` is the case
+  # that forced the question: the phone's keystore is a `web` variant with an
+  # idbfs vault (#147), while `wallet_backend_module` and `railgun_module` are
+  # native and name it in `dependencies`. Resolving only the catalog refused
+  # both by name for a module that was running on the device.
+  #
+  # `webModules` is what THIS build ships in that other half. A dependency found
+  # there is SATISFIED and is NOT a member: it is not fetched, verified or
+  # embedded here, because the web half is a different stage of the same image.
+  # It is recorded instead -- `webSatisfied` in bundled-set.json -- because the
+  # device reads that manifest and nothing else, and a set that is complete only
+  # alongside those assets has to say so.
+  #
+  # WHAT THIS DOES NOT DO: walk the web module's own dependencies. They are not
+  # in this index (it is not a catalog member), and the core resolves them on
+  # the device from the installed layout. The ADR 0007 guarantee is unchanged
+  # for everything this file does place in the image -- a Bundled member is
+  # still never filled in later -- and a `web` module is in the image too; what
+  # is not checked here is the half that the core, not the builder, resolves.
+  #
+  # A name in BOTH halves is a Bundled member: the loader brings that one up,
+  # and a rule that preferred the page would silently move a dependency.
+  # A name in the web half ALONE cannot be named on --bundle: `--bundle` names
+  # members of the Bundled set, and a `web` module has no variant to embed.
+  resolveSet = { index, target, apps, webModules ? [ ] }:
     let
       byName = lib.listToAttrs (map (p: { name = p.name; value = p; }) index.packages);
       catalogNames = lib.attrNames byName;
@@ -122,12 +159,14 @@ let
 
       step = acc: { name, via }:
         if lib.elem name acc.order then acc
+        else if via != [ ] && !(byName ? ${name}) && lib.elem name webModules
+        then acc // { web = lib.unique (acc.web ++ [ name ]); }
         else if lib.elem name via
         then throw (refusals.cycle { inherit release name via; })
         else
           let
             entry = byName.${name}
-              or (throw (refusals.missing { inherit release catalogNames name via; }));
+              or (throw (refusals.missing { inherit release catalogNames name via webModules; }));
             ok = if (entry.variants or { }) ? ${target} then true
                  else throw (refusals.noVariant { inherit entry via target; });
             via' = via ++ [ name ];
@@ -136,9 +175,17 @@ let
           assert ok;
           withDeps // { order = withDeps.order ++ [ name ]; };
 
-      resolved = lib.foldl' step { order = [ ]; } (map (a: { name = a; via = [ ]; }) apps);
+      resolved = lib.foldl' step { order = [ ]; web = [ ]; }
+        (map (a: { name = a; via = [ ]; }) apps);
     in
-    map (name: byName.${name}) resolved.order;
+    {
+      members = map (name: byName.${name}) resolved.order;
+      web = resolved.web;
+    };
+
+  # The members alone, which is what every consumer that does not build an image
+  # wants (nix/platform-floor.nix derives a shell's floor from exactly this).
+  resolveClosure = args: (resolveSet args).members;
 
   # ── fetch + verify ─────────────────────────────────────────────────────────
   # One derivation per member, and it is the ONLY place a `.lgx` is opened.
@@ -190,13 +237,15 @@ let
     { catalog          # { index; root; } -- see readCatalog / nix/catalog.nix
     , target           # an LGX variant name, e.g. "ios-sim-arm64"
     , apps             # module names, the way a user spelled them on --bundle
+    , webModules ? [ ] # the `web` modules the SAME app image ships (#183)
     , pname ? "bundled-set"
     }:
     let
       index = catalog.index;
       signers = index.signers or (throw
         "logos-basecamp: catalog '${index.release or "<unnamed>"}' declares no `signers`; there is then no key a member could be checked against");
-      closure = resolveClosure { inherit index target apps; };
+      resolved = resolveSet { inherit index target apps webModules; };
+      closure = resolved.members;
       verified = map (verifyPackage { inherit (catalog) root; inherit signers target; }) closure;
       embedDir = embedDirFor target;
 
@@ -216,9 +265,14 @@ let
         members = lib.concatStringsSep " " (map toString verified);
         requested = lib.concatStringsSep " " apps;
         inherit target embedDir;
+        webSatisfied = lib.concatStringsSep " " resolved.web;
         platformFloorJson = builtins.toJSON floor;
         passthru = {
           inherit target embedDir floor;
+          # The dependencies this set did NOT bundle because the app image's
+          # `web` half carries them (#183). Read by the caller that builds that
+          # half, so the two are resolved together rather than separately.
+          webSatisfied = resolved.web;
           members = verified;
           # The closure, AT EVAL. Everything here is in the catalog index, so a
           # consumer that has to name the images -- the iOS app's embed list,
@@ -274,6 +328,11 @@ let
           "embedDir": embed,
           "requested": os.environ["requested"].split(),
           "modules": modules,
+          # THE OTHER HALF (#183): dependencies of the members above that this
+          # image carries as `web` modules rather than Bundled ones. Recorded
+          # because the device reads this manifest and nothing else, and a set
+          # whose closure is only closed alongside the web assets has to say so.
+          "webSatisfied": os.environ["webSatisfied"].split(),
           # THE PLATFORM FLOOR, as this build derived it (nix/platform-floor.nix).
           # The app compiles this manifest in (BundledSetManifest.h) and the App
           # Manager reads the floor back out of it, which is what lets a shell
@@ -284,11 +343,15 @@ let
       json.dump(manifest, open(os.path.join(out, "bundled-set.json"), "w"),
                 indent=2, sort_keys=True)
       print("==> Bundled set for %s: %s" % (target, ", ".join(m["name"] for m in modules)))
+      if manifest["webSatisfied"]:
+          print("==> satisfied by this image's web half: %s"
+                % ", ".join(manifest["webSatisfied"]))
       PY
     '';
 
 in
 {
-  inherit variantForSystem systemForVariant embedDirFor readCatalog refusals resolveClosure mkBundledSet;
+  inherit variantForSystem systemForVariant embedDirFor readCatalog refusals
+    resolveSet resolveClosure mkBundledSet;
   inherit platformFloor;
 }
