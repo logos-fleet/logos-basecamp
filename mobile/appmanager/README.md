@@ -26,7 +26,8 @@ and "open this URL" — and everything else is plain C++ that a desktop test
 drives. `nix build .#unit-tests` covers every class here in under two seconds
 (`tests/catalog_entry_test.cpp`, `catalog_source_test.cpp`,
 `install_gate_signer_test.cpp`, `consent_queue_test.cpp`,
-`store_app_manager_test.cpp`, `store_module_dirs_test.cpp`).
+`store_app_manager_test.cpp`, `store_module_dirs_test.cpp`,
+`platform_floor_test.cpp`).
 
 ## Where each decision lives, and why it lives there
 
@@ -35,6 +36,7 @@ drives. `nix build .#unit-tests` covers every class here in under two seconds
 | whether a package's variants can run on this build | **package_manager** (`variantAvailability` / `catalogAvailability`) | the variant vocabulary is logos-package's, and a second implementation of "does `darwin-amd64` match `darwin-x86_64`" is a second answer |
 | whether a package may be installed as signed | **package_manager** (`signerTrust`) | the prompt and the installer must not be able to disagree, so one method answers both |
 | whether a cross-module call needs consent | **capability_module** (`requestModule`) | it is the only place every cross-module authority is minted; a gate anywhere else is one a module can route around |
+| whether a Platform module a row needs is in THIS build | **the build** (`nix/platform-floor.nix`), applied here (`PlatformFloor`) | the Bundled set is fixed at build time, so the fact is a property of the app image; the verdict can only be applied here, against a repository the build never saw |
 | what a row is allowed to offer, and which links to open | **here** (`CatalogEntry`) | it is the shell's decision what it will hand to the operating system |
 | the order, and when to stop | **here** (`InstallGate`) | |
 
@@ -58,6 +60,42 @@ A row with **no** availability annotation is not available either. An App Manage
 that read a missing annotation as "fine" would offer an install for every
 native-only package in the catalog, silently, because the row otherwise looks
 complete.
+
+## ...and neither has a row that needs a Platform module this build lacks
+
+ADR 0009's second rule, the mirror of ADR 0007's "a Bundled module may depend
+only on Bundled modules": a Downloaded module may depend on a **Platform**
+module — one that owns access a webview cannot give it, `"platform": true` in
+its metadata.json — only where that module is in the Bundled set of the shell it
+lands on. A Bundled set cannot gain a member at run time, so there is no remedy
+on the device: the install succeeds and the module dies at its first call.
+
+The floor is **derived at build time, never maintained as a list**.
+`nix/platform-floor.nix` reads which catalog members are Platform modules
+(the flag each module declares, carried into the index by nix-bundle-lgx's
+`mkCatalog`) and subtracts the Bundled closure `nix/bundled-set.nix` resolved
+for this shell. `nix/bundled-set.nix` writes the answer into
+`bundled-set.json`:
+
+```json
+"platformFloor": { "present": ["delivery_module"], "absent": ["token_list_module"] }
+```
+
+The build compiles that manifest in (`BundledSetManifest.h`), `ShellModulesBackend`
+reads the floor out of it and `StoreAppManager` applies it to every catalog row:
+
+    chat_module 0.2.2 -- requires delivery_module, not in this build; install control: absent
+
+**The walk is transitive**, and that is the whole reason the floor is derived
+rather than declared. `chat_module` is deliberately *not* a Platform module — it
+is built on one, its network comes from `delivery_module` — and `chat_ui` reaches
+that two edges down through its own dependency on `chat_module`. A floor that
+read only a row's own flag would offer chat_ui on a shell that cannot deliver a
+single message. So the refusal names the Platform module, not the intermediate.
+
+A build whose manifest carries no `platformFloor` declares none, and refuses
+nothing: emptying the App Manager of a shell that works is a worse failure than
+the one the floor prevents.
 
 ## The install order, and why it is the order
 

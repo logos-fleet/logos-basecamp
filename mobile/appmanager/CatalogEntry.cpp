@@ -18,6 +18,23 @@ bool isLoopback(const QString& host)
         || host == QLatin1String("::1");
 }
 
+// The names a manifest's `dependencies` declares: strings, or `{ "name": ... }`
+// entries -- the two spellings an LGX manifest allows. An entry that names
+// nothing is dropped rather than carried as an empty name the floor would then
+// try to walk.
+QStringList dependencyNames(const QVariantList& declared)
+{
+    QStringList names;
+    for (const QVariant& dep : declared) {
+        const QString name = dep.typeId() == QMetaType::QVariantMap
+                                 ? dep.toMap().value(QStringLiteral("name")).toString()
+                                 : dep.toString();
+        if (!name.isEmpty())
+            names.append(name);
+    }
+    return names;
+}
+
 // One catalog link, as the entry carries it: the URL when this shell will open
 // it, else a refusal saying why not.
 //
@@ -78,9 +95,15 @@ CatalogEntry entryFrom(const QVariantMap& annotatedRow,
     // would fetch — versions[] is newest-first out of the downloader.
     const QVariantList versions = annotatedRow.value(QStringLiteral("versions")).toList();
     if (!versions.isEmpty()) {
-        e.version = versions.first().toMap()
-                        .value(QStringLiteral("manifest")).toMap()
-                        .value(QStringLiteral("version")).toString();
+        const QVariantMap manifest =
+            versions.first().toMap().value(QStringLiteral("manifest")).toMap();
+        e.version = manifest.value(QStringLiteral("version")).toString();
+        // The package's own dependency list, as it signed it. A catalog that
+        // publishes none leaves this empty, which is the same answer as "it
+        // depends on nothing" and is the right one: the floor refuses on what a
+        // row SAYS it reaches, never on what it declined to say.
+        e.dependencies =
+            dependencyNames(manifest.value(QStringLiteral("dependencies")).toList());
     }
 
     // Availability is package_manager's verdict and is passed through. A row

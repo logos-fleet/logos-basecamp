@@ -79,6 +79,7 @@ qt_add_executable(BasecampShell
     ${BASECAMP_MOBILE}/appmanager/InstallGate.cpp ${BASECAMP_MOBILE}/appmanager/InstallGate.h
     ${BASECAMP_MOBILE}/appmanager/ModuleCallScript.cpp ${BASECAMP_MOBILE}/appmanager/ModuleCallScript.h
     ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.cpp ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.h
+    ${BASECAMP_MOBILE}/appmanager/PlatformFloor.cpp ${BASECAMP_MOBILE}/appmanager/PlatformFloor.h
     ${BASECAMP_MOBILE}/appmanager/StoreAppManager.cpp ${BASECAMP_MOBILE}/appmanager/StoreAppManager.h
     ${BASECAMP_APP}/ModuleInstanceModel.cpp ${BASECAMP_APP}/ModuleInstanceModel.h
     ${BASECAMP_APP}/CoreModuleManager.cpp ${BASECAMP_APP}/CoreModuleManager.h

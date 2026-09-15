@@ -79,6 +79,14 @@ let
     type = "ui_qml";
     category = "test";
     description = "${name}, published as a `web` variant for a Store shell";
+    # WHAT THE MODULE ITSELF DECLARES, and it is not decoration here (#169). A
+    # Store shell judges a row against its own Platform floor by WALKING this
+    # list: a `web` module that reaches a Platform module the shell did not
+    # bundle must be listed unavailable rather than installed and left to die at
+    # its first call. A package published with an empty list is a package the
+    # floor cannot judge, so the caller passes the module's own
+    # `config.dependencies` rather than letting this default stand.
+    dependencies = [ ];
   } // spec;
 
   # One `web` variant, out of a module's `web` output.
@@ -111,9 +119,8 @@ let
     let spec = specFor name entry; in
     catalog.mkPackage ({
       inherit name;
-      inherit (spec) type description category;
+      inherit (spec) type description category dependencies;
       version = "1.0.0";
-      dependencies = [ ];
       variants.web = webPayload name spec;
       signingKey = { inherit (testKey) jwk name; };
     } // lib.optionalAttrs (spec.type == "ui_qml") {

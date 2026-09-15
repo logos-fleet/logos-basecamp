@@ -6,6 +6,7 @@
 #include "ShellSections.h"
 #include "ShellStoreBackend.h"
 
+#include "appmanager/PlatformFloor.h"
 #include "appmanager/StoreAppManager.h"
 #include "webview/MobileWebContainerBackend.h"
 
@@ -38,6 +39,16 @@ ShellModulesBackend::ShellModulesBackend(BundledSetCoreRuntime* core, QObject* p
     // nothing.
     connect(m_appManager, &basecamp::appmanager::StoreAppManager::log,
             this, &ShellModulesBackend::log);
+
+    // THIS BUILD'S PLATFORM FLOOR (#169), out of the manifest the build wrote
+    // and compiled in. ADR 0009: a Downloaded module may depend on a Platform
+    // module only where this shell bundled it, and a Bundled set cannot gain a
+    // member at run time -- so a catalog row that reaches a Platform module
+    // absent from this image must be listed unavailable rather than installed
+    // and left to die at its first call. Set once, here, because the answer is
+    // a property of the app image and not of anything the App Manager asks.
+    m_appManager->setPlatformFloor(
+        basecamp::appmanager::PlatformFloor::fromBundledSetManifest(core->manifest()));
 
     // A MODULE HAS BEEN INSTALLED, AND THE CORE HAS NOT NOTICED.
     //

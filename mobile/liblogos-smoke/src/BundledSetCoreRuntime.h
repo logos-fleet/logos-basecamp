@@ -53,6 +53,13 @@ public:
     void refreshModules() override;
     QVariantList allStats() const override;
 
+    // THE MANIFEST THIS BUILD COMPILED IN, parsed. Empty when it would not
+    // parse -- the same state start() reports. The Shell reads its Platform
+    // floor out of it (#169): a Bundled set is fixed at build time, so which
+    // Platform modules this app HAS is a fact about the image, and the image's
+    // own manifest is where the build wrote it.
+    const QJsonObject& manifest() const { return m_set; }
+
     // The set as shipped, whether loaded or not: one entry per member, with
     // "name", "version", "type" and "image". This is what a Modules tab lists.
     QVariantList bundledSet() const;

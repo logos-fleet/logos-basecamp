@@ -101,6 +101,30 @@ private slots:
         QVERIFY(e.variant.isEmpty());
     }
 
+    void aRowCarriesTheDependenciesItsManifestDeclares()
+    {
+        // Carried through UNJUDGED, in both spellings an LGX manifest allows.
+        // It is what the Platform floor walks (PlatformFloor, #169): whether a
+        // Downloaded module may be offered at all depends on what it reaches,
+        // and a row that dropped its dependency list here would be offered on a
+        // shell that cannot run it.
+        QVariantMap manifest;
+        manifest[QStringLiteral("version")] = QStringLiteral("1.2.0");
+        manifest[QStringLiteral("dependencies")] = QVariantList{
+            QStringLiteral("delivery_module"),
+            QVariantMap{{QStringLiteral("name"), QStringLiteral("capability_module")}},
+            QStringLiteral(""),
+        };
+        QVariantMap r = row(QStringLiteral("chat_module"), availableAs("web"));
+        r[QStringLiteral("versions")] =
+            QVariantList{QVariantMap{{QStringLiteral("manifest"), manifest}}};
+
+        const CatalogEntry e = entryFrom(r);
+
+        QCOMPARE(e.dependencies, (QStringList{QStringLiteral("delivery_module"),
+                                              QStringLiteral("capability_module")}));
+    }
+
     void aRowWithNoAvailabilityVerdictIsNotOffered()
     {
         // The sharp one. An App Manager that read a MISSING annotation as "fine"

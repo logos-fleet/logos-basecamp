@@ -119,6 +119,49 @@ let
     inherit target;
   };
 
+  # ── the Platform floor (#169) ─────────────────────────────────────────────
+  # DERIVED from this catalog and this closure, never listed: `counter` is a
+  # Platform module the set carries, `desktop_only` is one it does not. The
+  # manifest assertion below is the same answer after a round trip through
+  # bundled-set.json, which is the form the device reads.
+  floor = bundledSet.platformFloor.floorOf {
+    inherit (local) index;
+    closure = bundledSet.resolveClosure {
+      inherit (local) index;
+      inherit target;
+      apps = [ "counter_ui" ];
+    };
+  };
+
+  floorIs = what: got: want:
+    if got == want then true
+    else throw ("FAIL: the derived floor's ${what} is "
+      + lib.concatStringsSep ", " got + "; expected "
+      + lib.concatStringsSep ", " want);
+
+  # THE WALK IS TRANSITIVE, and this is the shape the acceptance criterion
+  # names: `stale_ui` declares `desktop_only` directly, and a hypothetical app
+  # ON it reaches the same missing module two edges down. A floor that read only
+  # a row's own flag would offer that app on a shell that cannot run it.
+  catalogDeps = bundledSet.platformFloor.dependenciesOf local.index;
+  transitiveDeps = catalogDeps // { stale_app = [ "stale_ui" ]; };
+
+  missing = name: bundledSet.platformFloor.missingFor {
+    inherit floor name;
+    dependencies = transitiveDeps;
+  };
+
+  floorRefuses = name: want:
+    if missing name == want then true
+    else throw ("FAIL: the floor's verdict for '${name}' is "
+      + (if missing name == null then "(nothing missing)" else missing name)
+      + "; expected " + (if want == null then "(nothing missing)" else want));
+
+  reasonText = bundledSet.platformFloor.reasonFor "desktop_only";
+  reasonIs =
+    if reasonText == "requires desktop_only, not in this build" then true
+    else throw "FAIL: the floor's refusal reads '${reasonText}'";
+
   refusalNames = word:
     if lib.hasInfix word refusalText then true
     else throw "FAIL: the missing-variant refusal does not mention '${word}':\n${refusalText}";
@@ -133,6 +176,12 @@ assert refusalNames "desktop_only";
 assert refusalNames "darwin-arm64";
 assert refusalNames "linux-x86_64";
 assert refusalNames "stale_ui -> desktop_only";
+assert floorIs "present" floor.present [ "counter" ];
+assert floorIs "absent" floor.absent [ "desktop_only" ];
+assert floorRefuses "stale_ui" "desktop_only";
+assert floorRefuses "stale_app" "desktop_only";
+assert floorRefuses "counter_ui" null;
+assert reasonIs;
 pkgs.runCommand "bundled-set-tests"
   {
     nativeBuildInputs = [ lgx pkgs.python3 ];
@@ -164,6 +213,17 @@ pkgs.runCommand "bundled-set-tests"
   for x in m["modules"]:
       assert len(x["rootHash"]) == 64, x
       assert x["signer"] == os.environ["goodSigner"], x
+  # THE FLOOR, as the device reads it. Everything above is an eval-time
+  # assertion over nix values; this is the same answer after it has been written
+  # to bundled-set.json, which is the only form the app ever sees -- the build
+  # compiles this file in (BundledSetManifest.h) and the App Manager reads the
+  # floor back out of it to judge a repository this build never saw.
+  floor = m["platformFloor"]
+  assert floor["present"] == ["counter"], floor
+  assert floor["absent"] == ["desktop_only"], floor
+  print("platform floor: present %s, absent %s"
+        % (", ".join(floor["present"]), ", ".join(floor["absent"])))
+
   print("manifest: %s" % ", ".join(got))
   PY
 

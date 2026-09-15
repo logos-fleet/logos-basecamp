@@ -86,6 +86,8 @@ add_library(basecamp_shell_host STATIC
     ${BASECAMP_MOBILE}/appmanager/ModuleCallScript.h
     ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.cpp
     ${BASECAMP_MOBILE}/appmanager/ModuleDirectories.h
+    ${BASECAMP_MOBILE}/appmanager/PlatformFloor.cpp
+    ${BASECAMP_MOBILE}/appmanager/PlatformFloor.h
     ${BASECAMP_MOBILE}/appmanager/StoreAppManager.cpp
     ${BASECAMP_MOBILE}/appmanager/StoreAppManager.h
     ${BASECAMP_APP}/ModuleInstanceModel.cpp

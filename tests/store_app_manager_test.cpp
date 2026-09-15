@@ -1,4 +1,4 @@
-// srcdeps: appmanager/StoreAppManager.cpp appmanager/InstallGate.cpp appmanager/CatalogEntry.cpp appmanager/ConsentQueue.cpp
+// srcdeps: appmanager/StoreAppManager.cpp appmanager/InstallGate.cpp appmanager/CatalogEntry.cpp appmanager/ConsentQueue.cpp appmanager/PlatformFloor.cpp
 //
 // THE APP MANAGER ON A STORE SHELL (slice 29).
 //
@@ -19,6 +19,7 @@
 
 #include <QtTest/QtTest>
 
+using basecamp::appmanager::PlatformFloor;
 using basecamp::appmanager::StoreAppManager;
 
 namespace {
@@ -161,6 +162,21 @@ QVariantMap unanchoredSignerVerdict()
     };
 }
 
+// A row whose manifest declares dependencies. The catalog publishes a package's
+// dependency list as the package itself states it (logos-package-downloader
+// carries the whole manifest through), which is what makes the Platform-floor
+// walk a question about data rather than about a table kept here.
+QVariantMap dependentRow(const QString& name, const QStringList& dependencies)
+{
+    QVariantMap row = catalogRow(name, true,
+                                 QStringLiteral("installable here as the 'web' variant"));
+    QVariantMap manifest{{QStringLiteral("version"), QStringLiteral("1.2.0")},
+                         {QStringLiteral("dependencies"), QVariant(dependencies)}};
+    row[QStringLiteral("versions")] =
+        QVariantList{QVariantMap{{QStringLiteral("manifest"), manifest}}};
+    return row;
+}
+
 QVariantMap nativeOnlyRow()
 {
     return catalogRow(QStringLiteral("desktop_only"), false,
@@ -227,6 +243,83 @@ private slots:
         QVERIFY(!native.value(QStringLiteral("canInstall")).toBool());
         QCOMPARE(native.value(QStringLiteral("unavailableReason")).toString(),
                  QStringLiteral("available on macOS and Linux, not in this build"));
+    }
+
+    // ── the Platform floor (#169) ───────────────────────────────────────────
+
+    void aRowThatNeedsAPlatformModuleThisBuildLacksIsNotOffered()
+    {
+        // ADR 0009's second rule, at the only moment it can still be honoured:
+        // a Downloaded module may depend on a Platform module only where that
+        // module is in the Bundled set of the shell it lands on. A Bundled set
+        // is fixed at build time, so "install it and find out" has no remedy --
+        // the module installs and dies at its first call.
+        FakeBackend backend;
+        backend.catalog = QVariantList{
+            dependentRow(QStringLiteral("chat_module"), {QStringLiteral("delivery_module")})};
+        StoreAppManager m(&backend);
+        m.setPlatformFloor(PlatformFloor({}, {QStringLiteral("delivery_module")}));
+
+        m.refreshCatalog();
+
+        const QVariantMap row = rowByName(m, QStringLiteral("chat_module"));
+        QVERIFY(!row.value(QStringLiteral("available")).toBool());
+        QVERIFY(!row.value(QStringLiteral("canInstall")).toBool());
+        QCOMPARE(row.value(QStringLiteral("unavailableReason")).toString(),
+                 QStringLiteral("requires delivery_module, not in this build"));
+        // Nothing to name: there is no variant an install here would use.
+        QVERIFY(row.value(QStringLiteral("variant")).toString().isEmpty());
+    }
+
+    void thePlatformFloorIsWalkedThroughTheCatalogsOwnRows()
+    {
+        // THE SHARP ONE. chat_ui declares chat_module and nothing else, and
+        // chat_module is not itself a Platform module -- it is built on one. The
+        // missing module is two edges down, and the row must still name IT
+        // rather than the intermediate the user has never heard of.
+        FakeBackend backend;
+        backend.catalog = QVariantList{
+            dependentRow(QStringLiteral("chat_ui"), {QStringLiteral("chat_module")}),
+            dependentRow(QStringLiteral("chat_module"), {QStringLiteral("delivery_module")})};
+        StoreAppManager m(&backend);
+        m.setPlatformFloor(PlatformFloor({}, {QStringLiteral("delivery_module")}));
+
+        m.refreshCatalog();
+
+        QCOMPARE(rowByName(m, QStringLiteral("chat_ui"))
+                     .value(QStringLiteral("unavailableReason")).toString(),
+                 QStringLiteral("requires delivery_module, not in this build"));
+    }
+
+    void aShellThatShipsThePlatformModuleStillOffersTheRow()
+    {
+        FakeBackend backend;
+        backend.catalog = QVariantList{
+            dependentRow(QStringLiteral("chat_ui"), {QStringLiteral("chat_module")}),
+            dependentRow(QStringLiteral("chat_module"), {QStringLiteral("delivery_module")})};
+        StoreAppManager m(&backend);
+        m.setPlatformFloor(PlatformFloor({QStringLiteral("delivery_module")}, {}));
+
+        m.refreshCatalog();
+
+        QVERIFY(rowByName(m, QStringLiteral("chat_ui"))
+                    .value(QStringLiteral("canInstall")).toBool());
+    }
+
+    void aBuildThatDeclaredNoFloorLeavesEveryVerdictAlone()
+    {
+        // An app image whose manifest predates the derivation. Refusing the
+        // catalog on that basis would take a working shell's App Manager away,
+        // which is a far worse failure than the one the floor prevents.
+        FakeBackend backend;
+        backend.catalog = QVariantList{
+            dependentRow(QStringLiteral("chat_module"), {QStringLiteral("delivery_module")})};
+        StoreAppManager m(&backend);
+
+        m.refreshCatalog();
+
+        QVERIFY(rowByName(m, QStringLiteral("chat_module"))
+                    .value(QStringLiteral("canInstall")).toBool());
     }
 
     void anInstalledRowReportsItsVersionAndOffersNoInstall()

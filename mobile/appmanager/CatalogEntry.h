@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 #include <QVariantMap>
 
@@ -47,6 +48,13 @@ struct CatalogEntry {
     // The variant an install would use. Empty when unavailable; the Shell names
     // it so "installs into the Web container" is something the user can read.
     QString variant;
+
+    // What the package's own manifest says it depends on, carried through
+    // unjudged. It is what the Platform floor (PlatformFloor, #169) walks: a
+    // Downloaded module may depend on a Platform module only where this shell
+    // bundled it, and that walk is about the catalog's data rather than about
+    // any list kept in the App Manager.
+    QStringList dependencies;
 
     bool    installed = false;
     QString installedVersion;
