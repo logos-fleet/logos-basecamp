@@ -93,12 +93,46 @@
     # eth_rpc through the container. Its whole dependency tree is followed onto
     # this flake's copies so the lock carries one of each rather than six
     # module-builder subtrees; only their published `.lidl` contracts are read.
+    #
+    # ITS LOCK IS WHAT uniswap COMPILES AGAINST, which is why #148 had to move it.
+    # `eth_rpc_module.call` grew a third argument (`deadline_ms`), uniswap's glue
+    # passes it, and the typed client uniswap compiles against is generated from
+    # the contract of THIS input -- so a lock one revision behind failed the
+    # Bundled set's cross build with `this method takes 2 arguments but 3
+    # arguments were supplied`, pointing at uniswap's source and caused by the
+    # eth_rpc pin beside it. Invisible through the workspace flake, which follows
+    # its own newer eth_rpc onto this one; visible the moment this flake is
+    # evaluated on its own lock, which is what `ws test logos-basecamp` and CI do.
+    # Two members of one catalog have to be pinned as a PAIR.
     logos-evm-eth-rpc-module.url = "github:logos-co/logos-evm-eth-rpc-module";
     logos-evm-eth-rpc-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    # `uniswap_module` is the SECOND member of the catalog the wallet reaches
+    # (#148): a Bundled Bare module, the same shape as eth_rpc, and the module
+    # the `web` wallet's Market tab asks for a price. Its own dependency is
+    # eth_rpc, followed onto this flake's copy so the lock carries one of each
+    # and -- far more importantly -- so the Bare image it publishes is stamped
+    # with the SAME logos-protocol version every other bundled module is. A
+    # phone's host gates that stamp at load.
+    #
+    # It has no `web` (wasm) variant to ship: its every method is one
+    # synchronous eth_call through eth_rpc and a wasm image has no outbound
+    # door, so it crosses as native machine code only. See the module's flake.
+    #
+    # LOCKED TO THE logos-fleet FORK, for the same reason and with the same
+    # consequence as logos-capability-module below: upstream publishes no mobile
+    # keys, so a bare `nix flake update` walks the lock back to logos-co and this
+    # catalog entry stops EVALUATING ("attribute 'legacyPackages' missing", then
+    # "attribute 'config' missing"). Re-pin with
+    #   nix flake lock --override-input logos-evm-uniswap-module \
+    #     github:logos-fleet/logos-evm-uniswap-module/<rev>
+    logos-evm-uniswap-module.url = "github:logos-co/logos-evm-uniswap-module";
+    logos-evm-uniswap-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-evm-uniswap-module.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
     logos-evm-wallet-ui.url = "github:logos-co/logos-evm-wallet-ui";
     logos-evm-wallet-ui.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-evm-wallet-ui.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
     logos-evm-wallet-ui.inputs.keystore_module.follows = "logos-evm-keystore-module";
+    logos-evm-wallet-ui.inputs.uniswap_module.follows = "logos-evm-uniswap-module";
     # The capability broker, and a MEMBER of the mobile dev catalog
     # (mobileCatalogFor below): the catalog carries its `bare` output, reached
     # as `legacyPackages.<buildSystem>.mobile.<target>.bare`. A module-to-module
@@ -280,7 +314,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -672,6 +706,26 @@
               category = "wallet";
               description = "Proxyable, fail-closed Ethereum JSON-RPC client";
               module = logos-evm-eth-rpc-module;
+            };
+
+            # ...AND THE SECOND ONE (#148). The wallet's Market tab printed
+            # "Market prices needs uniswap_module, which has no mobile build"
+            # because this entry did not exist: a Bundled set is resolved out of
+            # this catalog, so a module absent from it cannot be on a phone
+            # however well it cross-builds.
+            #
+            # `dependencies` is read off the module's OWN metadata.json rather
+            # than written here, for the reason mkBareSpec gives: the Bundled set
+            # resolves a CLOSURE out of it, so `--bundle uniswap_module` has to
+            # bring eth_rpc_module along without naming it -- and a hand-written
+            # list in a signed manifest is a claim the core would later act on.
+            uniswap_module = mkBareSpec {
+              name = "uniswap_module";
+              version = logos-evm-uniswap-module.config.version;
+              category = "wallet";
+              description = "Uniswap V2/V3/V4 price oracle (Multicall3-batched) + swap building";
+              module = logos-evm-uniswap-module;
+              dependencies = logos-evm-uniswap-module.config.dependencies;
             };
 
             # ── the apps (slices 22 and 27) ──────────────────────────────
