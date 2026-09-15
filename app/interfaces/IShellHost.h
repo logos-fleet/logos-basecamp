@@ -34,7 +34,7 @@ class QWidget;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Bump on ANY vtable change to IShellHost or IShellObserver.
-constexpr int IShellHost_abi = 3;
+constexpr int IShellHost_abi = 4;
 
 // Host → shell notifications. Implemented shell-side by MainContainer.
 //
@@ -63,6 +63,22 @@ public:
     // weaker way to ask the same question, and the shell already knows where it
     // put each widget.
     virtual void onPresentAppRequested(QWidget* widget) = 0;
+
+    // A UI module the shell asked for is NOT COMING. The only negative edge on
+    // this interface, and it exists because the shell has pages that wait for a
+    // widget: the Package Manager section is one, and without this it waited
+    // for the rest of the session on every build that does not ship
+    // package_manager_ui (logos-workspace#145).
+    //
+    // `reason` is the host's own words, meant to be shown. "not a view module
+    // in this Bundled set" and "the plugin crashed on load" are different
+    // instructions to the person reading the screen, and only the host can tell
+    // them apart.
+    //
+    // NOT a guarantee that every dropped load arrives here — a host may park a
+    // load on data that never comes. A shell that waits must still bound its
+    // own wait.
+    virtual void onUiModuleUnavailable(const QString& name, const QString& reason) = 0;
 };
 
 // Shell → host operations. Implemented host-side by ShellHostAdapter.

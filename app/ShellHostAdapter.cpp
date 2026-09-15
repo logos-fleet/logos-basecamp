@@ -42,6 +42,12 @@ ShellHostAdapter::ShellHostAdapter(MainUIBackend* backend, QObject* parent)
         if (!m_observer) return;
         m_observer->onPresentAppRequested(widget);
     });
+
+    connect(m_backend, &MainUIBackend::uiModuleUnavailable, this,
+            [this](const QString& name, const QString& reason) {
+        if (!m_observer) return;
+        m_observer->onUiModuleUnavailable(name, reason);
+    });
 }
 
 ShellHostAdapter::~ShellHostAdapter() = default;

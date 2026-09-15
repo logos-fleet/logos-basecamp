@@ -45,6 +45,7 @@ logos-basecamp/
 │   ├── CMakeLists.txt                    # Plugin build (Qt only, no logos runtime)
 │   ├── MainShellView.h/cpp               # IShellView entry point
 │   ├── MainContainer.h/cpp               # UI coordinator (sidebar + content)
+│   ├── PackageManagerPane.h/cpp          # The Package Manager page without PMUI
 │   ├── WorkspaceArea.h/cpp               # Dock-based app workspace
 │   ├── Basecamp/                         # QML UI files, by feature
 ├── nix/                                  # Nix build modules
@@ -224,6 +225,8 @@ The shell's entire contract is `IShellHost`: a `QWidget*` out, eight named opera
 **Files:** `src/MainContainer.h`, `src/MainContainer.cpp` — plugin side, Qt only
 
 **Purpose:** UI coordinator that assembles the sidebar (QML `SidebarPanel`) and content area (stacked widget with `WorkspaceArea` + QML system views), and routes navigation between them. It does **not** create `MainUIBackend` any more — `Window` owns that and the shell borrows it through `IShellHost`, reaching it from QML as an opaque `QObject*` via `backendObject()`.
+
+Slot 2 of that stack is the Package Manager section, and it is the one page that waits for a widget: `package_manager_ui` is hoisted into it rather than docked. `PackageManagerPane` is what sits there in the meantime, and it has three states rather than the single "Loading…" label it used to be — idle, loading, and unavailable-with-a-reason. A build that does not ship the plugin (a Store shell's Bundled set is data, ADR 0007) now gets the host's refusal on screen via `IShellObserver::onUiModuleUnavailable`, and a load that is neither delivered nor refused is declared dead on the pane's own deadline. See logos-workspace#145.
 
 ### LogosQmlBridge
 

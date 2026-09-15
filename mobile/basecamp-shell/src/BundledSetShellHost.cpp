@@ -122,8 +122,16 @@ void BundledSetShellHost::mountApp(const QString& name)
         return;
     }
     if (!m_backend.isViewModule(name)) {
-        m_backend.report(QStringLiteral("app %1 is not a view module in this Bundled set")
-                             .arg(name));
+        // AND TELL THE SHELL. A Store shell's Bundled set is data (ADR 0007),
+        // so this is the ordinary answer for a desktop `ui_qml` plugin on a
+        // phone -- package_manager_ui above all, which the Shell mounts into a
+        // page of its own and used to wait for forever (logos-workspace#145).
+        // The report alone reaches the Modules tab's log and nothing the user
+        // looking at that page can see.
+        const QString why = QStringLiteral("app %1 is not a view module in this Bundled set")
+                                .arg(name);
+        m_backend.report(why);
+        if (m_observer) m_observer->onUiModuleUnavailable(name, why);
         return;
     }
 
@@ -139,9 +147,11 @@ void BundledSetShellHost::mountApp(const QString& name)
     QObject::connect(runner, &ViewModuleRunner::log,
                      &m_backend, &ShellModulesBackend::report);
     if (!runner->run(surface)) {
-        m_backend.report(QStringLiteral("app %1 did not come up").arg(name));
+        const QString why = QStringLiteral("app %1 did not come up").arg(name);
+        m_backend.report(why);
         delete runner;
         delete surface;
+        if (m_observer) m_observer->onUiModuleUnavailable(name, why);
         return;
     }
 
