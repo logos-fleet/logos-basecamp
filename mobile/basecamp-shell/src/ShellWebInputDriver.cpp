@@ -136,12 +136,15 @@ bool ShellWebInputDriver::ask(const QString& app, const QString& call,
                      .arg(app));
         return false;
     }
-    const int from = m_pageLines.size();
+    // Every line the page prints from here on, each offered exactly once: the
+    // predicates below record what they read, so a line seen twice would be
+    // read twice.
+    int next = m_pageLines.size();
     QElapsedTimer waiting;
     waiting.start();
     for (;;) {
-        for (int i = from; i < m_pageLines.size(); ++i) {
-            if (answered(m_pageLines.at(i))) return true;
+        while (next < m_pageLines.size()) {
+            if (answered(m_pageLines.at(next++))) return true;
         }
         if (waiting.elapsed() >= budgetMs) return false;
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
@@ -176,16 +179,16 @@ void ShellWebInputDriver::run()
     }
 
     for (const Step& step : flow.steps) {
-        bool refused = false;
-        const auto refusal = [&](const QString& line) {
-            refused = WebPageInput::refusalReported(line, step.control);
-            return refused;
-        };
         const bool typing = !step.text.isEmpty();
         const QString call = typing ? WebPageInput::typeCall(step.control, step.text)
                                     : WebPageInput::pressCall(step.control);
+        // A refusal ENDS the wait as surely as the answer does, and the two are
+        // told apart afterwards: waiting a whole budget out for a control the
+        // page has already said it does not have proves nothing and costs 15 s.
+        bool refused = false;
         const auto done = [&](const QString& line) {
-            if (refusal(line)) return true;
+            refused = WebPageInput::refusalReported(line, step.control);
+            if (refused) return true;
             return typing ? WebPageInput::valueReported(line, step.control).has_value()
                           : WebPageInput::pressReported(line, step.control);
         };

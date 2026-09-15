@@ -81,14 +81,12 @@ QString WebPageInput::driverScript()
   };
   var reachable = function (el) { return onCanvas(el.getBoundingClientRect()); };
 
-  // Exactly, then case-insensitively from the front. The second is what lets a
-  // caller ask for 'Account label' when the field's accessible name is its
-  // placeholder, 'Account label (e.g. main)'.
+  // Case-insensitively FROM THE FRONT, which an exact match satisfies too. The
+  // prefix is what lets a caller ask for 'Account label' when the field's
+  // accessible name is its placeholder, 'Account label (e.g. main)'.
   var matches = function (el, name) {
     var own = nameOf(el);
-    if (!own) return false;
-    if (own === name) return true;
-    return own.toLowerCase().indexOf(name.toLowerCase()) === 0;
+    return !!own && own.toLowerCase().indexOf(name.toLowerCase()) === 0;
   };
 
   // ── THE TWO HANDLES A CONTROL CAN HAVE ────────────────────────────────────
@@ -260,7 +258,12 @@ QString WebPageInput::driverScript()
   window.logosDrive = {
     describe: function () {
       afterWaking(function () {
-        var all = controls(), lines = [];
+        var all = controls();
+        if (!all.length) {
+          say('the accessibility tree is empty -- this page published no controls');
+          return;
+        }
+        var lines = [];
         for (var i = 0; i < all.length; i++) {
           if (!reachable(all[i])) continue;
           var r = all[i].getBoundingClientRect();
@@ -268,10 +271,6 @@ QString WebPageInput::driverScript()
                      + (all[i].type ? '[' + all[i].type + ']' : '')
                      + " '" + nameOf(all[i]) + "' at "
                      + Math.round(r.left) + ',' + Math.round(r.top));
-        }
-        if (!all.length) {
-          say('the accessibility tree is empty -- this page published no controls');
-          return;
         }
         say(lines.length + ' reachable control(s) of ' + all.length + ': ' + lines.join(' | '));
       });
@@ -360,8 +359,8 @@ std::optional<QString> WebPageInput::valueReported(const QString& line, const QS
     // answers with a count, and that text IS the answer -- a caller comparing
     // it against what it typed will not match, which is the honest outcome for
     // a field whose contents are deliberately not readable.
-    if (rest.startsWith(QLatin1Char('\'')) && rest.endsWith(QLatin1Char('\''))
-        && rest.size() >= 2)
+    if (rest.size() >= 2 && rest.startsWith(QLatin1Char('\''))
+        && rest.endsWith(QLatin1Char('\'')))
         return rest.mid(1, rest.size() - 2);
     return rest;
 }
