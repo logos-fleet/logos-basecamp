@@ -13,10 +13,12 @@
 //   2. navigating away really puts the Shell back in front;
 //   3. coming back brings the app back;
 //   4. closing it takes the page off screen and leaves the module RUNNING --
-//      closing an app is not an unload (BundledSetShellHost::unmountApp).
+//      closing an app is not an unload (BundledSetShellHost::unmountApp);
+//   5. and unloading the MODULE while the app is open takes the page, the tab
+//      and the container's live-runtime slot with it (#151).
 //
-// Every one of those is false when the page owns the window, and (1) is the
-// only one a driver can even attempt then.
+// Every one of the first four is false when the page owns the window, and (1)
+// is the only one a driver can even attempt then.
 #pragma once
 
 #include "ShellSceneDriver.h"
@@ -56,6 +58,11 @@ private:
     // is and is NOT loaded at startup, so a run that only looked at what was
     // already open would have nothing to open.
     void loadShippedWebModules();
+    // 4 is the user closing the app. This is 5: the module being taken away
+    // while the app is OPEN -- the state logos-workspace#151 was reported in,
+    // which has to take the page, the tab AND the container's live-runtime
+    // slot with it. Runs last, because it leaves the module unloaded.
+    void checkUnloadedWhileOpen(const QString& app);
 
     BundledSetShellHost* m_host;  // not owned
 };

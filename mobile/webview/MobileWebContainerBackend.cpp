@@ -110,6 +110,20 @@ void MobileWebContainerBackend::forget(const QString& moduleName)
     m_budget.forget(moduleName);
     // A page that no longer exists is not in front of anything.
     if (m_frontmost == moduleName) m_frontmost.clear();
+    // AND THE CONSOLE IS TOLD WHAT IS LEFT (#151). show() states the budget and
+    // what is held against it; nothing stated it when a page went away, so the
+    // last word about an unloaded module stayed `web_counter is visible; 1 live
+    // runtime(s), 290 MB of 290 MB` -- true when it was printed, never taken
+    // back, and read beside the Shell's `app web_counter is not mounted` as a
+    // container that had lost track of its own pages. The books were right; the
+    // account of them stopped at the last thing that went well.
+    //
+    // It is also the second half of the pair slice 28 asks for: the memory a
+    // shell holds with a module's UI live, and what it returns to when that UI
+    // is given up.
+    qInfo().noquote() << QStringLiteral("Web container: %1's page is gone; %2")
+                             .arg(moduleName, budgetLine());
+    qInfo().noquote() << appMemoryLine(QStringLiteral("with %1's page gone").arg(moduleName));
     emit viewClosed(moduleName);
 }
 
@@ -223,8 +237,40 @@ QString MobileWebContainerBackend::appMemoryLine(const QString& occasion)
         : QStringLiteral("Web container: app memory %1: %2").arg(occasion, megabytes(bytes));
 }
 
+QString MobileWebContainerBackend::budgetLine() const
+{
+    return QStringLiteral("%1 live runtime(s), %2 of %3")
+        .arg(QString::number(m_budget.live().size()),
+             megabytes(m_budget.projectedBytes()),
+             megabytes(m_budget.budgetBytes()));
+}
+
 QStringList MobileWebContainerBackend::show(const QString& moduleName)
 {
+    // THE BOOKS MAY ONLY NAME A MODULE THIS CONTAINER HAS A PAGE FOR (#151).
+    //
+    // show() is an announcement from the shell -- "the user is looking at this
+    // one" -- and an announcement about a module with no page is stale by
+    // construction: the page went away between the shell deciding and the
+    // container hearing. Written into the books anyway it cost twice. The
+    // budget is ONE on a phone, so a module with no page took the live
+    // runtime's slot and named the module that really was up for eviction: a
+    // tab press on a dead app unloaded the app the user was looking at. And the
+    // line below then said the dead one was visible and holding the runtime,
+    // which is the contradiction #151 was reported as -- `web_counter is
+    // visible; 1 live runtime(s)` from here, `app web_counter is not mounted`
+    // from the Shell, both about a module whose page had been destroyed.
+    //
+    // Nothing is touched on the way out: the page that IS in front stays there,
+    // because nothing on screen changed either.
+    if (!m_views.contains(moduleName)) {
+        qInfo().noquote()
+            << QStringLiteral("Web container: %1 has no page; nothing to show and nothing "
+                              "spent on it (%2)")
+                   .arg(moduleName, budgetLine());
+        return {};
+    }
+
     const QStringList evicted = m_budget.show(moduleName);
 
     // THE SURFACE FOLLOWS THE BOOKS. A page is mounted behind the host's own
@@ -235,11 +281,8 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
         it.value()->setFrontmost(it.key() == moduleName);
     m_frontmost = moduleName;
 
-    qInfo().noquote()
-        << QStringLiteral("Web container: %1 is visible; %2 live runtime(s), %3 of %4")
-               .arg(moduleName, QString::number(m_budget.live().size()),
-                    megabytes(m_budget.projectedBytes()),
-                    megabytes(m_budget.budgetBytes()));
+    qInfo().noquote() << QStringLiteral("Web container: %1 is visible; %2")
+                             .arg(moduleName, budgetLine());
     qInfo().noquote() << appMemoryLine(QStringLiteral("with %1 visible").arg(moduleName));
 
     for (const QString& name : evicted) {

@@ -25,9 +25,25 @@ ShellModulesDriver::ShellModulesDriver(BundledSetShellHost* host, QWidget* shell
 // of what #149 reported.
 void ShellModulesDriver::checkUnloadedWebApp(const QString& name)
 {
-    if (basecamp::web::MobileWebContainerBackend::instance()->hasView(name)) {
+    auto* web = basecamp::web::MobileWebContainerBackend::instance();
+    if (web->hasView(name)) {
         emit log(QStringLiteral("WRONG: %1 is unloaded and the container still has its "
                                 "page").arg(name));
+        return;
+    }
+    // AND THE BOOKS SAY THE SAME THING AS THE PAGES (#151). The budget is what
+    // decides which app may have a QML runtime alive -- ONE of them on a phone
+    // -- so a module with no page left in the live set is 290 MB of budget
+    // spent on nothing, and the next app the user opens has to evict a dead
+    // one to get it back. It is also the half the console disagreed with
+    // itself over: `web_counter is visible; 1 live runtime(s)` from the
+    // container, `app web_counter is not mounted` from the Shell.
+    if (web->budget().isLive(name) || web->budget().visible() == name
+        || web->frontmostModule() == name) {
+        emit log(QStringLiteral("WRONG: %1 is unloaded and the container still counts it "
+                                "-- live: %2, visible: '%3', in front: '%4'")
+                     .arg(name, web->budget().live().join(QStringLiteral(", ")),
+                          web->budget().visible(), web->frontmostModule()));
         return;
     }
     if (m_host->webSurface(name)) {
@@ -57,8 +73,10 @@ void ShellModulesDriver::checkUnloadedWebApp(const QString& name)
                                 "as running").arg(name));
         return;
     }
-    emit log(QStringLiteral("drive modules: %1 unloaded -- no page, no tab, and its tile "
-                            "is on the sidebar and not claiming to be up").arg(name));
+    emit log(QStringLiteral("drive modules: %1 unloaded -- no page, no tab, %2 live "
+                            "runtime(s) held, and its tile is on the sidebar and not "
+                            "claiming to be up")
+                 .arg(name).arg(web->budget().live().size()));
 }
 
 void ShellModulesDriver::run()
@@ -337,6 +355,11 @@ void ShellModulesDriver::run()
         // the dock, `web app web_counter_b has no page any more; its tab is
         // closed` is the last line the process prints; without it, the same
         // unload round-trips.
+        //
+        // The docked case IS driven, once: ShellWebAppDriver::
+        // checkUnloadedWhileOpen does it last in its own pass, on the app it
+        // already has open, where a death costs nothing that has not already
+        // been asserted (#151). This loop still does not risk it per row.
         if (!tap(toggle)) return;
         // A `web` module's unload tears a page down and its load brings 290 MB
         // of QML runtime back up, and both are announced rather than awaited by

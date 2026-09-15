@@ -102,6 +102,19 @@ to liblogos' container, which destroys it when the module is unloaded, and a
 backend that destroyed one behind the container's back would leave a published
 module with a dead channel.
 
+**The books may only name a module this container has a page for**, and both
+halves of that are logos-workspace#151. `show()` is the shell saying "the user
+is looking at this one"; arriving for a module whose page has gone it is stale
+by construction, so it says so and spends nothing — written into the books it
+took the single runtime's slot and named the module that really was up for
+eviction, so a tab press on a dead app unloaded the live one. And `forget()`
+states what is left when a page goes away, because nothing did: the last word
+about an unloaded module stayed `web_counter is visible; 1 live runtime(s), 290
+MB of 290 MB` — true when it was printed, never taken back, and read beside the
+Shell's `app web_counter is not mounted` as a container that had lost track of
+its own pages. The console is the whole of a phone's diagnostic surface; an
+accounting it only ever reports the good news of is not one.
+
 `show()` also puts the module's page in FRONT of the host's own surface and
 sends the others back (`PlatformPage::setFrontmost`). Both phones mount a page
 at the BACK of the hierarchy when it is created, because a webview outside the

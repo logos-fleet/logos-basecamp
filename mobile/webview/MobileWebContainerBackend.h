@@ -223,6 +223,13 @@ private:
     void forget(const QString& moduleName);
     void armPollTimer();
 
+    // WHAT THE BOOKS SAY RIGHT NOW, as the tail of a log line: how many UI
+    // runtimes are alive and what they weigh against the budget. Three lines
+    // state it -- a page shown, a page gone, and a show() for a module with no
+    // page -- and one wording is what lets a device run's console be read as
+    // one account.
+    QString budgetLine() const;
+
     QHash<QString, MobileWebModuleView*> m_views;
     LiveRuntimeBudget m_budget;
     QRect m_contentRect;

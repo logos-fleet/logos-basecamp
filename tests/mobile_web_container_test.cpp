@@ -79,6 +79,53 @@ struct FakeWebView {
     int address = 0;
 };
 
+// WHAT THE CONTAINER SAID WHILE THIS WAS ALIVE.
+//
+// The budget is LOGGED rather than returned -- slice 28 asks the host to say
+// what it is holding, and a number the host never prints cannot be read off a
+// device run. So the console IS the interface for the accounting, and
+// logos-workspace#151 is a report of it saying two things at once: the Shell
+// announcing that nothing is mounted while the container's last word was still
+// "web_counter is visible; 1 live runtime(s)". Lines are forwarded to the
+// handler that was in place, so a failing test still prints everything QtTest
+// would have printed.
+QStringList* g_captured = nullptr;
+QtMessageHandler g_previousHandler = nullptr;
+
+void captureMessage(QtMsgType type, const QMessageLogContext& context, const QString& message)
+{
+    if (g_captured) g_captured->append(message);
+    if (g_previousHandler) g_previousHandler(type, context, message);
+}
+
+class ConsoleLines {
+public:
+    ConsoleLines()
+    {
+        g_captured = &m_lines;
+        g_previousHandler = qInstallMessageHandler(captureMessage);
+    }
+    ~ConsoleLines()
+    {
+        qInstallMessageHandler(g_previousHandler);
+        g_captured = nullptr;
+        g_previousHandler = nullptr;
+    }
+
+    QStringList matching(const QString& needle) const
+    {
+        QStringList found;
+        for (const QString& line : m_lines) {
+            if (line.contains(needle)) found << line;
+        }
+        return found;
+    }
+    QString joined() const { return m_lines.join(QLatin1Char('\n')); }
+
+private:
+    QStringList m_lines;
+};
+
 } // namespace
 
 class MobileWebContainerTest : public QObject {
@@ -474,10 +521,114 @@ private slots:
         // -- which destroys its view through the ordinary container path.
         first.reset();
 
+        // And the user opens it again, which is what pressing its tile does
+        // (#123): a fresh page, and the books name what is there rather than
+        // what used to be. The module that gives its UI up here is `notes_ui`;
+        // naming the destroyed page a second time is a use after free on every
+        // platform this runs on.
+        auto reopened = load("counter_ui");
         QSignalSpy evict(backend, &MobileWebContainerBackend::uiEvictionRequired);
-        backend->show("counter_ui");
+        QCOMPARE(backend->show("counter_ui"), QStringList{"notes_ui"});
         QCOMPARE(evict.count(), 1);
         QCOMPARE(evict.at(0).at(0).toString(), QString("notes_ui"));
+    }
+
+    // ── #151: THE BOOKS MAY ONLY NAME A MODULE THAT HAS A PAGE ─────────────
+    //
+    // A `web` app unloaded from the Modules tab left the Shell holding a tab
+    // onto a page that no longer existed, and raising that tab said so out
+    // loud: `web_counter is visible; 1 live runtime(s), 290 MB of 290 MB` from
+    // this container, beside `app web_counter is not mounted` from the Shell.
+    // The tab is #149's half and is fixed; this is the container's, and it is
+    // the half that costs something -- the phone's single live runtime was
+    // spent on a module with no page, so the next app to open had to evict a
+    // dead one.
+    //
+    // show() is an ANNOUNCEMENT from the Shell ("the user is looking at this"),
+    // and an announcement about a module this container has no page for is
+    // stale by definition: the page is gone and what is left to do is say so,
+    // not to write it into the books.
+    void aModuleWithNoPageIsNotShown()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        auto view = load("counter_ui");
+        backend->show("counter_ui");
+        QCOMPARE(backend->budget().visible(), QStringLiteral("counter_ui"));
+
+        // Unloaded from the Modules tab: the core tears the view down, which is
+        // the one path a page goes away by.
+        view.reset();
+        QVERIFY(!backend->hasView("counter_ui"));
+
+        ConsoleLines console;
+        QCOMPARE(backend->show("counter_ui"), QStringList{});
+        QVERIFY2(backend->budget().live().isEmpty(),
+                 qPrintable(backend->budget().live().join(QLatin1Char(','))));
+        QCOMPARE(backend->budget().visible(), QString());
+        QCOMPARE(backend->frontmostModule(), QString());
+        QCOMPARE(backend->budget().projectedBytes(), Q_INT64_C(0));
+        // AND IT SAYS SO. The console is the whole of a phone's diagnostic
+        // surface, and a container that stayed silent here is what left the
+        // Shell's "not mounted" as the only account of the state.
+        QVERIFY2(!console.matching(QStringLiteral("counter_ui has no page")).isEmpty(),
+                 qPrintable(console.joined()));
+        QVERIFY2(console.matching(QStringLiteral("counter_ui is visible")).isEmpty(),
+                 qPrintable(console.joined()));
+    }
+
+    // AND IT DOES NOT COST THE MODULE THAT IS ACTUALLY UP. With the budget at
+    // one, entering a page-less module in the books names the live one for
+    // eviction -- so a stale tab press took down the app the user was looking
+    // at, to make room for a module that no longer exists.
+    void aStaleShowDoesNotEvictTheModuleThatIsUp()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        auto gone = load("counter_ui");
+        backend->show("counter_ui");
+        gone.reset();
+
+        auto up = load("notes_ui");
+        backend->show("notes_ui");
+        QCOMPARE(backend->budget().live(), QStringList{"notes_ui"});
+
+        QSignalSpy backgrounded(backend, &MobileWebContainerBackend::uiEvicted);
+        QSignalSpy unloadNeeded(backend, &MobileWebContainerBackend::uiEvictionRequired);
+        QCOMPARE(backend->show("counter_ui"), QStringList{});
+
+        QCOMPARE(unloadNeeded.count(), 0);
+        QCOMPARE(backgrounded.count(), 0);
+        QCOMPARE(backend->budget().live(), QStringList{"notes_ui"});
+        QCOMPARE(backend->budget().visible(), QStringLiteral("notes_ui"));
+        QCOMPARE(backend->frontmostModule(), QStringLiteral("notes_ui"));
+        QVERIFY(currentPageFor("notes_ui")->frontmost);
+    }
+
+    // A PAGE GOING AWAY IS THE OTHER HALF OF THE SAME SENTENCE. show() prints
+    // what the container is holding; nothing printed when it stopped holding
+    // it, so the last word about `web_counter` on the console of the run #151
+    // was reported from was that it was visible and alive -- which was true
+    // when it was printed and was never taken back.
+    void aPageGoingAwayIsAnnouncedWithWhatIsLeft()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        auto view = load("counter_ui");
+        backend->show("counter_ui");
+
+        ConsoleLines console;
+        view.reset();
+
+        const QStringList said = console.matching(QStringLiteral("counter_ui"));
+        QVERIFY2(!said.filter(QStringLiteral("page is gone")).isEmpty(),
+                 qPrintable(console.joined()));
+        // The count and the budget, as show() states them: the two numbers a
+        // device run is read against.
+        QVERIFY2(!said.filter(QStringLiteral("0 live runtime(s)")).isEmpty(),
+                 qPrintable(console.joined()));
+        // ...and what the app weighs now it is not holding the page, which is
+        // the pair slice 28 asks for -- the memory with a module's UI live, and
+        // what it returns to.
+        QVERIFY2(!said.filter(QStringLiteral("app memory")).isEmpty(),
+                 qPrintable(console.joined()));
     }
 
     // The shell says what the user is looking at; the surface has to follow,
