@@ -238,25 +238,19 @@ int main(int argc, char* argv[])
     //
     // Nothing, unless it said so (#155). A plain launch is a plain app, on a
     // phone as on the desktop: the passes below exist, print exactly what they
-    // have always printed, and run only when `--drive` names them.
-    //
-    // They used to all fire from one timer, gated only by whether the BUILD
-    // carried something drivable -- so a build carrying everything drove
-    // everything, and a tester opening the app found state a driver had made
-    // and left. DriveScript.h has the whole account of why that had to go.
-    //
-    // `--repository`/`--install`, `--call` and `--consent` are NOT passes and
-    // are unchanged: each is its own script with work to do only when a flag
-    // asked for some, which is the shape this generalises.
+    // have always printed, and run only when `--drive` names them. DriveScript.h
+    // holds the account of why driving stopped being automatic, and of why
+    // `--repository`/`--install`, `--call` and `--consent` are not passes.
     using basecamp::shell::DrivePass;
     const basecamp::shell::DriveScript drive =
         basecamp::shell::DriveScript::fromArguments(app.arguments());
+    const QStringList wantedPasses = drive.passes();
     for (const QString& refusal : drive.refusals())
         console(QStringLiteral("drive: %1").arg(refusal));
-    console(drive.passes().isEmpty()
+    console(wantedPasses.isEmpty()
                 ? QStringLiteral("drive: nothing -- a plain launch. --drive %1 (or all)")
                       .arg(basecamp::shell::DriveScript::knownPasses().join(QLatin1Char(',')))
-                : QStringLiteral("drive: %1").arg(drive.passes().join(QStringLiteral(", "))));
+                : QStringLiteral("drive: %1").arg(wantedPasses.join(QStringLiteral(", "))));
 
     // ── the passes, constructed whether or not they run ───────────────────
     //
@@ -399,7 +393,7 @@ int main(int argc, char* argv[])
                               || drive.wants(DrivePass::Modules);
     // Nothing at all to do is the DEFAULT case, and it costs no timer: the app
     // comes up and waits for whoever is holding the phone.
-    const bool anythingToDo = !drive.passes().isEmpty() || catalog->hasWork()
+    const bool anythingToDo = !wantedPasses.isEmpty() || catalog->hasWork()
                               || calls->hasWork() || consent->hasWork();
 
     if (anythingToDo) {

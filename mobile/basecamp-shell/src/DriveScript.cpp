@@ -22,6 +22,17 @@ const Named kPasses[] = {
     { DrivePass::Modules,  QLatin1String("modules") },
 };
 
+// The pass a name spells, or null. `all` is deliberately absent: it stands for
+// every pass at once rather than for one, and only fromArguments() has a use
+// for it.
+const Named* passNamed(const QString& name)
+{
+    for (const Named& named : kPasses)
+        if (name == named.name)
+            return &named;
+    return nullptr;
+}
+
 // The value that follows the flag, or empty when the flag was last on the line
 // or the next token is itself a flag. The second case is what stops
 // `--drive --call m.f` from reading the flag as a pass name and losing both.
@@ -46,6 +57,10 @@ DriveScript DriveScript::fromArguments(const QStringList& args)
 {
     DriveScript out;
 
+    // Quoted by every refusal, so a name that does not exist arrives with the
+    // whole vocabulary beside it rather than sending the reader to the README.
+    const QString vocabulary = knownPasses().join(QLatin1String(", "));
+
     // Recorded once, in run order, however many times or in whatever order it
     // was asked for.
     const auto select = [&out](DrivePass pass) {
@@ -59,8 +74,7 @@ DriveScript DriveScript::fromArguments(const QStringList& args)
 
         const QString spec = valueAfter(args, i);
         if (spec.isEmpty()) {
-            out.m_refusals << QStringLiteral("--drive needs a pass: %1")
-                                  .arg(knownPasses().join(QLatin1String(", ")));
+            out.m_refusals << QStringLiteral("--drive needs a pass: %1").arg(vocabulary);
             continue;
         }
 
@@ -71,21 +85,12 @@ DriveScript DriveScript::fromArguments(const QStringList& args)
             if (name == kAll) {
                 for (const Named& named : kPasses)
                     select(named.pass);
-                continue;
+            } else if (const Named* named = passNamed(name)) {
+                select(named->pass);
+            } else {
+                out.m_refusals
+                    << QStringLiteral("--drive '%1' is not a pass: %2").arg(name, vocabulary);
             }
-            const Named* found = nullptr;
-            for (const Named& named : kPasses) {
-                if (name == named.name) {
-                    found = &named;
-                    break;
-                }
-            }
-            if (!found) {
-                out.m_refusals << QStringLiteral("--drive '%1' is not a pass: %2")
-                                      .arg(name, knownPasses().join(QLatin1String(", ")));
-                continue;
-            }
-            select(found->pass);
         }
     }
 
