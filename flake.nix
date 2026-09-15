@@ -949,33 +949,29 @@
           pname = "liblogos-smoke-bundled-set";
         };
 
-      # THE `web` HALF OF A PHONE APP: the Qt-wasm QML runtime and the
-      # Downloaded `web` modules this build ships (nix/mobile-web-assets.nix).
-      # Architecture-free wasm and JavaScript, so it is keyed off the BUILD
-      # platform and both phones carry the same bytes.
-      #
-      # `web-view-counter` and `web-view-counter-b` are the two `ui_qml` `web`
-      # variants -- the same instrumented fixture built twice under two names,
-      # which logos-module-builder exports precisely so a container with a
-      # live-runtime budget can be shown enforcing it. `keystore_module` is the
-      # third and is not a fixture: a `core` module with a durable store, which
-      # is the only kind whose criterion needs a SECOND LAUNCH of this app to
-      # ask. Each is absent while a pin predates the output it needs, which is a
-      # pin rollout rather than a defect -- the app then ships whichever exist.
-      # EVERY `web` MODULE THIS BUILD COULD SHIP, ungated by
-      # LOGOS_SHELL_WEB_MODULES. Split out of mobileWebAssetsFor because TWO
-      # stages of one image need it (#183): the assets stage picks from it, and
-      # the Bundled-set closure is resolved against its NAMES -- a native member
-      # whose dependency is in this list is satisfied by the image's web half
-      # rather than refused. Resolving them apart is what made the phone's
-      # `keystore_module` invisible to `wallet_backend_module`.
-      #
       # `set` is where the variant comes from, `name` is what the module is
       # called on this device, `attr` is the output that holds it. Three
       # arguments rather than two because the counters are FIXTURES of the
       # builder and the keystore is a module in its own right -- and the package
       # name and the output name stop coinciding the moment a real module
       # arrives (`keystore_module` out of `web`).
+      webVariantFrom = set: name: attr:
+        nixpkgs.lib.optionalAttrs (set ? ${attr}) { ${name} = set.${attr}; };
+
+      # EVERY `web` MODULE THIS BUILD COULD SHIP, ungated by
+      # LOGOS_SHELL_WEB_MODULES. Split out of mobileWebAssetsFor because TWO
+      # stages of one image need it (#183): the assets stage picks from it, and
+      # the Bundled-set closure is resolved against the NAMES of the half below
+      # -- a native member whose dependency is in that list is satisfied by the
+      # image's web half rather than refused. Resolving them apart is what made
+      # the phone's `keystore_module` invisible to `wallet_backend_module`.
+      #
+      # `web-view-counter` and `web-view-counter-b` are the two `ui_qml` `web`
+      # variants -- the same instrumented fixture built twice under two names,
+      # which logos-module-builder exports precisely so a container with a
+      # live-runtime budget can be shown enforcing it. `keystore_module` is not
+      # a fixture: a `core` module with a durable store, which is the only kind
+      # whose criterion needs a SECOND LAUNCH of this app to ask.
       #
       # Each is absent while a pin predates the output it needs, which is a pin
       # rollout rather than a defect -- the app then ships whichever exist, and
@@ -987,9 +983,6 @@
         webVariantFrom builderPkgs "web_counter" "web-view-counter"
         // webVariantFrom builderPkgs "web_counter_b" "web-view-counter-b"
         // mobileWebModulesFor { inherit androidBuildSystem; };
-
-      webVariantFrom = set: name: attr:
-        nixpkgs.lib.optionalAttrs (set ? ${attr}) { ${name} = set.${attr}; };
 
       # THE HALF A BUNDLED MEMBER MAY DEPEND ON: the `web` variants that are
       # MODULES rather than fixtures of the builder. The Bundled-set closure is
@@ -1016,6 +1009,11 @@
         webVariantFrom keystorePkgs "keystore_module" "web"
         // webVariantFrom walletUiPkgs "wallet_ui" "web";
 
+      # THE `web` HALF OF A PHONE APP: the Qt-wasm QML runtime and the
+      # Downloaded `web` modules this build ships (nix/mobile-web-assets.nix).
+      # Architecture-free wasm and JavaScript, so it is keyed off the BUILD
+      # platform and both phones carry the same bytes.
+      #
       # `alsoShip` is what the Bundled closure resolved against this image's web
       # half (#183) -- the names a native member depends on. They are shipped
       # whether or not LOGOS_SHELL_WEB_MODULES names them, because the

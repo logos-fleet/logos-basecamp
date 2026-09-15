@@ -117,6 +117,7 @@ let
   # leaf, which is the difference between "counter ships no ios-sim-arm64" and
   # "you asked for counter_ui; it needs counter; counter ships no
   # ios-sim-arm64".
+  #
   # THE APP IMAGE HAS TWO HALVES, AND ONLY ONE OF THEM IS THIS CATALOG (#183).
   #
   # Beside the Bundled set an app carries `web` modules -- wasm and JavaScript
@@ -159,8 +160,11 @@ let
 
       step = acc: { name, via }:
         if lib.elem name acc.order then acc
+        # The other half, and only for a DEPENDENCY (`via != [ ]`, so never a
+        # --bundle name) this catalog does not hold (so a name in both halves
+        # stays a member). Recorded, and not walked: see the note above.
         else if via != [ ] && !(byName ? ${name}) && lib.elem name webModules
-        then acc // { web = lib.unique (acc.web ++ [ name ]); }
+        then acc // { webSatisfied = lib.unique (acc.webSatisfied ++ [ name ]); }
         else if lib.elem name via
         then throw (refusals.cycle { inherit release name via; })
         else
@@ -175,16 +179,17 @@ let
           assert ok;
           withDeps // { order = withDeps.order ++ [ name ]; };
 
-      resolved = lib.foldl' step { order = [ ]; web = [ ]; }
+      resolved = lib.foldl' step { order = [ ]; webSatisfied = [ ]; }
         (map (a: { name = a; via = [ ]; }) apps);
     in
     {
       members = map (name: byName.${name}) resolved.order;
-      web = resolved.web;
+      inherit (resolved) webSatisfied;
     };
 
-  # The members alone, which is what every consumer that does not build an image
-  # wants (nix/platform-floor.nix derives a shell's floor from exactly this).
+  # The members alone: the closure a caller wants when it is not building an
+  # image and so has no web half to resolve against -- a Platform floor out of a
+  # catalog (nix/platform-floor.nix takes exactly this list), or a test.
   resolveClosure = args: (resolveSet args).members;
 
   # ── fetch + verify ─────────────────────────────────────────────────────────
@@ -265,14 +270,14 @@ let
         members = lib.concatStringsSep " " (map toString verified);
         requested = lib.concatStringsSep " " apps;
         inherit target embedDir;
-        webSatisfied = lib.concatStringsSep " " resolved.web;
+        webSatisfied = lib.concatStringsSep " " resolved.webSatisfied;
         platformFloorJson = builtins.toJSON floor;
         passthru = {
           inherit target embedDir floor;
           # The dependencies this set did NOT bundle because the app image's
           # `web` half carries them (#183). Read by the caller that builds that
           # half, so the two are resolved together rather than separately.
-          webSatisfied = resolved.web;
+          inherit (resolved) webSatisfied;
           members = verified;
           # The closure, AT EVAL. Everything here is in the catalog index, so a
           # consumer that has to name the images -- the iOS app's embed list,

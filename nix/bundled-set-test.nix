@@ -131,14 +131,14 @@ let
   # laid into the image by a different stage entirely. What the closure does is
   # stop refusing it, and RECORD it -- `webSatisfied` is the only place a
   # reader can see that this set is complete only alongside those assets.
-  webSet = bundledSet.resolveSet {
+  webResolved = bundledSet.resolveSet {
     inherit (local) index;
     inherit target;
     apps = [ "vault_user" ];
     webModules = [ "vault_web" ];
   };
 
-  webMembers = map (e: e.name) webSet.members;
+  webMembers = map (e: e.name) webResolved.members;
 
   webClosureOk =
     let want = [ "capability_module" "counter" "vault_user" ]; in
@@ -148,9 +148,9 @@ let
       + lib.concatStringsSep ", " want);
 
   webSatisfiedOk =
-    if webSet.web == [ "vault_web" ] then true
+    if webResolved.webSatisfied == [ "vault_web" ] then true
     else throw ("FAIL: vault_user's web-satisfied names are "
-      + lib.concatStringsSep ", " webSet.web + "; expected vault_web");
+      + lib.concatStringsSep ", " webResolved.webSatisfied + "; expected vault_web");
 
   # ...AND WITHOUT THE WEB HALF IT IS STILL REFUSED. The rule is that THIS
   # build ships the name, not that any name outside the catalog is fine.
@@ -174,7 +174,7 @@ let
       webModules = [ "vault_web" ];
     });
 
-  webSet' = bundledSet.mkBundledSet {
+  webSatisfiedSet = bundledSet.mkBundledSet {
     catalog = local;
     inherit target;
     apps = [ "vault_user" ];
@@ -192,10 +192,6 @@ let
     via = [ "vault_user" ];
     webModules = [ "web_counter" ];
   };
-
-  missingNames = word:
-    if lib.hasInfix word missingText then true
-    else throw "FAIL: the missing-module refusal does not mention '${word}':\n${missingText}";
 
   # ── the Platform floor (#169) ─────────────────────────────────────────────
   # DERIVED from this catalog and this closure, never listed: `counter` is a
@@ -240,9 +236,12 @@ let
     if reasonText == "requires desktop_only, not in this build" then true
     else throw "FAIL: the floor's refusal reads '${reasonText}'";
 
-  refusalNames = word:
-    if lib.hasInfix word refusalText then true
-    else throw "FAIL: the missing-variant refusal does not mention '${word}':\n${refusalText}";
+  mentions = what: text: word:
+    if lib.hasInfix word text then true
+    else throw "FAIL: the ${what} refusal does not mention '${word}':\n${text}";
+
+  refusalNames = mentions "missing-variant" refusalText;
+  missingNames = mentions "missing-module" missingText;
 
 in
 assert closureOk;
@@ -272,7 +271,7 @@ pkgs.runCommand "bundled-set-tests"
     inherit target;
     set = "${set}";
     pinnedSet = "${pinnedSet}";
-    webSatisfiedSet = "${webSet'}";
+    webSatisfiedSet = "${webSatisfiedSet}";
     catalogRoot = "${local.root}";
     verifyScript = "${./verify-lgx-member.sh}";
     goodSigner = testKey.did;
