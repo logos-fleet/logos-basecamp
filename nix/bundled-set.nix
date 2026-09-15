@@ -63,8 +63,8 @@ let
   # out of the manifest written below -- see nix/platform-floor.nix.
   platformFloor = import ./platform-floor.nix { inherit lib; };
 
-  depNames = entry:
-    map (d: if builtins.isString d then d else d.name) (entry.dependencies or [ ]);
+  # The two spellings a catalog index allows, read in ONE place (above).
+  inherit (platformFloor) depNamesOf;
 
   # A published catalog is a directory with an index.json beside the packages.
   # Reading a DERIVATION this way is import-from-derivation; reading a checked-in
@@ -131,7 +131,7 @@ let
             ok = if (entry.variants or { }) ? ${target} then true
                  else throw (refusals.noVariant { inherit entry via target; });
             via' = via ++ [ name ];
-            withDeps = lib.foldl' step acc (map (d: { name = d; via = via'; }) (depNames entry));
+            withDeps = lib.foldl' step acc (map (d: { name = d; via = via'; }) (depNamesOf entry));
           in
           assert ok;
           withDeps // { order = withDeps.order ++ [ name ]; };

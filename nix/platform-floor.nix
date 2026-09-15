@@ -39,13 +39,13 @@
 # never saw.
 { lib }:
 
-let
-  # Strings, or `{ name = ...; }` entries: the two spellings a catalog index
-  # allows, the same two nix/bundled-set.nix reads.
+rec {
+  # The names an entry declares: strings, or `{ name = ...; }` entries -- the
+  # two spellings a catalog index allows. Exported because nix/bundled-set.nix
+  # walks the same index and a second reading of it could drift.
   depNamesOf = entry:
     map (d: if builtins.isString d then d else d.name) (entry.dependencies or [ ]);
-in
-rec {
+
   # name -> the names it declares, for every package in a catalog index.
   dependenciesOf = index:
     lib.listToAttrs (map (p: { name = p.name; value = depNamesOf p; }) index.packages);

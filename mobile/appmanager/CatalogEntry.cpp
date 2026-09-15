@@ -18,6 +18,23 @@ bool isLoopback(const QString& host)
         || host == QLatin1String("::1");
 }
 
+// The names a manifest's `dependencies` declares: strings, or `{ "name": ... }`
+// entries -- the two spellings an LGX manifest allows. An entry that names
+// nothing is dropped rather than carried as an empty name the floor would then
+// try to walk.
+QStringList dependencyNames(const QVariantList& declared)
+{
+    QStringList names;
+    for (const QVariant& dep : declared) {
+        const QString name = dep.typeId() == QMetaType::QVariantMap
+                                 ? dep.toMap().value(QStringLiteral("name")).toString()
+                                 : dep.toString();
+        if (!name.isEmpty())
+            names.append(name);
+    }
+    return names;
+}
+
 // One catalog link, as the entry carries it: the URL when this shell will open
 // it, else a refusal saying why not.
 //
@@ -85,15 +102,8 @@ CatalogEntry entryFrom(const QVariantMap& annotatedRow,
         // publishes none leaves this empty, which is the same answer as "it
         // depends on nothing" and is the right one: the floor refuses on what a
         // row SAYS it reaches, never on what it declined to say.
-        for (const QVariant& dep : manifest.value(QStringLiteral("dependencies")).toList()) {
-            // Strings, or `{ "name": ... }` entries -- the two spellings an LGX
-            // manifest allows.
-            const QString name = dep.typeId() == QMetaType::QVariantMap
-                                     ? dep.toMap().value(QStringLiteral("name")).toString()
-                                     : dep.toString();
-            if (!name.isEmpty())
-                e.dependencies.append(name);
-        }
+        e.dependencies =
+            dependencyNames(manifest.value(QStringLiteral("dependencies")).toList());
     }
 
     // Availability is package_manager's verdict and is passed through. A row

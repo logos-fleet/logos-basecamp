@@ -40,8 +40,8 @@ PlatformFloor PlatformFloor::fromBundledSetManifest(const QJsonObject& manifest)
     const QJsonValue floor = manifest.value(QLatin1String("platformFloor"));
     if (!floor.isObject())
         return {};
-    return PlatformFloor(stringsAt(floor.toObject(), "present"),
-                         stringsAt(floor.toObject(), "absent"));
+    const QJsonObject declared = floor.toObject();
+    return PlatformFloor(stringsAt(declared, "present"), stringsAt(declared, "absent"));
 }
 
 QString PlatformFloor::missingFor(const QString& name,

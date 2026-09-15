@@ -163,7 +163,7 @@ private:
     Backend*      m_backend;  // not owned
     InstallGate   m_gate;
     PlatformFloor m_floor;
-    ConsentQueue m_consents;
+    ConsentQueue  m_consents;
 
     QList<CatalogEntry> m_entries;
     QString             m_catalogUnavailable;
