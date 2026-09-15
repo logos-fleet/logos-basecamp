@@ -1,9 +1,5 @@
 #include "ShellPopupDriver.h"
 
-#include "BundledSetShellHost.h"
-
-#include <QCoreApplication>
-#include <QEventLoop>
 #include <QImage>
 #include <QPointF>
 #include <QQmlComponent>
@@ -11,7 +7,6 @@
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QQuickWindow>
-#include <QRect>
 #include <QRectF>
 #include <QScopedPointer>
 #include <QUrl>
@@ -128,48 +123,9 @@ constexpr int kOpenSettleMs = 700;
 // screenshot taken from the host has something to photograph. The same round
 // trip the keyboard pass leaves for the same reason.
 constexpr int kHoldMs = 3000;
-
-// Pixels inside `logical` that differ between two frames of the same surface,
-// and how many were looked at.
-//
-// The grabs are in DEVICE pixels and the popup's geometry is in logical ones,
-// so the rectangle is scaled by whatever ratio the two grabs report rather than
-// by a devicePixelRatio read from somewhere else -- a surface that renders at
-// 2x and a surface that renders at 1x both answer correctly.
-struct FrameDiff {
-    int changed = -1;   // -1: there was no pair of frames to compare
-    int looked  = 0;
-};
-
-FrameDiff pixelsChangedIn(const QImage& before, const QImage& after,
-                          const QRectF& logical, const QSizeF& surface)
-{
-    if (before.isNull() || after.isNull() || before.size() != after.size())
-        return {};
-    if (surface.isEmpty() || logical.isEmpty())
-        return {};
-    const qreal scaleX = before.width()  / surface.width();
-    const qreal scaleY = before.height() / surface.height();
-    const QRect box = QRectF(logical.x() * scaleX, logical.y() * scaleY,
-                             logical.width() * scaleX, logical.height() * scaleY)
-                          .toRect()
-                          .intersected(QRect(QPoint(0, 0), before.size()));
-    if (box.isEmpty())
-        return {};
-    const QImage a = before.convertToFormat(QImage::Format_ARGB32);
-    const QImage b = after.convertToFormat(QImage::Format_ARGB32);
-    FrameDiff diff;
-    diff.changed = 0;
-    diff.looked = box.width() * box.height();
-    for (int y = box.top(); y <= box.bottom(); ++y) {
-        const QRgb* rowA = reinterpret_cast<const QRgb*>(a.constScanLine(y));
-        const QRgb* rowB = reinterpret_cast<const QRgb*>(b.constScanLine(y));
-        for (int x = box.left(); x <= box.right(); ++x)
-            if (rowA[x] != rowB[x])
-                ++diff.changed;
-    }
-    return diff;
-}
+// And what a close is given before the next shape's `before` frame is grabbed,
+// so the one that just went away is not counted as the next one appearing.
+constexpr int kCloseSettleMs = 200;
 
 QString popupTypeName(const QVariant& value)
 {
@@ -186,10 +142,8 @@ QString popupTypeName(const QVariant& value)
 
 } // namespace
 
-ShellPopupDriver::ShellPopupDriver(BundledSetShellHost* host, QWidget* shellWidget,
-                                   QObject* parent)
+ShellPopupDriver::ShellPopupDriver(QWidget* shellWidget, QObject* parent)
     : ShellSceneDriver(shellWidget, parent)
-    , m_host(host)
 {
 }
 
@@ -220,9 +174,8 @@ void ShellPopupDriver::run()
 bool ShellPopupDriver::probe(QQuickWidget* surface)
 {
     QQuickItem* root = surface->rootObject();
-    const QString scene = surface->source().fileName().isEmpty()
-                              ? QStringLiteral("<no source>")
-                              : surface->source().fileName();
+    const QString file = surface->source().fileName();
+    const QString scene = file.isEmpty() ? QStringLiteral("<no source>") : file;
     if (!root || !surface->engine()) {
         emit log(QStringLiteral("popups: scene '%1' has no root object to put a popup in")
                      .arg(scene));
@@ -231,16 +184,20 @@ bool ShellPopupDriver::probe(QQuickWidget* surface)
     emit log(QStringLiteral("popups: scene '%1' is %2x%3")
                  .arg(scene).arg(surface->width()).arg(surface->height()));
 
+    // Every shape, whatever the one before it answered -- "the plain Popup
+    // draws and the Menu does not" is the whole diagnosis, and stopping at the
+    // first failure would hide half of it.
     bool any = false;
-    for (const Shape& shape : kShapes)
-        any = probeShape(surface, scene, shape.name, shape.qml) || any;
+    for (const Shape& shape : kShapes) {
+        if (probeShape(surface, scene, shape.name, shape.qml))
+            any = true;
+    }
     return any;
 }
 
 bool ShellPopupDriver::probeShape(QQuickWidget* surface, const QString& scene,
                                   const QString& shape, const char* qml)
 {
-    QQuickItem* root = surface->rootObject();
     QQmlComponent component(surface->engine());
     component.setData(QByteArray(qml), QUrl());
     if (component.isError()) {
@@ -249,8 +206,8 @@ bool ShellPopupDriver::probeShape(QQuickWidget* surface, const QString& scene,
         return false;
     }
     QScopedPointer<QObject> popup(
-        component.createWithInitialProperties({ { QStringLiteral("parent"),
-                                                  QVariant::fromValue(root) } }));
+        component.createWithInitialProperties(
+            { { QStringLiteral("parent"), QVariant::fromValue(surface->rootObject()) } }));
     if (!popup) {
         emit log(QStringLiteral("popups: the %1 probe would not instantiate in '%2': %3")
                      .arg(shape, scene, component.errorString().trimmed()));
@@ -266,10 +223,10 @@ bool ShellPopupDriver::probeShape(QQuickWidget* surface, const QString& scene,
     popup->setProperty("x", (surface->width() - width) / 2.0);
     popup->setProperty("y", (surface->height() - height) / 2.0);
 
-    const QImage before = surface->grabFramebuffer();
+    const QImage before = frameOf(surface);
     QMetaObject::invokeMethod(popup.data(), "open");
     settle(kOpenSettleMs);
-    const QImage after = surface->grabFramebuffer();
+    const QImage after = frameOf(surface);
 
     // ── what the scene says ──
     // The fill, looked up the way every other pass looks a control up. Finding
@@ -291,24 +248,28 @@ bool ShellPopupDriver::probeShape(QQuickWidget* surface, const QString& scene,
                                 "renders -- nothing it draws can reach the screen")
                      .arg(shape, scene));
         QMetaObject::invokeMethod(popup.data(), "close");
-        settle(200);
+        settle(kCloseSettleMs);
         return true;
     }
 
     // ── what the frame says ──
-    // The fill's OWN rectangle in the scene, not the one asked for above: a
-    // dialog centred on the Overlay and a menu positioned by the style both
-    // decide where they are, and a pixel test aimed anywhere else would be
-    // measuring the background.
+    // Measured and reported at the FILL'S OWN rectangle, not the one asked for
+    // above: a dialog centred on the Overlay and a menu positioned by the style
+    // both decide where they are, and a pixel test aimed anywhere else would be
+    // measuring the background. `here` means the fill is in this surface's
+    // scene, so pixelsChangedUnder -- which finds the surface from the item --
+    // reads the two frames grabbed above. `looked` is 0 when there was no pair
+    // of frames to compare at all, which is not "not one pixel changed".
     const QRectF where(fill->mapToScene(QPointF(0, 0)),
                        QSizeF(fill->width(), fill->height()));
-    const FrameDiff diff = pixelsChangedIn(before, after, where, QSizeF(surface->size()));
+    int looked = 0;
+    const int changed = pixelsChangedUnder(fill, before, after, &looked);
     const QPointF onScreen = surface->mapToGlobal(where.topLeft());
-    if (diff.changed < 0) {
+    if (looked == 0) {
         emit log(QStringLiteral("popups: '%1' rendered no frame to compare "
                                 "(grab %2x%3) -- nothing can be said about the %4")
                      .arg(scene).arg(before.width()).arg(before.height()).arg(shape));
-    } else if (diff.changed == 0) {
+    } else if (changed == 0) {
         emit log(QStringLiteral("WRONG: '%1' draws no %2 -- a %3x%4 %5 rectangle is open "
                                 "at (%6, %7) in the scene and not one of the %8 pixels "
                                 "under it changed in the surface's frame")
@@ -316,11 +277,11 @@ bool ShellPopupDriver::probeShape(QQuickWidget* surface, const QString& scene,
                      .arg(where.width(), 0, 'f', 0).arg(where.height(), 0, 'f', 0)
                      .arg(kProbeColour)
                      .arg(where.x(), 0, 'f', 0).arg(where.y(), 0, 'f', 0)
-                     .arg(diff.looked));
+                     .arg(looked));
     } else {
         emit log(QStringLiteral("popups: '%1' PAINTS the %2 -- %3 of %4 pixels changed "
                                 "under it")
-                     .arg(scene, shape).arg(diff.changed).arg(diff.looked));
+                     .arg(scene, shape).arg(changed).arg(looked));
         emit log(QStringLiteral("popups: it is at (%1, %2) %3x%4 on the screen; holding it "
                                 "for %5 ms so a screenshot can see it")
                      .arg(onScreen.x(), 0, 'f', 0).arg(onScreen.y(), 0, 'f', 0)
@@ -330,6 +291,6 @@ bool ShellPopupDriver::probeShape(QQuickWidget* surface, const QString& scene,
     }
 
     QMetaObject::invokeMethod(popup.data(), "close");
-    settle(200);
+    settle(kCloseSettleMs);
     return true;
 }

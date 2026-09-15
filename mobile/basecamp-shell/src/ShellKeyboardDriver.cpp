@@ -298,13 +298,13 @@ void ShellKeyboardDriver::reportPainted(const QString& name, QQuickItem* item,
         return;
     }
     if (changed == 0) {
+        const QPointF at = item->mapToScene(QPointF(0, 0));
         emit log(QStringLiteral("WRONG: '%1' is %2x%3 at (%4, %5) in the app's scene and "
                                 "NOT ONE of the %6 pixels under it changed when it opened "
                                 "-- the surface draws no trace of it")
                      .arg(name)
                      .arg(item->width(), 0, 'f', 0).arg(item->height(), 0, 'f', 0)
-                     .arg(item->mapToScene(QPointF(0, 0)).x(), 0, 'f', 0)
-                     .arg(item->mapToScene(QPointF(0, 0)).y(), 0, 'f', 0)
+                     .arg(at.x(), 0, 'f', 0).arg(at.y(), 0, 'f', 0)
                      .arg(looked));
         dumpAncestry(item, QStringLiteral("'%1' is not drawn").arg(name));
         return;

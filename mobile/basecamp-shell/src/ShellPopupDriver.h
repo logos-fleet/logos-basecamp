@@ -16,7 +16,7 @@
 //
 // Two verdicts, and the second is not implied by the first:
 //
-//   1. is the popup in the surface's RENDERED FRAME? QQuickWidget::grab()
+//   1. is the popup in the surface's RENDERED FRAME? A QQuickWidget's grab
 //      re-renders the scene, so a popup missing there is missing from the
 //      scene graph -- the popup went somewhere else (a popup WINDOW, which a
 //      QQuickWidget has no way to show) or is not drawn at all.
@@ -30,7 +30,6 @@
 
 #include <QString>
 
-class BundledSetShellHost;
 class QQuickWidget;
 class QWidget;
 
@@ -38,8 +37,9 @@ class ShellPopupDriver : public ShellSceneDriver
 {
     Q_OBJECT
 public:
-    ShellPopupDriver(BundledSetShellHost* host, QWidget* shellWidget,
-                     QObject* parent = nullptr);
+    // Needs no host: the probe is the Shell's own scenes and a popup of its
+    // own, with no module, no network and no conversation behind it.
+    explicit ShellPopupDriver(QWidget* shellWidget, QObject* parent = nullptr);
 
     // Every scene the Shell owns, and a mounted app's too when one is up.
     void run();
@@ -54,6 +54,4 @@ private:
     // changed where it landed.
     bool probeShape(QQuickWidget* surface, const QString& scene, const QString& shape,
                     const char* qml);
-
-    BundledSetShellHost* m_host;  // not owned
 };

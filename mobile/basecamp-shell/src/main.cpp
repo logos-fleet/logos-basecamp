@@ -319,7 +319,7 @@ int main(int argc, char* argv[])
     // path a user cannot see as working. This one carries its own popup and
     // reads pixels; it needs no module and no network, so it is the cheap half
     // of that diagnosis. ShellPopupDriver.h has the rest.
-    auto* popups = new ShellPopupDriver(&host, shellWidget, &app);
+    auto* popups = new ShellPopupDriver(shellWidget, &app);
     QObject::connect(popups, &ShellPopupDriver::log, &console);
 
     // AND THE KEYBOARD, for the app's own input fields: the app's "+", its New
