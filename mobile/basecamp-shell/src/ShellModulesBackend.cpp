@@ -307,16 +307,6 @@ basecamp::shell::ModuleFacts ShellModulesBackend::facts() const
     return out;
 }
 
-QVariantList ShellModulesBackend::snapshot() const
-{
-    return withStats(basecamp::shell::moduleRows(facts()));
-}
-
-QVariantList ShellModulesBackend::appSnapshot() const
-{
-    return withStats(basecamp::shell::appRows(facts()));
-}
-
 QVariantList ShellModulesBackend::withStats(QVariantList rows) const
 {
     // The only thing the rules above cannot answer: what each module is costing
@@ -341,13 +331,18 @@ QVariantList ShellModulesBackend::withStats(QVariantList rows) const
 
 void ShellModulesBackend::rebuildRows()
 {
-    m_coreModulesModel->replaceRows(snapshot());
+    // ONE READING, for all three things derived from it below. They are three
+    // answers about the same set, and a call apiece would let them be built
+    // from different ones.
+    const basecamp::shell::ModuleFacts current = facts();
+
+    m_coreModulesModel->replaceRows(withStats(basecamp::shell::moduleRows(current)));
     // AND THE APPS PANE, off the same facts in the same tick (#146). Two models
     // rather than one filtered in QML: the Apps Inspector binds the same view
     // type as the Modules tab and would otherwise need a role meaning "this row
     // is an app" -- which is a fact about the SET, decided by the sidebar's
     // rule, and not something a row carries.
-    m_uiModulesModel->replaceRows(appSnapshot());
+    m_uiModulesModel->replaceRows(withStats(basecamp::shell::appRows(current)));
     // AND THE SIDEBAR, when the same facts moved its tiles. A tile carries
     // whether its app is running, and that is a function of the core's loaded
     // set -- so an app unloaded from the Modules tab left a tile still drawn as
@@ -355,7 +350,7 @@ void ShellModulesBackend::rebuildRows()
     //
     // Compared rather than announced: this runs on every stats tick, and a
     // sidebar told to rebuild every two seconds is a sidebar that flickers.
-    QVariantList tiles = basecamp::shell::launcherApps(facts());
+    QVariantList tiles = basecamp::shell::launcherApps(current);
     if (tiles != m_announcedApps) {
         m_announcedApps = std::move(tiles);
         emit launcherAppsChanged();
@@ -502,11 +497,11 @@ void ShellModulesBackend::refreshCoreModules()
 }
 
 // Settings -> Apps Inspector became visible, or its Reload was pressed. The
-// rows are derived from the core's own set, so this is the Modules tab's
+// rows are derived from the core's own set, so this IS the Modules tab's
 // refresh: one scan answers both panes (#146).
 void ShellModulesBackend::refreshUiModules()
 {
-    m_modules->refresh();
+    refreshCoreModules();
 }
 
 void ShellModulesBackend::loadCoreModule(const QString& moduleName)

@@ -79,6 +79,34 @@ void ShellModulesDriver::checkUnloadedWebApp(const QString& name)
                  .arg(name).arg(web->budget().live().size()));
 }
 
+// THE NAMES A PANE IS DRAWING, read off the SCENE rather than off its model:
+// the model is built from the manifest, so the two agreeing would prove only
+// that this host can copy a list. What can still go wrong above it is the view
+// -- a filter proxy dropping a row, a delegate that never instantiated, a
+// table showing a module the manifest does not account for -- and each row's
+// status badge is objectName'd `<prefix><name>`, so the badges ARE the
+// rendered list.
+//
+// `firstExpected` is one row the pane should have, waited for because a view
+// that has just become visible instantiates its delegates over the next few
+// ticks: cacheBuffer keeps every row alive once made, but not necessarily by
+// the tick the view appeared in. Both layouts may carry a badge for the same
+// row, hence the de-duplication.
+QStringList ShellModulesDriver::rowNamesOnScreen(const QString& prefix,
+                                                 const QString& firstExpected)
+{
+    waitFor(prefix + firstExpected, 5000);
+
+    QStringList rows;
+    forEachItem([&rows, &prefix](QQuickItem* item) {
+        if (item->objectName().startsWith(prefix))
+            rows << item->objectName().mid(prefix.size());
+    });
+    rows.removeDuplicates();
+    rows.sort();
+    return rows;
+}
+
 // WHICH PANE LISTS AN APP (#146).
 //
 // Settings has a Module Inspector -- "Core modules known to the runtime", which
@@ -117,20 +145,8 @@ void ShellModulesDriver::checkAppsInspector()
         apps << value.toMap().value(QStringLiteral("name")).toString();
     apps.sort();
 
-    QStringList rows;
-    {
-        const QString prefix = QStringLiteral("appsInspector.status.");
-        // One delegate at a time, as the Modules tab does: cacheBuffer keeps
-        // every row instantiated but not necessarily by the tick the view
-        // appeared in.
-        waitFor(prefix + apps.value(0), 5000);
-        forEachItem([&rows, &prefix](QQuickItem* item) {
-            if (item->objectName().startsWith(prefix))
-                rows << item->objectName().mid(prefix.size());
-        });
-        rows.removeDuplicates();
-        rows.sort();
-    }
+    const QStringList rows =
+        rowNamesOnScreen(QStringLiteral("appsInspector.status."), apps.value(0));
     emit log(QStringLiteral("apps tab rows:   %1")
                  .arg(rows.isEmpty() ? QStringLiteral("(none)")
                                      : rows.join(QStringLiteral(", "))));
@@ -202,30 +218,13 @@ void ShellModulesDriver::run()
     emit log(QStringLiteral("shell: Settings -> Module Inspector is on screen"));
 
     // ── 2. the rows on screen ARE what the app SHIPS ──
-    // Counted off the SCENE, not off the model: the model is built from the
-    // manifest, so the two agreeing would prove only that this host can copy
-    // a list. What can still go wrong above it is the view -- a filter proxy
-    // dropping a row, a delegate that never instantiated, a table showing a
-    // module the manifest does not account for -- and each row's status badge
-    // carries its module's name, so the badges ARE the rendered list.
     // The Bundled-set manifest PLUS the app's own `web-modules` tree. Both came
     // in with the app image; the manifest names only the native Bare
     // frameworks, and a shell that asserted on it alone would fail on its own
     // shipped `web` modules the moment it carried a Web container.
     const QStringList set = backend->shippedModuleNames();
-    QStringList rows;
-    {
-        const QString prefix = QStringLiteral("moduleInspector.status.");
-        // One delegate at a time: the table keeps every row instantiated
-        // (cacheBuffer), but not necessarily by the tick the view appeared in.
-        waitFor(prefix + set.value(0), 5000);
-        forEachItem([&rows, &prefix](QQuickItem* item) {
-            if (item->objectName().startsWith(prefix))
-                rows << item->objectName().mid(prefix.size());
-        });
-        rows.removeDuplicates();
-        rows.sort();
-    }
+    const QStringList rows =
+        rowNamesOnScreen(QStringLiteral("moduleInspector.status."), set.value(0));
     QStringList expected = set;
     expected.sort();
     emit log(QStringLiteral("modules tab rows: %1")

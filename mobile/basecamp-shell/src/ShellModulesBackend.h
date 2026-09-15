@@ -344,10 +344,6 @@ private:
     // the names are unchanged, which is what keeps the table from flickering
     // every two seconds.
     void rebuildRows();
-    QVariantList snapshot() const;
-    // The same, for the Apps Inspector: only the rows the sidebar carries a
-    // tile for (#146).
-    QVariantList appSnapshot() const;
     // What the Native container is measuring for each of these, added to rows
     // that are otherwise a pure function of `facts()`. One decoration for both
     // panes, so an app's figure cannot differ between them.
@@ -360,10 +356,10 @@ private:
     LogosAPI*              m_api;     // owned
     CoreModuleManager*     m_modules; // owned (parent = this)
     ModuleInstanceModel*   m_coreModulesModel;
-    // The Apps Inspector's rows: the subset of the above the sidebar carries a
-    // tile for. Its own model rather than a QML-side filter, because the two
-    // panes bind the same view type and a proxy would need a role that says
-    // "this row is an app" -- which is a fact about the SET, not about a row.
+    // The Apps Inspector's rows -- see `uiModulesModel` above. Its own model
+    // rather than a QML-side filter, because the two panes bind the same view
+    // type and a proxy would need a role that says "this row is an app" --
+    // which is a fact about the SET, not about a row.
     ModuleInstanceModel*   m_uiModulesModel;
     // AFTER m_api and m_modules, and that is not cosmetic: members are
     // initialised in DECLARATION order regardless of what the constructor's

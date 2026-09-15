@@ -16,6 +16,8 @@
 
 #include "ShellSceneDriver.h"
 
+#include <QStringList>
+
 class BundledSetShellHost;
 
 class ShellModulesDriver : public ShellSceneDriver
@@ -33,18 +35,12 @@ public:
     void run();
 
 private:
-    // Settings -> Apps Inspector, before anything is loaded or unloaded.
-    //
-    // THE OTHER PANE (logos-workspace#146). Settings draws two inspectors and
-    // the acceptance pass only ever read one of them, so nothing noticed that
-    // on a phone the Apps one was EMPTY: `uiModulesModel` was null, a `web` app
-    // was listed under Modules and nowhere else, and the same Shell was drawing
-    // it a sidebar tile and mounting it in the dock.
-    //
-    // Read off the SCENE and compared with the TILES, for the reason the
-    // Modules check is: the two panes are two answers to "what is an app", and
-    // the sidebar is the third. A model compared with itself would prove only
-    // that this host can copy a list.
+    // The names a pane has rows on screen for, sorted and de-duplicated; see
+    // the definition for what `firstExpected` is waited for.
+    QStringList rowNamesOnScreen(const QString& prefix, const QString& firstExpected);
+
+    // Settings -> Apps Inspector checked against the sidebar's tiles, which is
+    // THE OTHER PANE the acceptance pass never read (logos-workspace#146).
     //
     // Read-only, and first: everything after it changes what is loaded.
     void checkAppsInspector();
