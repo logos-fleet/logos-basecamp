@@ -28,6 +28,7 @@
 #include "ShellCallDriver.h"
 #include "ShellCatalogDriver.h"
 #include "ShellConsentDriver.h"
+#include "ShellKeyboardDriver.h"
 #include "ShellModulesDriver.h"
 #include "ShellWebAppDriver.h"
 #include "ShellSections.h"
@@ -262,6 +263,13 @@ int main(int argc, char* argv[])
     auto* apps = new ShellAppDriver(&host, shellWidget, &app);
     QObject::connect(apps, &ShellAppDriver::log, &console);
 
+    // AND THE KEYBOARD, for the app's own input fields. Straight after the app
+    // driver, because it needs the app on screen and it must not run behind the
+    // web-app driver: opening a page hands the workspace to a platform view and
+    // the question here is about the Shell's own focus chain.
+    auto* keyboard = new ShellKeyboardDriver(&host, shellWidget, &app);
+    QObject::connect(keyboard, &ShellKeyboardDriver::log, &console);
+
     // AND THE WEB APP, opened and LEFT AGAIN. A `web` module's UI is a platform
     // page rather than a widget, and the tile-press check above is satisfied by
     // a page that covers the Shell whole -- which is how a user ended up inside
@@ -329,8 +337,8 @@ int main(int argc, char* argv[])
         catalog->openLinks();
     };
 
-    QTimer::singleShot(0, &app, [network, driver, apps, webApps, catalog, calls, consent,
-                                 finishOnTheApp]() {
+    QTimer::singleShot(0, &app, [network, driver, apps, keyboard, webApps, catalog,
+                                 calls, consent, finishOnTheApp]() {
         // The catalog FIRST when there is one: the module it installs is what
         // the Modules tab and the sidebar then have to account for, and a run
         // pointed at a catalog is a developer's rather than a cold-start
@@ -361,6 +369,7 @@ int main(int argc, char* argv[])
             // local-network prompt on a device) with the group exchange
             // perfectly fine.
             apps->run(network->madeConversation());
+            if (keyboard->hasWork()) keyboard->run();
             if (webApps->hasWork()) webApps->run();
             driver->run();
             finishOnTheApp();
@@ -369,8 +378,10 @@ int main(int argc, char* argv[])
             // Nothing ran ahead of it, so the tab needs its own settle: a QML
             // item has no geometry until the scene has painted, and a press
             // at the centre of a zero-sized button lands on nothing.
-            QTimer::singleShot(2500, driver, [driver, apps, webApps, finishOnTheApp]() {
+            QTimer::singleShot(2500, driver, [driver, apps, keyboard, webApps,
+                                              finishOnTheApp]() {
                 apps->run();
+                if (keyboard->hasWork()) keyboard->run();
                 if (webApps->hasWork()) webApps->run();
                 driver->run();
                 finishOnTheApp();

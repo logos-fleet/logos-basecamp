@@ -44,12 +44,16 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/BundledSetShellHost.h
     ${SRC}/WebAppSurface.cpp
     ${SRC}/WebAppSurface.h
+    ${SRC}/QuickWidgetKeyboardFocus.cpp
+    ${SRC}/QuickWidgetKeyboardFocus.h
     ${SRC}/ShellSceneDriver.cpp
     ${SRC}/ShellSceneDriver.h
     ${SRC}/ShellModulesDriver.cpp
     ${SRC}/ShellModulesDriver.h
     ${SRC}/ShellAppDriver.cpp
     ${SRC}/ShellAppDriver.h
+    ${SRC}/ShellKeyboardDriver.cpp
+    ${SRC}/ShellKeyboardDriver.h
     ${SRC}/ShellWebAppDriver.cpp
     ${SRC}/ShellWebAppDriver.h
     ${SRC}/ShellCatalogDriver.cpp
