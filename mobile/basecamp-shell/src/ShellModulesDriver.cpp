@@ -25,8 +25,7 @@ ShellModulesDriver::ShellModulesDriver(BundledSetShellHost* host, QWidget* shell
 // of what #149 reported.
 void ShellModulesDriver::checkUnloadedWebApp(const QString& name)
 {
-    auto* web = basecamp::web::MobileWebContainerBackend::instance();
-    if (web->hasView(name)) {
+    if (basecamp::web::MobileWebContainerBackend::instance()->hasView(name)) {
         emit log(QStringLiteral("WRONG: %1 is unloaded and the container still has its "
                                 "page").arg(name));
         return;
@@ -39,14 +38,14 @@ void ShellModulesDriver::checkUnloadedWebApp(const QString& name)
     // AND THE TILE STAYS, which is not the same claim. The app is installed
     // whether or not it is running, so the sidebar carries it and the press is
     // what loads it (#123) -- but it must not go on claiming to be up.
-    const auto tileOf = [this](const QString& wanted) {
-        for (const QVariant& value : m_host->backend()->launcherApps()) {
-            const QVariantMap tile = value.toMap();
-            if (tile.value(QStringLiteral("name")).toString() == wanted) return tile;
+    QVariantMap tile;
+    for (const QVariant& value : m_host->backend()->launcherApps()) {
+        const QVariantMap candidate = value.toMap();
+        if (candidate.value(QStringLiteral("name")).toString() == name) {
+            tile = candidate;
+            break;
         }
-        return QVariantMap();
-    };
-    const QVariantMap tile = tileOf(name);
+    }
     if (tile.isEmpty()) {
         emit log(QStringLiteral("WRONG: unloading %1 took its tile off the sidebar -- the "
                                 "app is still installed and pressing it is what loads it")
@@ -229,13 +228,13 @@ void ShellModulesDriver::run()
     const QStringList bundled = backend->bundledSetNames();
     QStringList stats;
     QStringList missingFigure;
-    int loadedCoreRows = 0;
+    int loadedBundledRows = 0;
     for (const QString& name : rows) {
         QObject* row = modelRow(name);
         const bool loaded = row && row->property("isLoaded").toBool();
         const bool owesAFigure = loaded && !isHostRow(row) && bundled.contains(name);
         if (owesAFigure)
-            ++loadedCoreRows;
+            ++loadedBundledRows;
 
         QQuickItem* cpu = find(QStringLiteral("moduleInspector.cpu.%1").arg(name));
         QQuickItem* memory = find(QStringLiteral("moduleInspector.memory.%1").arg(name));
@@ -280,9 +279,9 @@ void ShellModulesDriver::run()
                      .arg(missingFigure.join(QStringLiteral(", "))));
         return;
     }
-    emit log(loadedCoreRows > 0
+    emit log(loadedBundledRows > 0
                  ? QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS (%1 loaded "
-                                  "Bundled row(s), each with a figure)").arg(loadedCoreRows)
+                                  "Bundled row(s), each with a figure)").arg(loadedBundledRows)
                  : QStringLiteral("SHELL MODULES TAB SHOWS THE SET'S STATS "
                                   "(no Bundled core module is loaded, so every row it "
                                   "could measure is an em dash)"));
@@ -322,6 +321,9 @@ void ShellModulesDriver::run()
         if (!toggle || !toggle->isEnabled() || !toggle->isVisible())
             continue;
 
+        // Asked once: it is the row's kind, and the three things below that
+        // turn on it happen inside a single press-wait-press.
+        const bool webApp = backend->isWebContainerApp(name);
         const bool before = isLoaded(name);
         // NOT DOCKED FIRST, and that is a deliberate omission with a reason.
         // The state #149 was reported in is a `web` app the user has OPENED,
@@ -340,7 +342,7 @@ void ShellModulesDriver::run()
         // of QML runtime back up, and both are announced rather than awaited by
         // the press -- so the row is given a moment to follow the core. A Bare
         // module's toggle has already settled and pays nothing for this.
-        if (backend->isWebContainerApp(name)) settle(1500);
+        if (webApp) settle(1500);
         QQuickItem* afterFirstToggle =
             waitFor(QStringLiteral("moduleRow.loadToggle.%1").arg(name), 3000);
         const bool afterFirst = isLoaded(name);
@@ -349,10 +351,10 @@ void ShellModulesDriver::run()
         // have let its page go, the Shell must not still be holding a tab onto
         // it, and the sidebar must still carry its tile -- the app is installed
         // either way, and pressing that tile is what brings it back (#123).
-        if (before && !afterFirst && backend->isWebContainerApp(name))
+        if (before && !afterFirst && webApp)
             checkUnloadedWebApp(name);
         if (!afterFirstToggle || !tap(afterFirstToggle)) return;
-        if (backend->isWebContainerApp(name)) settle(1500);
+        if (webApp) settle(1500);
         const bool afterSecond = isLoaded(name);
 
         emit log(QStringLiteral("drive modules: %1 %2 -> %3 -> %4")

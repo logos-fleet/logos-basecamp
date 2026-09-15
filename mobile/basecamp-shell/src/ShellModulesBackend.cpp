@@ -335,8 +335,8 @@ void ShellModulesBackend::rebuildRows()
     // Compared rather than announced: this runs on every stats tick, and a
     // sidebar told to rebuild every two seconds is a sidebar that flickers.
     QVariantList tiles = basecamp::shell::launcherApps(facts());
-    if (tiles != m_launcherApps) {
-        m_launcherApps = std::move(tiles);
+    if (tiles != m_announcedApps) {
+        m_announcedApps = std::move(tiles);
         emit launcherAppsChanged();
     }
 }

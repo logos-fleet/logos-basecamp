@@ -359,8 +359,9 @@ private:
     // running. See refreshInstalledPackages().
     QSet<QString>          m_uiPackages;
     // The tiles as the sidebar last heard them, so rebuildRows() can tell an
-    // actual change from a stats tick. See rebuildRows().
-    QVariantList           m_launcherApps;
+    // actual change from a stats tick. NOT what launcherApps() returns -- that
+    // reads the facts fresh -- only what was last announced. See rebuildRows().
+    QVariantList           m_announcedApps;
     // Where this shell's modules live -- the tree the app ships and the one an
     // install writes into. Kept because the packages in them are re-read after
     // every install, not only at startup.
