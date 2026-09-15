@@ -358,6 +358,9 @@ private:
     // Modules whose installed package declares a UI, whether or not they are
     // running. See refreshInstalledPackages().
     QSet<QString>          m_uiPackages;
+    // The tiles as the sidebar last heard them, so rebuildRows() can tell an
+    // actual change from a stats tick. See rebuildRows().
+    QVariantList           m_launcherApps;
     // Where this shell's modules live -- the tree the app ships and the one an
     // install writes into. Kept because the packages in them are re-read after
     // every install, not only at startup.

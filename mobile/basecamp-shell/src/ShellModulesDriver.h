@@ -33,5 +33,11 @@ public:
     void run();
 
 private:
+    // The three things outside the core that unloading a `web` app has to
+    // move: its page, the Shell's tab onto it, and what its sidebar tile
+    // claims. Reported as one line when they all hold, and named one at a time
+    // when one does not.
+    void checkUnloadedWebApp(const QString& name);
+
     BundledSetShellHost* m_host;  // not owned
 };

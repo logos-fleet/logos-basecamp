@@ -73,10 +73,27 @@ run reads the verdicts off the console:
 [shell] SHELL MODULES TAB ROUND TRIP OK (bare_counter)
 ```
 
-Every row the CORE is in charge of is driven, not just the first — a view
-module is mounted by the host rather than run by the core (ADR 0006), so its
-row is skipped. The names are printed rather than a count because which modules
-were actually unloaded is the whole of what #96 was about.
+Every row the CORE is in charge of is driven, not just the first — a row the
+HOST mounts is instantiated in this process rather than run by the core (ADR
+0006), so it is skipped. The names are printed rather than a count because which
+modules were actually unloaded is the whole of what #96 was about.
+
+**Which row is whose** is the row's own `hostLoaded`, not its type, and the two
+are different questions (logos-workspace#149). A `web` app's row is a `ui_qml`
+row — it has a user interface and the sidebar carries a tile for it — and its
+MODULE is the core's, because its page lives in the Web container. Asking for
+the type here skipped every `web` app, so the one Unload a user complained
+about was also the one nothing had ever pressed. A `web` row's unload is
+checked further than a Bare one's: the container must have let its page go, the
+Shell must not still hold a tab onto it, and its tile must stay on the sidebar
+— the app is installed either way, and pressing the tile is what brings it back
+(#123).
+
+One thing this deliberately does NOT drive: unloading a `web` app while the
+Shell still holds its tab. It works — `web app <name> has no page any more; its
+tab is closed` — and then the app dies tearing the QDockWidget's accessibility
+cache down, which is #139 and not this. ShellWebAppDriver's close already meets
+it.
 
 The rows are counted off the **scene**, not off the model: each row's status
 badge carries its module's name, so a filter proxy that dropped a row or a
