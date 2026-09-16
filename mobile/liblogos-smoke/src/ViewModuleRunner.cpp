@@ -167,7 +167,17 @@ ViewModuleRunner::~ViewModuleRunner()
     // destructor's; it is latched, so calling it here costs a host that already
     // did nothing and covers one that never did.
     finish();
-    basecamp::mobile::destroyViewMount({ m_plugin, m_node, m_host, m_api });
+    // Named rather than brace-positional. All four members are QObject*, so a
+    // reordered or widened struct would go on compiling here while silently
+    // handing teardown the wrong pointer for each role -- and the struct is
+    // deliberately NOT in destruction order, so reordering it is a thing
+    // someone may reasonably do.
+    basecamp::mobile::ViewMountParts parts;
+    parts.plugin = m_plugin;
+    parts.node = m_node;
+    parts.host = m_host;
+    parts.api = m_api;
+    basecamp::mobile::destroyViewMount(parts);
 }
 
 void ViewModuleRunner::finish()

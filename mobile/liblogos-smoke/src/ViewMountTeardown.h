@@ -71,6 +71,10 @@ struct ViewMountParts {
 // answers Synchronous, or declares no hook at all, costs one meta-call. Callers
 // must not call it twice for one mount: a second `aboutToUnload()` is a second
 // teardown to the view, and there is no state here to remember the first.
+//
+// `plugin` may be null, for the same reason every member of ViewMountParts may:
+// a mount that failed before it had one is closed by these two calls like any
+// other, and there is nothing to ask.
 void finishViewMount(QObject* plugin, int graceMs);
 
 // Destroy the mount: the plugin FIRST, then the transport it spoke over.
