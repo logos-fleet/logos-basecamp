@@ -2,9 +2,13 @@
 
 #include "BundledSetShellHost.h"
 #include "ShellModulesBackend.h"
+#include "appmanager/PlatformFloor.h"
 #include "appmanager/StoreAppManager.h"
 
+#include <QDir>
+#include <QImage>
 #include <QPointF>
+#include <QStandardPaths>
 #include <QQuickItem>
 #include <QSet>
 #include <QVariantMap>
@@ -22,6 +26,23 @@ const QLatin1String kReasonPrefix("storeCatalog.reason.");
 QString textOf(QQuickItem* item)
 {
     return item ? item->property("text").toString() : QString();
+}
+
+// Whether this refusal is the PLATFORM FLOOR'S rather than package_manager's.
+//
+// Told apart by the shape PlatformFloor::reasonFor gives its sentence, taken
+// FROM that function rather than written out again here: the two refusals are
+// identical to a row (the page shows what it is given) and different to a
+// reader of this run -- "available on macOS and Linux" is the variant rule, and
+// "requires <module>" is the one #169 derives.
+bool isFloorRefusal(const QString& reason)
+{
+    static const QString mark = QStringLiteral("\x01");
+    static const QString shape = basecamp::appmanager::PlatformFloor::reasonFor(mark);
+    const int split = shape.indexOf(mark);
+    return split >= 0 && reason.size() > shape.size() - mark.size()
+           && reason.startsWith(shape.left(split))
+           && reason.endsWith(shape.mid(split + mark.size()));
 }
 
 } // namespace
@@ -125,6 +146,7 @@ bool ShellCatalogPageDriver::checkRows()
     QSet<QString> judged;
     QStringList refusals;
     int offered = 0;
+    int floorRefusals = 0;
     bool wrong = false;
 
     const auto judgeVisibleRows = [&]() {
@@ -201,6 +223,16 @@ bool ShellCatalogPageDriver::checkRows()
                 continue;
             }
             refusals << QStringLiteral("%1 -- %2").arg(name, reason);
+            if (isFloorRefusal(reason)) {
+                ++floorRefusals;
+                // AND A PICTURE OF THE FIRST ONE, while the row that carries it
+                // is on screen. The assertions above are read off the live
+                // scene, which is the proof; this is the thing a person can
+                // look at, and on a phone there is no inspector to take it
+                // with (ADR 0002). One is enough: they all render the same way.
+                if (m_picture.isEmpty())
+                    m_picture = savePicture(row);
+            }
         }
     };
 
@@ -242,9 +274,37 @@ bool ShellCatalogPageDriver::checkRows()
         return false;
 
     emit log(QStringLiteral("CATALOG PAGE OK: %1 row(s) on screen, %2 offered for install, "
-                            "%3 refused")
-                 .arg(entries.size()).arg(offered).arg(refusals.size()));
+                            "%3 refused (%4 by this build's Platform floor)")
+                 .arg(entries.size()).arg(offered).arg(refusals.size()).arg(floorRefusals));
+    if (!m_picture.isEmpty())
+        emit log(QStringLiteral("catalog page picture: %1").arg(m_picture));
     for (const QString& refusal : refusals)
         emit log(QStringLiteral("  refused on screen: %1").arg(refusal));
     return true;
+}
+
+// The page as it is drawn, written where a run can fetch it off the device.
+//
+// grabFramebuffer(), not the platform's screenshot: a QQuickWidget's pixels are
+// its scene's, rendered by the scene graph into an offscreen surface, and the
+// simulator's own screen capture showed the frame from BEFORE the section
+// change for the whole of this pass -- measured, 24 captures a second apart on
+// an iPad Air 13-inch (M2), every one of them identical. The app is the only
+// thing here that can see what the app drew.
+QString ShellCatalogPageDriver::savePicture(QQuickItem* item)
+{
+    const QImage frame = frameOf(surfaceOf(item));
+    if (frame.isNull()) {
+        emit log(QStringLiteral("catalog page: the surface gave no frame to save"));
+        return {};
+    }
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (dir.isEmpty() || !QDir().mkpath(dir))
+        return {};
+    const QString path = dir + QStringLiteral("/catalog-page.png");
+    if (!frame.save(path)) {
+        emit log(QStringLiteral("catalog page: could not write %1").arg(path));
+        return {};
+    }
+    return QStringLiteral("%1 (%2x%3)").arg(path).arg(frame.width()).arg(frame.height());
 }

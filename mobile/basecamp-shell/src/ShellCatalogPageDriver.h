@@ -39,6 +39,8 @@
 
 #include <QString>
 
+class QQuickItem;
+
 class BundledSetShellHost;
 
 class ShellCatalogPageDriver : public ShellSceneDriver
@@ -59,8 +61,13 @@ private:
     // Every row, judged. Split from run() so that opening the section and
     // reading it are separable failures.
     bool checkRows();
+    // The scene this item is in, as a PNG under the app's data directory, and
+    // the line to report it by. Empty when it could not be written.
+    QString savePicture(QQuickItem* item);
 
     BundledSetShellHost* m_host;  // not owned
+    // Where the picture of the first refused row went, once one has been taken.
+    QString m_picture;
 
     // How long a row's delegate may take to exist after the page appears. A
     // view that has just become visible instantiates its delegates over the
