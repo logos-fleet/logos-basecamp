@@ -677,9 +677,43 @@
           # convenience: the Bundled set resolves a CLOSURE out of it, so
           # `--bundle chat_module` has to bring delivery_module along without
           # naming it.
-          mkBareSpec = { name, version, category, description, module, dependencies ? [ ] }: {
+          # WHAT THE MODULE ITSELF SAYS, read off its SOURCE TREE rather than
+          # through its flake. The audit below compares this with what the spec
+          # computed, and the two readings have to be independent or the
+          # comparison says nothing: `module.config` is exactly the value that
+          # can silently go missing (#207), so a second look at it would agree
+          # with the first every time.
+          #
+          # `null` when there is no metadata.json to read -- a fixture built out
+          # of this repo -- and such an entry is skipped rather than assumed
+          # false. See nix/platform-flag-check.nix.
+          # A flake input or a path, both of which name a source tree. A module
+          # built in THIS repo (bareCounter, viewCounter) is neither -- it is
+          # already the builder's output attrset -- so those are passed their
+          # source directory directly, and anything else answers `null`.
+          declaredPlatformOf = src:
+            let
+              namesATree = builtins.isPath src
+                || (builtins.isAttrs src && src ? outPath);
+              f = "${src}/metadata.json";
+            in
+            if namesATree && builtins.pathExists f
+            then (builtins.fromJSON (builtins.readFile f)).platform or false
+            else null;
+
+          # `declaredFrom` is the module's SOURCE TREE, and defaults to the
+          # module itself because a flake input is one. The two fixtures built
+          # in this repo are the exception: `module` is already the builder's
+          # output attrset there, so they name their directory.
+          mkBareSpec = { name, version, category, description, module, declaredFrom ? module, dependencies ? [ ] }: {
             inherit name version category description dependencies signingKey;
             type = "core";
+            # NOT part of the catalog entry -- `catalogSpecs` below strips it
+            # before anything is published or signed. It is the declaration this
+            # spec's `platform` was supposed to be derived from, carried beside
+            # it so the audit has both halves in one place and cannot be given a
+            # list of modules that has drifted from the list of entries.
+            platformDeclared = declaredPlatformOf declaredFrom;
             # ADR 0009's Platform flag, READ OFF THE MODULE rather than listed
             # here (#169). It is `"platform": true` in the module's own
             # metadata.json -- it owns access a webview cannot give it, so it
@@ -734,6 +768,7 @@
               category = "testing";
               description = "The counter, as a Bundled Bare module for the mobile host";
               module = bareCounter;
+              declaredFrom = ./mobile/bare-counter;
             };
 
             # The capability broker. Not a networking module, and here for what
@@ -953,6 +988,11 @@
               # capability_module. `--bundle view_counter` therefore resolves
               # all three.
               dependencies = viewCounter.config.dependencies;
+              # Audited like every other entry (nix/platform-flag-check.nix). A
+              # `ui_qml` spec carries no `platform` key at all, so it reads as
+              # false, and the check's job is to notice if this fixture's
+              # metadata.json ever starts declaring otherwise.
+              platformDeclared = declaredPlatformOf ./mobile/view-counter;
               variants.${target} = viewPayload;
               inherit signingKey;
             };
@@ -983,6 +1023,7 @@
               view = "qml/ChatView.qml";
               icon = ./mobile/catalog/icon.png;
               dependencies = logos-chat-ui.config.dependencies;
+              platformDeclared = declaredPlatformOf logos-chat-ui;
               variants.${target} = chatUiPayload;
               inherit signingKey;
             };
@@ -1019,15 +1060,36 @@
             };
           };
 
-          drvs = nixpkgs.lib.mapAttrs (_: catalogLib.mkPackage) specs;
+          # WHAT IS ACTUALLY PUBLISHED. `platformDeclared` is scaffolding for
+          # the audit below and must not reach a signed index: a catalog entry
+          # is a claim the core acts on, and an extra key in it would be a
+          # second, unread copy of a flag the entry already carries.
+          catalogSpecs = nixpkgs.lib.mapAttrs
+            (_: spec: builtins.removeAttrs spec [ "platformDeclared" ]) specs;
+
+          # THE TWO READINGS, SIDE BY SIDE (#207). `read` is what this catalog
+          # computed through the module's flake -- the value that reaches the
+          # index and the floor derived from it -- and `declared` is the
+          # module's own metadata.json. nix/platform-flag-check.nix refuses to
+          # let them differ; here they are only collected, so that assembling
+          # the audit cannot itself fail the flake.
+          platformAudit = nixpkgs.lib.mapAttrsToList
+            (n: spec: {
+              name = n;
+              read = spec.platform or false;
+              declared = spec.platformDeclared or null;
+            })
+            specs;
+
+          drvs = nixpkgs.lib.mapAttrs (_: catalogLib.mkPackage) catalogSpecs;
         in
         {
-          inherit target bundledSetLib;
+          inherit target bundledSetLib platformAudit;
           catalog = catalogLib.mkCatalog {
             release = "logos-basecamp-mobile-dev";
             signers = [ catalogTestKey.did ];
             packages = nixpkgs.lib.mapAttrsToList
-              (n: spec: { inherit spec; drv = drvs.${n}; }) specs;
+              (n: spec: { inherit spec; drv = drvs.${n}; }) catalogSpecs;
           };
           # ONE name is enough, on both phones: view_counter's own declared
           # dependencies resolve the rest, so the set comes out as
@@ -2025,6 +2087,26 @@
         # evaluated at all on a Linux host.
         ios-shell-host = mobileSmoke.aarch64-ios-simulator.basecamp-shell-host-ios;
       } // pkgs.lib.optionalAttrs (builtins.elem system logos-nix.lib.androidBuildSystems) {
+        # ADR 0009's flag, asserted ACROSS THE REPO BOUNDARY (#207). A module
+        # declares `"platform": true` in its own metadata.json and this catalog
+        # is what acts on it; between them sits the module's flake, which has to
+        # forward `config` for the catalog to see anything at all. When it does
+        # not, nothing anywhere is an error -- the `or false` fallback wins and
+        # the module reads as ordinary -- so this builds the two readings side
+        # by side and fails when they differ. See nix/platform-flag-check.nix.
+        #
+        # `aarch64-android` is an arbitrary target: the flag does not vary by
+        # one, and the audit forces no variant. The gate is only about which
+        # build systems have an Android cross set for mobileCatalogFor to
+        # resolve at all.
+        catalog-platform-flags = import ./nix/platform-flag-check.nix {
+          inherit pkgs;
+          catalog = mobileCatalogFor {
+            system = "aarch64-android";
+            androidBuildSystem = system;
+          };
+        };
+
         # The Android Shell's own two stages, CROSS BUILT. The APK above them
         # needs gradle and a 300 MB download-free sandbox and is built by `ws
         # build logos-basecamp#basecamp-shell-android --target android-arm64`;
