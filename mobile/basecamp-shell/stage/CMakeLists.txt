@@ -56,6 +56,8 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/ShellModulesDriver.h
     ${SRC}/ShellPackageSectionDriver.cpp
     ${SRC}/ShellPackageSectionDriver.h
+    ${SRC}/ShellPopupDriver.cpp
+    ${SRC}/ShellPopupDriver.h
     ${SRC}/ShellAppDriver.cpp
     ${SRC}/ShellAppDriver.h
     ${SRC}/ShellKeyboardDriver.cpp

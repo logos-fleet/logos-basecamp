@@ -29,7 +29,10 @@
 
 #include "ShellSceneDriver.h"
 
+#include <QImage>
+
 class BundledSetShellHost;
+class QQuickWidget;
 
 class ShellKeyboardDriver : public ShellSceneDriver
 {
@@ -59,7 +62,19 @@ private:
     // dialog, the tap on its field and the three facts. Split out so that
     // run() has one place to close what the menu opened, whether this reached
     // the field or gave up short of it.
-    void askTheField(const FieldPath& path);
+    //
+    // `beforeTheMenu` is the app surface's frame from before anything opened,
+    // so what the menu draws can be told from what was already there.
+    void askTheField(const FieldPath& path, QQuickWidget* surface,
+                     const QImage& beforeTheMenu);
+
+    // Whether `item` left a mark on the app's surface when it appeared -- the
+    // one question in this pass that is about what the USER sees rather than
+    // about a property (logos-workspace#187). Prints the ancestry when it did
+    // not, because the level where the size or the visibility was lost is the
+    // level with the bug.
+    void reportPainted(const QString& name, QQuickItem* item, QQuickWidget* surface,
+                       const QImage& before);
 
     // The view module whose app is up, or an empty string. Both hasWork() and
     // run() are about that one app.

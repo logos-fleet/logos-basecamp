@@ -64,6 +64,7 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/ShellSceneDriver.cpp ${SHELL_SRC}/ShellSceneDriver.h
     ${SHELL_SRC}/ShellModulesDriver.cpp ${SHELL_SRC}/ShellModulesDriver.h
     ${SHELL_SRC}/ShellPackageSectionDriver.cpp ${SHELL_SRC}/ShellPackageSectionDriver.h
+    ${SHELL_SRC}/ShellPopupDriver.cpp ${SHELL_SRC}/ShellPopupDriver.h
     ${SHELL_SRC}/ShellAppDriver.cpp ${SHELL_SRC}/ShellAppDriver.h
     ${SHELL_SRC}/ShellKeyboardDriver.cpp ${SHELL_SRC}/ShellKeyboardDriver.h
     ${SHELL_SRC}/ShellWebAppDriver.cpp ${SHELL_SRC}/ShellWebAppDriver.h

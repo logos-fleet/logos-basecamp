@@ -17,6 +17,10 @@ namespace basecamp::shell {
 //   Apps      then the app, opened from the sidebar -- before the Modules tab,
 //             which unloads and reloads a core module underneath it
 //   Packages  the Shell's own chrome, while the Shell still has the window
+//   Popups    whether a QtQuick Popup reaches the screen at all, in every scene
+//             the Shell has -- ahead of Keyboard because Keyboard's whole path
+//             runs through two of them, so "the menu is not drawn" is a fact
+//             worth having before a pass that presses one
 //   Keyboard  the app's input fields -- after the section pass, because it is
 //             the one that leaves a platform panel over the Shell and the one
 //             that puts itself back where it started
@@ -27,6 +31,7 @@ enum class DrivePass {
     Chat,
     Apps,
     Packages,
+    Popups,
     Keyboard,
     WebApps,
     WebInput,

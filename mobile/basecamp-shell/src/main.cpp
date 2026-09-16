@@ -33,6 +33,7 @@
 #include "ShellKeyboardDriver.h"
 #include "ShellModulesDriver.h"
 #include "ShellPackageSectionDriver.h"
+#include "ShellPopupDriver.h"
 #include "ShellWebAppDriver.h"
 #include "ShellWebInputDriver.h"
 #include "ShellSections.h"
@@ -310,6 +311,17 @@ int main(int argc, char* argv[])
     auto* packages = new ShellPackageSectionDriver(shellWidget, &app);
     QObject::connect(packages, &ShellPackageSectionDriver::log, &console);
 
+    // AND WHETHER A POPUP IS DRAWN AT ALL, which is the question under the
+    // pass below it. A menu and a modal dialog are what the keyboard pass walks
+    // through, and on the venue's physical iPad both of them exist, take focus
+    // and raise the keyboard while NOTHING of either is on the screen
+    // (logos-workspace#187) -- so a pass that only reads properties reports a
+    // path a user cannot see as working. This one carries its own popup and
+    // reads pixels; it needs no module and no network, so it is the cheap half
+    // of that diagnosis. ShellPopupDriver.h has the rest.
+    auto* popups = new ShellPopupDriver(shellWidget, &app);
+    QObject::connect(popups, &ShellPopupDriver::log, &console);
+
     // AND THE KEYBOARD, for the app's own input fields: the app's "+", its New
     // DM entry, the address field in the dialog that opens -- and then the
     // three facts the platform reads before it raises a keyboard. Asked from
@@ -398,8 +410,8 @@ int main(int argc, char* argv[])
 
     // The passes that press things in the Shell's own rendered scene, in the
     // order above. Each one runs only if this run named it.
-    auto scenePasses = [&drive, network, driver, apps, webApps, webInput, packages, keyboard,
-                        finishOnTheApp]() {
+    auto scenePasses = [&drive, network, driver, apps, webApps, webInput, packages, popups,
+                        keyboard, finishOnTheApp]() {
         // The CHAT half is what the app has to show, not the run's overall
         // verdict: the libp2p leg can fail on its own (an unanswered
         // local-network prompt on a device) with the group exchange perfectly
@@ -426,6 +438,13 @@ int main(int argc, char* argv[])
         // Shell's own focus chain. Nothing is owed to it by the pass in front
         // either way -- it switches back to the workspace and finds the app's
         // "+" itself, and closes again whatever it opened (#152).
+        // AHEAD OF THE KEYBOARD, because the keyboard pass' whole path runs
+        // through two popups: knowing whether a popup reaches the screen at all
+        // is what tells "the field is focused and invisible" apart from "the
+        // field is fine". It presses nothing of the Shell's and leaves nothing
+        // open, so it owes the passes around it nothing either.
+        if (drive.wants(DrivePass::Popups))
+            popups->run();
         if (drive.wants(DrivePass::Keyboard) && keyboard->hasWork())
             keyboard->run();
         if (drive.wants(DrivePass::WebApps) && webApps->hasWork())
@@ -445,6 +464,7 @@ int main(int argc, char* argv[])
     };
 
     const bool drivesAScene = drive.wants(DrivePass::Apps) || drive.wants(DrivePass::Packages)
+                              || drive.wants(DrivePass::Popups)
                               || drive.wants(DrivePass::Keyboard)
                               || drive.wants(DrivePass::WebApps)
                               || drive.wants(DrivePass::WebInput)

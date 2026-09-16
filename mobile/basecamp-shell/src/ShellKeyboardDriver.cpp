@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QGuiApplication>
+#include <QImage>
 #include <QInputMethod>
 #include <QKeyEvent>
 #include <QQuickItem>
@@ -124,6 +125,11 @@ void ShellKeyboardDriver::run()
         dumpNames(QStringLiteral("app '%1' shows no '%2'").arg(app, path.menuButton));
         return;
     }
+    // THE FRAME BEFORE ANY OF IT OPENS. What follows is a menu and then a
+    // dialog, and #187 is that neither of them is drawn -- so each is compared
+    // against this rather than against what the pass claims about it.
+    QQuickWidget* surface = surfaceOf(menuButton);
+    const QImage beforeTheMenu = frameOf(surface);
     if (!tap(menuButton)) return;
     settle(kMenuSettleMs);
 
@@ -134,11 +140,12 @@ void ShellKeyboardDriver::run()
     // the workspace would swallow their taps. The "+" is the anchor because it
     // is in the same scene as the popups and is the one handle that exists on
     // all of those paths.
-    askTheField(path);
+    askTheField(path, surface, beforeTheMenu);
     dismiss(menuButton);
 }
 
-void ShellKeyboardDriver::askTheField(const FieldPath& path)
+void ShellKeyboardDriver::askTheField(const FieldPath& path, QQuickWidget* surface,
+                                      const QImage& beforeTheMenu)
 {
     // The items from here on are inside Popups, which hang off the scene's
     // overlay rather than off the view's root object.
@@ -147,6 +154,13 @@ void ShellKeyboardDriver::askTheField(const FieldPath& path)
         dumpNames(QStringLiteral("the '%1' menu has no '%2'").arg(path.menuButton, path.menuItem));
         return;
     }
+    reportPainted(path.menuItem, menuItem, surface, beforeTheMenu);
+
+    // AND THE FRAME WITH THE MENU ON IT, which is what the dialog is compared
+    // against: pressing the entry closes the menu and opens the dialog, so a
+    // diff taken from before the menu would count the menu's own disappearance
+    // as the dialog being drawn.
+    const QImage beforeTheDialog = frameOf(surface);
     if (!tap(menuItem)) return;
 
     QQuickItem* field = waitFor(path.field, kDialogBudgetMs, Scope::WithOverlays);
@@ -156,6 +170,7 @@ void ShellKeyboardDriver::askTheField(const FieldPath& path)
     }
     emit log(QStringLiteral("keyboard: '%1' opened the dialog holding '%2'")
                  .arg(path.menuItem, path.field));
+    reportPainted(path.field, field, surface, beforeTheDialog);
 
     // ── 2. the tap a user makes ──
     // The dialog focuses the field itself on open; tapping it is still the
@@ -256,6 +271,46 @@ void ShellKeyboardDriver::askTheField(const FieldPath& path)
                                 "so a screenshot can see it").arg(kPanelHoldMs));
         settle(kPanelHoldMs);
     }
+}
+
+// WHAT THE USER WOULD SEE, in the one place this pass can answer it. Every
+// other line it prints is a property -- found, pressed, focused, a panel of so
+// many points -- and logos-workspace#187 is a path on which all of those are
+// true and the screen shows an unchanged conversations pane.
+void ShellKeyboardDriver::reportPainted(const QString& name, QQuickItem* item,
+                                        QQuickWidget* surface, const QImage& before)
+{
+    if (!surface || before.isNull()) {
+        emit log(QStringLiteral("keyboard: no frame of the app's surface to compare '%1' "
+                                "against").arg(name));
+        return;
+    }
+    int looked = 0;
+    const int changed = pixelsChangedUnder(item, before, frameOf(surface), &looked);
+    if (looked == 0) {
+        // An item with no area on screen. Which is itself the answer -- a
+        // control a user cannot see is a control that is not there -- so the
+        // ancestry says at which level the size was lost.
+        emit log(QStringLiteral("WRONG: '%1' covers nothing -- it is %2x%3 in the scene, "
+                                "so there is no pixel of it to draw")
+                     .arg(name).arg(item->width(), 0, 'f', 0).arg(item->height(), 0, 'f', 0));
+        dumpAncestry(item, QStringLiteral("'%1' has no area").arg(name));
+        return;
+    }
+    if (changed == 0) {
+        const QPointF at = item->mapToScene(QPointF(0, 0));
+        emit log(QStringLiteral("WRONG: '%1' is %2x%3 at (%4, %5) in the app's scene and "
+                                "NOT ONE of the %6 pixels under it changed when it opened "
+                                "-- the surface draws no trace of it")
+                     .arg(name)
+                     .arg(item->width(), 0, 'f', 0).arg(item->height(), 0, 'f', 0)
+                     .arg(at.x(), 0, 'f', 0).arg(at.y(), 0, 'f', 0)
+                     .arg(looked));
+        dumpAncestry(item, QStringLiteral("'%1' is not drawn").arg(name));
+        return;
+    }
+    emit log(QStringLiteral("keyboard: '%1' IS DRAWN -- %2 of the %3 pixels under it "
+                            "changed when it opened").arg(name).arg(changed).arg(looked));
 }
 
 void ShellKeyboardDriver::dismiss(QQuickItem* anchor)
