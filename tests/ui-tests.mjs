@@ -267,28 +267,29 @@ test("welcome: the filter chips scope which result rows show", async (app) => {
 // assertable is the half that regressed before — that the page still declares
 // the shortcut for ShortcutBridge to mirror onto the host. The bridge logs
 // "bound N QML shortcut(s)" for the welcome pane when it picks it up.
+// BY NAME, AND OFF `sequences`. This used to walk every QQuickShortcut in the
+// app and assert the first whose `nativeText` ended in K -- which was never
+// this page's: the welcome page declares `sequences: ["Ctrl+K"]` (plural) and
+// `nativeText` mirrors the singular `sequence`, so it reads empty here. The
+// match was the App Manager's or Settings' own ⌘K, each of which is enabled
+// only while ITS view is in front, and which one the walk reached first
+// depended on the shape of the content stack -- so adding an item to it failed
+// a welcome-page test with a disabled shortcut belonging to a page nobody was
+// looking at (logos-workspace#169).
 test("welcome: the page declares a ⌘K shortcut for the bridge to mirror", async (app) => {
-  const res = await app.inspector.send("findByType", { typeName: "QQuickShortcut" });
-  const shortcuts = res.matches ?? [];
-  if (shortcuts.length === 0) throw new Error("no Shortcut declared on the welcome page");
+  const shortcut = await findByObjectName(app.inspector, "welcomePage.searchShortcut");
+  if (!shortcut) throw new Error("no ⌘K Shortcut declared on the welcome page");
 
-  let found = false;
-  for (const sc of shortcuts) {
-    const seq = await app.inspector.send("evaluate", {
-      objectId: sc.id, expression: "JSON.stringify({ s: nativeText, on: enabled })",
-    });
-    if (seq.error) continue;
-    const info = JSON.parse(seq.result);
-    if (typeof info.s === "string" && /K$/i.test(info.s)) {
-      if (info.on !== true) throw new Error(`⌘K shortcut present but enabled=${info.on}`);
-      found = true;
-      break;
-    }
+  const seq = await app.inspector.send("evaluate", {
+    objectId: shortcut.id,
+    expression: "JSON.stringify({ s: String(nativeText || sequences), on: enabled })",
+  });
+  if (seq.error) throw new Error(`evaluate on the welcome page's shortcut: ${seq.error}`);
+  const info = JSON.parse(seq.result);
+  if (typeof info.s !== "string" || !/K$/i.test(info.s)) {
+    throw new Error(`the welcome page's shortcut is "${info.s}", not ⌘K`);
   }
-  if (!found) {
-    throw new Error("no enabled ⌘K shortcut among "
-                  + `${shortcuts.length} declared shortcut(s)`);
-  }
+  if (info.on !== true) throw new Error(`⌘K shortcut present but enabled=${info.on}`);
 });
 
 const CI_MODE = process.argv.includes("--ci");

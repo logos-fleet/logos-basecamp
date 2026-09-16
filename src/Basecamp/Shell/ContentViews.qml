@@ -99,23 +99,28 @@ Item {
         // Until this existed a phone's Applications section drew the desktop
         // grid over a null model -- an empty page -- while the catalog and its
         // verdicts (logos-workspace#169) lived only in a console line.
-        Item {
+        StackLayout {
             id: appManagerSlot
 
             readonly property var storeAppManager:
                 (backend && backend.appManager) ? backend.appManager : null
 
+            // A STACK, not two `visible` bindings. Which view is shown is the
+            // same kind of choice the layout around it already makes, and a
+            // layout OWNS the `visible` of its children: a hand-written binding
+            // beside it takes that ownership away, and the first thing that
+            // noticed was a ⌘K Shortcut whose `enabled: root.visible` then read
+            // false on a page that was in front (tests/ui-tests.mjs, "the page
+            // declares a ⌘K shortcut for the bridge to mirror").
+            currentIndex: storeAppManager ? 0 : 1
+
             StoreCatalogView {
                 objectName: "storeCatalogView"
-                anchors.fill: parent
-                visible: appManagerSlot.storeAppManager !== null
                 appManager: appManagerSlot.storeAppManager
             }
 
             AppManagerView {
                 id: appManagerView
-                anchors.fill: parent
-                visible: appManagerSlot.storeAppManager === null
 
                 appsProxy:      uiAppsProxy
                 repositories:   backend.repositories
