@@ -18948,6 +18948,29 @@
         "type": "github"
       }
     },
+    "logos-evm-fee-module": {
+      "inputs": {
+        "eth_rpc_module": [
+          "logos-evm-eth-rpc-module"
+        ],
+        "logos-module-builder": [
+          "logos-module-builder"
+        ]
+      },
+      "locked": {
+        "lastModified": 1789531033,
+        "narHash": "sha256-4Xb/7Vq/XQEu1AdEtp4c/ZNtNWMGKMSr4oGlK82apCY=",
+        "owner": "logos-fleet",
+        "repo": "logos-evm-fee-module",
+        "rev": "045f87c313e5ec37adf31732506b971aeed70546",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-evm-fee-module",
+        "type": "github"
+      }
+    },
     "logos-evm-keystore-module": {
       "inputs": {
         "logos-module-builder": [
@@ -19034,6 +19057,41 @@
       "original": {
         "owner": "logos-co",
         "repo": "logos-evm-uniswap-module",
+        "type": "github"
+      }
+    },
+    "logos-evm-wallet-backend-module": {
+      "inputs": {
+        "eth_rpc_module": [
+          "logos-evm-eth-rpc-module"
+        ],
+        "fee_module": [
+          "logos-evm-fee-module"
+        ],
+        "keystore_module": [
+          "logos-evm-keystore-module"
+        ],
+        "logos-module-builder": [
+          "logos-module-builder"
+        ],
+        "token_list_module": [
+          "logos-evm-token-list-module"
+        ],
+        "uniswap_module": [
+          "logos-evm-uniswap-module"
+        ]
+      },
+      "locked": {
+        "lastModified": 1789512903,
+        "narHash": "sha256-P9YJTcpZgcaVofo+bpg4DrThhHR6U8DnmTdzTiOHEoU=",
+        "owner": "logos-fleet",
+        "repo": "logos-evm-wallet-backend-module",
+        "rev": "0fe192cae480cbf4f923556a627cdaa5a3a42dfc",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-evm-wallet-backend-module",
         "type": "github"
       }
     },
@@ -231853,10 +231911,12 @@
         "logos-delivery-module": "logos-delivery-module",
         "logos-design-system": "logos-design-system",
         "logos-evm-eth-rpc-module": "logos-evm-eth-rpc-module",
+        "logos-evm-fee-module": "logos-evm-fee-module",
         "logos-evm-keystore-module": "logos-evm-keystore-module",
         "logos-evm-railgun-module": "logos-evm-railgun-module",
         "logos-evm-token-list-module": "logos-evm-token-list-module",
         "logos-evm-uniswap-module": "logos-evm-uniswap-module",
+        "logos-evm-wallet-backend-module": "logos-evm-wallet-backend-module",
         "logos-evm-wallet-ui": "logos-evm-wallet-ui",
         "logos-liblogos": "logos-liblogos_3",
         "logos-libp2p-module": "logos-libp2p-module",

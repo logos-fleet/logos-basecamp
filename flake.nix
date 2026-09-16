@@ -163,6 +163,49 @@
     logos-evm-railgun-module.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-evm-railgun-module.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
     logos-evm-railgun-module.inputs.keystore_module.follows = "logos-evm-keystore-module";
+    # `fee_module` is the FIFTH member (#183), and the reason
+    # `wallet_backend_module` below can be the sixth. Same shape as uniswap and
+    # token_list: a Bundled Bare module whose builder is followed onto this
+    # flake's so its image carries the SAME logos-protocol stamp the phone's
+    # host gates at load. Its own dependency is `eth_rpc_module`, already a
+    # member, so its closure was satisfiable the moment the module published
+    # mobile keys.
+    #
+    # It is NOT optional for a wallet on a phone: `wallet_backend_module` calls
+    # `modules().fee_module.estimate(...)` on the quote path and again when it
+    # builds a send, so a Bundled set without it is a Send tab that cannot
+    # price a transaction.
+    #
+    # LOCKED TO THE logos-fleet FORK, for the reason uniswap's note above gives:
+    # upstream publishes no mobile keys, so a bare `nix flake update` walks the
+    # lock back to logos-co and this catalog entry stops EVALUATING. Re-pin with
+    #   nix flake lock --override-input logos-evm-fee-module \
+    #     github:logos-fleet/logos-evm-fee-module/<rev>
+    logos-evm-fee-module.url = "github:logos-co/logos-evm-fee-module";
+    logos-evm-fee-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-evm-fee-module.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
+    # `wallet_backend_module` is the SIXTH member (#183), and the whole point of
+    # the five above: the wallet's COORDINATOR, the module the desktop wallet UI
+    # drives and the one a phone needs if its Send tab is to do more than read
+    # balances. It declares all five of them --
+    # `eth_rpc_module, keystore_module, token_list_module, uniswap_module,
+    # fee_module` -- and a Bundled set is a CLOSURE, so it could not be a member
+    # until every one of them was resolvable. Four are Bundled entries beside
+    # it; `keystore_module` is the image's `web` half, which is what ADR 0010
+    # made a legitimate answer.
+    #
+    # LOCKED TO THE logos-fleet FORK, for the reason uniswap's note above gives:
+    # upstream publishes no mobile keys, so a bare `nix flake update` walks the
+    # lock back to logos-co and this catalog entry stops EVALUATING. Re-pin with
+    #   nix flake lock --override-input logos-evm-wallet-backend-module \
+    #     github:logos-fleet/logos-evm-wallet-backend-module/<rev>
+    logos-evm-wallet-backend-module.url = "github:logos-co/logos-evm-wallet-backend-module";
+    logos-evm-wallet-backend-module.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-evm-wallet-backend-module.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
+    logos-evm-wallet-backend-module.inputs.keystore_module.follows = "logos-evm-keystore-module";
+    logos-evm-wallet-backend-module.inputs.uniswap_module.follows = "logos-evm-uniswap-module";
+    logos-evm-wallet-backend-module.inputs.token_list_module.follows = "logos-evm-token-list-module";
+    logos-evm-wallet-backend-module.inputs.fee_module.follows = "logos-evm-fee-module";
     logos-evm-wallet-ui.url = "github:logos-co/logos-evm-wallet-ui";
     logos-evm-wallet-ui.inputs.logos-module-builder.follows = "logos-module-builder";
     logos-evm-wallet-ui.inputs.eth_rpc_module.follows = "logos-evm-eth-rpc-module";
@@ -350,7 +393,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-token-list-module, logos-evm-railgun-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-token-list-module, logos-evm-fee-module, logos-evm-railgun-module, logos-evm-wallet-backend-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -823,6 +866,67 @@
               description = "RAILGUN private transactions: shield, private transfer, unshield";
               module = logos-evm-railgun-module;
               dependencies = logos-evm-railgun-module.config.dependencies;
+            };
+
+            # ...AND THE FIFTH (#183). fee_module prices a transaction:
+            # EIP-1559 slow/normal/fast tiers derived from `eth_feeHistory`,
+            # plus the gas ceiling a send is signed against. It was absent from
+            # this catalog for the flattest possible reason -- its flake
+            # published `packages.<system>` and nothing else, so there was no
+            # `mobile.<target>.bare` for an entry to point at -- and that
+            # absence was HALF OF WHY the entry below could not exist.
+            #
+            # `dependencies` read off its own metadata.json for the reason
+            # mkBareSpec gives: it names `eth_rpc_module`, which is the entry
+            # four above, so `--bundle fee_module` pulls it in without this file
+            # saying so.
+            fee_module = mkBareSpec {
+              name = "fee_module";
+              version = logos-evm-fee-module.config.version;
+              category = "wallet";
+              description = "EIP-1559 fee suggestion (slow/normal/fast) derived from eth_feeHistory";
+              module = logos-evm-fee-module;
+              dependencies = logos-evm-fee-module.config.dependencies;
+            };
+
+            # ...AND THE SIXTH (#183), which is the one the five above were for.
+            # `wallet_backend_module` is the wallet's COORDINATOR -- the module
+            # that turns "send 0.1 ETH" into a nonce, a fee, a gas estimate, a
+            # human approval, a signature and a broadcast -- and it is what a
+            # phone's Send tab has to talk to if it is to do more than read
+            # balances.
+            #
+            # ITS CLOSURE IS THE WHOLE OF #183. It declares five dependencies,
+            # and a Bundled set is resolved as a CLOSURE over this catalog, so
+            # each had to be present or the set is refused BY NAME at eval:
+            #
+            #   eth_rpc_module    entry five above (#148)
+            #   uniswap_module    entry four above (#148)
+            #   token_list_module entry three above (#148)
+            #   fee_module        the entry directly above -- it was not a
+            #                     workspace repo at all until this issue, so it
+            #                     could not be given a mobile Bare build from a
+            #                     workspace cycle
+            #   keystore_module   NOT a Bundled entry, and deliberately never
+            #                     one. It reaches a phone as the `web` variant
+            #                     with the idbfs vault #147 proved a key
+            #                     survives a reload in, shipped in this image's
+            #                     web assets. ADR 0010 is what lets the closure
+            #                     see it: a member may depend on a module THIS
+            #                     IMAGE CARRIES, Bundled or `web`. A Bare
+            #                     keystore beside it would be two vaults in one
+            #                     app under one name.
+            #
+            # `dependencies` read off the module's own metadata.json, which is
+            # what makes the paragraph above a description rather than a second
+            # copy of the list the core would act on.
+            wallet_backend_module = mkBareSpec {
+              name = "wallet_backend_module";
+              version = logos-evm-wallet-backend-module.config.version;
+              category = "wallet";
+              description = "The wallet coordinator: accounts, balances, quotes, approvals, sends and history";
+              module = logos-evm-wallet-backend-module;
+              dependencies = logos-evm-wallet-backend-module.config.dependencies;
             };
 
             # ── the apps (slices 22 and 27) ──────────────────────────────
