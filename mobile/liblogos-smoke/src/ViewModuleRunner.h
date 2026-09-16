@@ -97,6 +97,19 @@ public:
     // backend's state without going through the view.
     QObject* replica() const { return m_replica; }
 
+    // Tell the view the app is closing, while this mount is still whole.
+    //
+    // Called by the host AT THE CLOSE, before the deferred deletes it queues:
+    // this is the view's one chance to say anything to the modules it called
+    // (close a session, flush a draft), and by the time the deletes run the
+    // user may already have re-opened the app -- so a "close my session" sent
+    // from there would close the NEXT mount's. See ViewMountTeardown.h.
+    //
+    // Latched, and the destructor calls it too: a mount nobody finished is
+    // still finished before it is destroyed, and one that was is not asked
+    // twice.
+    void finish();
+
     // Press the view's own button and watch the number come back.
     //
     // This is the acceptance criterion as a round trip, driven from inside the
@@ -134,4 +147,6 @@ private:
     QObject* m_replica = nullptr;
     InProcViewBridge* m_bridge = nullptr;
     QQuickWidget* m_surface = nullptr;
+    // Whether finish() has already asked the plugin. See finish().
+    bool m_finished = false;
 };

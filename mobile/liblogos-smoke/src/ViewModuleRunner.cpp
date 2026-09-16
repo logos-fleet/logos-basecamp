@@ -1,5 +1,7 @@
 #include "ViewModuleRunner.h"
 
+#include "ViewMountTeardown.h"
+
 #include <logos_api.h>
 #include <logos_protocol.h>
 
@@ -43,6 +45,14 @@ using AcquireReplicaFn = void* (*)(void*);
 // resolved by NAME, so an image from a later builder would answer a different
 // question with the same signature.
 constexpr unsigned kSupportedViewAbi = 1;
+
+// How long a closing view gets to finish, when it says it needs to. Shorter
+// than ui-host's 2000 ms and deliberately: there the number is carved out of
+// ViewModuleHost::stop()'s 3 s kill budget for a whole PROCESS, while here the
+// wait is a nested event loop inside a live app, between the user pressing a
+// tab's close button and the tab going away. A view that wants longer than this
+// is asking the user to watch it think.
+constexpr int kUnloadGraceMs = 1500;
 
 // The bundle-relative path Xcode's "Embed Frameworks" phase writes. The stem
 // is the module's, and comes from the build (LOGOS_VIEW_MODULE_STEM) rather
@@ -149,10 +159,23 @@ ViewModuleRunner::~ViewModuleRunner()
     // The image is deliberately NOT dlclose()d. The replica, the node and the
     // plugin object all hold code and vtables that live in it, and unmapping
     // running code is the one failure mode that does not name itself.
-    delete m_node;
-    delete m_host;
-    delete m_plugin;
-    delete m_api;
+    //
+    // The ORDER, and the hook that runs ahead of it, are ViewMountTeardown.h:
+    // a view's last words go OUT, so the plugin has to be asked -- and then
+    // destroyed -- while the transport it would speak over is still there
+    // (logos-workspace#212). finish() is normally the CLOSE's, not this
+    // destructor's; it is latched, so calling it here costs a host that already
+    // did nothing and covers one that never did.
+    finish();
+    basecamp::mobile::destroyViewMount({ m_plugin, m_node, m_host, m_api });
+}
+
+void ViewModuleRunner::finish()
+{
+    if (m_finished)
+        return;
+    m_finished = true;
+    basecamp::mobile::finishViewMount(m_plugin, kUnloadGraceMs);
 }
 
 QString ViewModuleRunner::viewImagePathFor(const QString& stem)

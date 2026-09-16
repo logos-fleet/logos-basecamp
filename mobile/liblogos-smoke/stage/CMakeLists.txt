@@ -46,6 +46,8 @@ add_library(liblogos_smoke_host STATIC
     ${LOGOS_HOST_SOURCES}
     ${SRC}/ViewModuleRunner.cpp
     ${SRC}/ViewModuleRunner.h
+    ${SRC}/ViewMountTeardown.cpp
+    ${SRC}/ViewMountTeardown.h
     ${SRC}/WebModuleRunner.cpp
     ${SRC}/WebModuleRunner.h
 )
