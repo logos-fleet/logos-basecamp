@@ -677,6 +677,7 @@
           # convenience: the Bundled set resolves a CLOSURE out of it, so
           # `--bundle chat_module` has to bring delivery_module along without
           # naming it.
+
           # WHAT THE MODULE ITSELF SAYS, read off its SOURCE TREE rather than
           # through its flake. The audit below compares this with what the spec
           # computed, and the two readings have to be independent or the
@@ -684,27 +685,25 @@
           # can silently go missing (#207), so a second look at it would agree
           # with the first every time.
           #
-          # `null` when there is no metadata.json to read -- a fixture built out
-          # of this repo -- and such an entry is skipped rather than assumed
-          # false. See nix/platform-flag-check.nix.
-          # A flake input or a path, both of which name a source tree. A module
-          # built in THIS repo (bareCounter, viewCounter) is neither -- it is
-          # already the builder's output attrset -- so those are passed their
-          # source directory directly, and anything else answers `null`.
+          # `src` is anything that names a source tree -- a flake input or a
+          # path. Answers `null` when there is nothing to read, which is both a
+          # module built in THIS repo (`module` is already the builder's output
+          # attrset, not a tree) and a tree without a metadata.json; such an
+          # entry is skipped rather than assumed false. See
+          # nix/platform-flag-check.nix.
           declaredPlatformOf = src:
             let
               namesATree = builtins.isPath src
                 || (builtins.isAttrs src && src ? outPath);
-              f = "${src}/metadata.json";
+              metadataFile = "${src}/metadata.json";
             in
-            if namesATree && builtins.pathExists f
-            then (builtins.fromJSON (builtins.readFile f)).platform or false
+            if namesATree && builtins.pathExists metadataFile
+            then (builtins.fromJSON (builtins.readFile metadataFile)).platform or false
             else null;
 
           # `declaredFrom` is the module's SOURCE TREE, and defaults to the
-          # module itself because a flake input is one. The two fixtures built
-          # in this repo are the exception: `module` is already the builder's
-          # output attrset there, so they name their directory.
+          # module itself because a flake input is one; the two fixtures built
+          # in this repo pass their own directory instead.
           mkBareSpec = { name, version, category, description, module, declaredFrom ? module, dependencies ? [ ] }: {
             inherit name version category description dependencies signingKey;
             type = "core";

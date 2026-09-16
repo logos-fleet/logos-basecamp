@@ -29,15 +29,16 @@
 # assumed false: this check reports a DISAGREEMENT between two readings, and
 # where there is only one reading there is nothing to disagree about.
 #
-# A failing BUILD rather than a failing eval, deliberately: an eval throw here
-# would take out every other output of this flake at once and say so from
-# inside a stack trace, and the reader needs the table, not the trace.
 # ...and THE SECOND HALF, because a flag nothing acts on is the same defect
 # one step further along: the check also derives this catalog's Platform FLOOR
 # for a shell that bundles only its default apps, and prints the sentence each
 # row would carry. A declared Platform module that no default shell ships has
 # to come out in `absent`, and every row that reaches it has to be refused BY
 # NAME -- which is what makes the declaration mean something to a user.
+#
+# A failing BUILD rather than a failing eval, deliberately: an eval throw here
+# would take out every other output of this flake at once and say so from
+# inside a stack trace, and the reader needs the table, not the trace.
 { pkgs, catalog }:
 
 let
@@ -46,16 +47,16 @@ let
   inherit (catalog) platformAudit bundledSetLib target defaultApps;
   inherit (bundledSetLib) platformFloor;
 
-  audit = platformAudit;
   index = catalog.catalog.index;
 
-  flag = b: if b then "true" else "false";
+  nameList = ns: if ns == [ ] then "(none)" else lib.concatStringsSep ", " ns;
 
-  row = e: "  ${e.name}: catalog reads ${flag e.read}, metadata.json declares ${flag e.declared}";
-
-  readable = lib.filter (e: e.declared != null) audit;
+  # ── the two readings, and where they disagree ─────────────────────────────
+  readable = lib.filter (e: e.declared != null) platformAudit;
   mismatched = lib.filter (e: e.declared != e.read) readable;
   platformNames = map (e: e.name) (lib.filter (e: e.read) readable);
+
+  mismatchRow = e: "  ${e.name}: catalog reads ${lib.boolToString e.read}, metadata.json declares ${lib.boolToString e.declared}";
 
   # ── the floor a DEFAULT shell derives from this catalog ───────────────────
   # `defaultApps` is what a build with no `--bundle` ships, so every Platform
@@ -86,19 +87,20 @@ let
     (n: !(lib.elem n floor.present) && !(lib.elem n floor.absent))
     platformNames;
 
+  problems = map mismatchRow mismatched
+    ++ map (n: "  ${n}: declared a Platform module, and the derived floor lists it neither present nor absent") unfloored;
+
   # The message is a FILE rather than a heredoc in the builder: a nix indented
   # string strips the common leading whitespace, and one interpolated line at
   # column 0 would strip it to nothing and take the heredoc's own terminator
   # with it. `cat` a store path and the text is the text.
   pass = pkgs.writeText "catalog-platform-flags.txt" ''
-    catalog platform flags agree with metadata.json for ${
-      toString (builtins.length readable)} catalog entries.
-    Platform modules (ADR 0009): ${
-      if platformNames == [ ] then "(none)" else lib.concatStringsSep ", " platformNames}
+    catalog platform flags agree with metadata.json for ${toString (builtins.length readable)} catalog entries.
+    Platform modules (ADR 0009): ${nameList platformNames}
 
     The floor a default shell (--bundle ${lib.concatStringsSep " " defaultApps}) derives from this catalog:
-      present: ${if floor.present == [ ] then "(none)" else lib.concatStringsSep ", " floor.present}
-      absent:  ${if floor.absent == [ ] then "(none)" else lib.concatStringsSep ", " floor.absent}
+      present: ${nameList floor.present}
+      absent:  ${nameList floor.absent}
 
     ...and what such a shell would say about each row it cannot honour:
     ${lib.concatStringsSep "\n" (map verdictRow refused)}
@@ -107,9 +109,7 @@ let
   fail = pkgs.writeText "catalog-platform-flags-fail.txt" ''
     FAIL: the mobile catalog disagrees with what these modules declare.
 
-    ${lib.concatStringsSep "\n" (map row mismatched)}
-    ${lib.concatStringsSep "\n"
-        (map (n: "  ${n}: declared a Platform module, and the derived floor lists it neither present nor absent") unfloored)}
+    ${lib.concatStringsSep "\n" problems}
 
     A module that declares `"platform": true` (ADR 0009) but reads as false in
     the catalog is SILENTLY INERT: the Platform floor derived from this catalog
@@ -129,7 +129,7 @@ let
   '';
 in
 
-if mismatched == [ ] && unfloored == [ ] then
+if problems == [ ] then
   pkgs.runCommand "catalog-platform-flags" { } ''
     cat ${pass}
     touch $out
