@@ -101,6 +101,12 @@ protected:
     // Every named item in every scene, for when a lookup failed.
     void dumpNames(const QString& why);
     QQuickWidget* surfaceOf(QQuickItem* item) const;
+    // Whether a press at this item's centre would land on it -- the question
+    // tap() asks itself, WITHOUT making the press. For a control whose press
+    // has consequences a driver does not want (the catalog page's Install
+    // starts a download), reachability is still a claim about the layout that
+    // has to be checkable. Reports the same sentences tap() does.
+    bool pressWouldReach(QQuickItem* item);
     // A press and a release at the item's centre, entering the scene where a
     // finger's would. Fails, rather than working around it, when that centre
     // is off the viewport -- see the comment in tap().

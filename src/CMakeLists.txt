@@ -135,6 +135,7 @@ qt_add_qml_module(basecamp_appmanager_qml
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Basecamp/AppManager
     QML_FILES
         Basecamp/AppManager/AppManagerView.qml
+        Basecamp/AppManager/StoreCatalogView.qml
         Basecamp/AppManager/AppManagerPanelHeader.qml
         Basecamp/AppManager/AppRepoSection.qml
         Basecamp/AppManager/AppContextMenu.qml

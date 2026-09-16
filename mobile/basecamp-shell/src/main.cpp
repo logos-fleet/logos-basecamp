@@ -29,6 +29,7 @@
 #include "ShellAppDriver.h"
 #include "ShellCallDriver.h"
 #include "ShellCatalogDriver.h"
+#include "ShellCatalogPageDriver.h"
 #include "ShellConsentDriver.h"
 #include "ShellKeyboardDriver.h"
 #include "ShellModulesDriver.h"
@@ -311,6 +312,15 @@ int main(int argc, char* argv[])
     auto* packages = new ShellPackageSectionDriver(shellWidget, &app);
     QObject::connect(packages, &ShellPackageSectionDriver::log, &console);
 
+    // AND THE OTHER PAGE OF THE SHELL'S OWN CHROME: the catalog, read off the
+    // screen rather than out of the App Manager's model. The Platform floor
+    // (#169) refuses a row whose dependency this build did not bundle, and
+    // until the Applications section drew a catalog the refusal's only home on
+    // a phone was a console line -- which is not somewhere a user can be asked
+    // to look.
+    auto* catalogPage = new ShellCatalogPageDriver(&host, shellWidget, &app);
+    QObject::connect(catalogPage, &ShellCatalogPageDriver::log, &console);
+
     // AND WHETHER A POPUP IS DRAWN AT ALL, which is the question under the
     // pass below it. A menu and a modal dialog are what the keyboard pass walks
     // through, and on the venue's physical iPad both of them exist, take focus
@@ -410,8 +420,8 @@ int main(int argc, char* argv[])
 
     // The passes that press things in the Shell's own rendered scene, in the
     // order above. Each one runs only if this run named it.
-    auto scenePasses = [&drive, network, driver, apps, webApps, webInput, packages, popups,
-                        keyboard, finishOnTheApp]() {
+    auto scenePasses = [&drive, network, driver, apps, webApps, webInput, packages,
+                        catalogPage, popups, keyboard, finishOnTheApp]() {
         // The CHAT half is what the app has to show, not the run's overall
         // verdict: the libp2p leg can fail on its own (an unanswered
         // local-network prompt on a device) with the group exchange perfectly
@@ -425,6 +435,13 @@ int main(int argc, char* argv[])
         // has the window.
         if (drive.wants(DrivePass::Packages))
             packages->run();
+        // AND THE CATALOG PAGE, beside it: the same kind of claim about the
+        // same kind of page, and equally only the Shell's to make while the
+        // Shell still has the window. It leaves the user on the Applications
+        // section, which the pass after it does not care about and
+        // finishOnTheApp() puts right.
+        if (drive.wants(DrivePass::Catalog))
+            catalogPage->run();
         // AND THE KEYBOARD, last of the passes that press the Shell's own
         // scene and still ahead of the web app. Both ends of that are about
         // what a pass leaves behind. It goes AFTER the package-manager section
@@ -464,6 +481,7 @@ int main(int argc, char* argv[])
     };
 
     const bool drivesAScene = drive.wants(DrivePass::Apps) || drive.wants(DrivePass::Packages)
+                              || drive.wants(DrivePass::Catalog)
                               || drive.wants(DrivePass::Popups)
                               || drive.wants(DrivePass::Keyboard)
                               || drive.wants(DrivePass::WebApps)

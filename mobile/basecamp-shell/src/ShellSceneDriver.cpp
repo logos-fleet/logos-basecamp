@@ -262,6 +262,45 @@ void ShellSceneDriver::scrollIntoView(QQuickItem* item)
     }
 }
 
+// WHETHER A FINGER COULD LAND ON THIS CONTROL, without landing on it.
+//
+// Split out of tap() for the one case that must NOT press what it is checking:
+// the catalog page's Install control starts a download and an install, and
+// "the control is where a finger can reach it" is a claim about the LAYOUT
+// that a driver has to be able to make without buying the consequence.
+// Everything it asks is what tap() asks, in the same order and with the same
+// sentences, so a reachability verdict reads the same wherever it came from.
+bool ShellSceneDriver::pressWouldReach(QQuickItem* item)
+{
+    QQuickWidget* surface = surfaceOf(item);
+    if (!surface) {
+        emit log(QStringLiteral("drive: '%1' is in no scene this host owns")
+                     .arg(item ? item->objectName() : QString()));
+        return false;
+    }
+    if (!basecamp::shell::sceneIsOnScreen(surface)) {
+        emit log(QStringLiteral("WRONG: '%1' is in a scene that is not on screen "
+                                "-- no touch can reach it")
+                     .arg(item->objectName()));
+        return false;
+    }
+    const QPointF centre = settledCentre(item);
+    const QPointF global = surface->mapToGlobal(centre);
+    const QRectF screen = screenRect(surface);
+    if (!basecamp::shell::pressIsReachable(centre, QSizeF(surface->size()), global, screen)) {
+        emit log(QStringLiteral("WRONG: '%1' is at (%2, %3) of a %4x%5 view, "
+                                "at (%6, %7) on a %8x%9 screen "
+                                "-- no touch can reach it on this screen")
+                     .arg(item->objectName())
+                     .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
+                     .arg(surface->width()).arg(surface->height())
+                     .arg(global.x(), 0, 'f', 0).arg(global.y(), 0, 'f', 0)
+                     .arg(screen.width(), 0, 'f', 0).arg(screen.height(), 0, 'f', 0));
+        return false;
+    }
+    return true;
+}
+
 bool ShellSceneDriver::tap(QQuickItem* item)
 {
     QQuickWidget* surface = surfaceOf(item);
