@@ -340,6 +340,18 @@ app anyway now and puts the host's reason in the tab (`src/AppNotices.h`,
 refusals — the app is not on this device, the module came up with no page — go
 through the same edge rather than stopping at the Modules tab's log.
 
+`ShellAppDriver` step 7 is the device half of that. A shipped set cannot be put
+in the refusal state from a tile — `--bundle` resolves a closure, so every app
+on the sidebar has its dependencies in the image by construction — so the step
+asks the host for a name the set does not carry, through the same entry point a
+stale tile uses, and reads the pane off the Shell's widget tree:
+
+```
+[shell] shell app: refusing 'no_such_app_ui' put this on screen: no_such_app_ui
+        cannot open.  app no_such_app_ui is not a view module in this Bundled set
+[shell] SHELL SAYS WHY AN APP CANNOT COME UP
+```
+
 ```
 [shell] shell: the sidebar carries a tile for chat_ui
 [shell] drive: press 'sidebar.app.chat_ui' at (44, 268) in 88x1326
