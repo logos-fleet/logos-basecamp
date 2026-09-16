@@ -3,6 +3,8 @@
 #include <QString>
 #include <QtGlobal>
 
+#include <functional>
+
 namespace basecamp::web {
 
 // WHAT THIS PROCESS IS COSTING, in bytes, or -1 where the platform will not say.
@@ -25,6 +27,35 @@ namespace basecamp::web {
 // honest thing to log: what a shell can measure about itself. The page's own
 // cost is the platform's to report and neither phone offers it to an embedder.
 qint64 appResidentBytes();
+
+// HOW MUCH MEMORY THIS DEVICE HAS, in bytes, or -1 where the platform will not
+// say -- `hw.memsize` on iOS/macOS, `MemTotal` on Android/Linux.
+//
+// It is here because it is the other half of the same question and is measured
+// the same way: what the app costs, and what the thing it is running on can
+// afford. #153 is that the second half was never asked -- the live-runtime
+// budget was a fixed count of ONE on a 2 GB phone and on a 16 GB tablet alike,
+// justified by a constant sampled once on a Samsung.
+//
+// A SIMULATOR ANSWERS THE MAC'S MEMORY, which is not a bug to be corrected here
+// (there is no honest way for a process to tell) and is why the policy that
+// reads this caps its count -- see LiveRuntimeBudget::kMaxLiveRuntimes.
+qint64 deviceMemoryBytes();
+
+// SUBSCRIBE TO THE PLATFORM'S MEMORY WARNING. `onWarning` is called on the Qt
+// main thread when the OS says it wants memory back; returns false where this
+// platform has no such signal, and then the container is left with the polling
+// half alone.
+//
+// iOS posts UIApplicationDidReceiveMemoryWarningNotification and then kills the
+// app if nothing changes -- it does not ask twice. Android calls
+// ComponentCallbacks2.onTrimMemory with a level, and the levels that mean "you
+// are about to be killed" (RUNNING_LOW and worse) are the ones passed on here.
+//
+// Implemented per platform beside that platform's page (IosWebPage.mm,
+// AndroidWebPage.cpp) because both signals arrive through the app's own UI
+// object, and answered with `false` in AppMemory.cpp everywhere else.
+bool watchAppMemoryPressure(std::function<void()> onWarning);
 
 // A byte count as whole megabytes, which is the unit every line about memory in
 // the Web container is stated in -- the budget's, the container's and the smoke

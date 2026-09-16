@@ -85,6 +85,11 @@ The Shell knows how to drive itself through nine acceptance passes, and it runs
                     and LEAVE it again (#110)
 --drive web-input   open a `web` app and TYPE into its form, with real pointer
                     and key events at the page, then read the field back (#174)
+--drive web-budget  open EVERY `web` app the build carries, one at a time, and
+                    say what the app weighs with each of them live -- then
+                    answer a memory warning and say what it shed (#153).
+                    Pair it with `--web-budget <n>`, which states the
+                    live-runtime count instead of taking the device's
 --drive modules     the Modules tab: the rows, their install type, their stats,
                     and a Load/Unload round trip
 --drive all         every pass, in the order above
@@ -178,7 +183,7 @@ container's BOOKS as well as its pages:
 ```
 
 The runtime half is what #151 is left as. A module with no page still in the
-live set spends the phone's single 290 MB slot on nothing, so the next app the
+live set spends a 290 MB slot on nothing, so the next app the
 user opens has to evict a dead one — and the console said both things at once,
 `web_counter is visible; 1 live runtime(s)` from the container beside `app
 web_counter is not mounted` from the Shell.
@@ -801,8 +806,9 @@ A Downloaded module is loaded exactly once: by the install that brought it
 (`ShellModulesBackend::onModuleInstalled`). On every later launch the core
 discovers the same package in the same scanned directory and waits to be asked,
 and a Store shell's cold start deliberately does not ask -- one `web` page is
-290 MB of QML runtime and seconds of it, and the container's budget is ONE live
-runtime, so loading every installed app at startup would evict the one the user
+290 MB of QML runtime and seconds of it, and the container's budget is one live
+runtime on a small phone (it is the device's own number since #153, capped at
+three), so loading every installed app at startup would evict the one the user
 actually wanted before they could reach it.
 
 So the app is brought up when its TILE IS PRESSED, and the tile is there before

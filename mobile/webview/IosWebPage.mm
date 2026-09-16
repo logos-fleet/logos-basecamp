@@ -1,5 +1,6 @@
 #include "webview/IosWebPage.h"
 
+#include "webview/AppMemory.h"
 #include "webview/MobileWebBridge.h"
 #include "webview/MobileWebContainerBackend.h"
 #include "web/LogosWebPaths.h"
@@ -406,6 +407,33 @@ PlatformPageFactory iosPlatformPageFactory()
         };
         return page;
     };
+}
+
+// THE ONE WARNING iOS GIVES BEFORE IT KILLS THE APP (#153).
+//
+// UIApplicationDidReceiveMemoryWarningNotification is posted on the main queue
+// and is not repeated -- jetsam's next move is the kill, and an app that
+// answered nothing is the app that gets it. So this is the signal the container
+// sheds every background page on, and it is deliberately NOT the same thing as
+// the weighing on the poll timer: that one is this app's own opinion about a
+// ceiling it computed, and this one is the system's.
+//
+// The block runs on the main queue, which under Qt for iOS IS the Qt main
+// thread (Qt runs its event loop on the platform's main thread here), so the
+// container is reached directly rather than through a queued invocation.
+bool watchAppMemoryPressure(std::function<void()> onWarning)
+{
+    static id observer = nil;
+    if (observer) return true;   // already watching; one warning, one answer
+    observer = [NSNotificationCenter.defaultCenter
+        addObserverForName:UIApplicationDidReceiveMemoryWarningNotification
+                    object:nil
+                     queue:NSOperationQueue.mainQueue
+                usingBlock:^(NSNotification*) {
+                    qInfo() << "iOS sent a memory warning";
+                    onWarning();
+                }];
+    return true;
 }
 
 } // namespace basecamp::web

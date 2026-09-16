@@ -784,6 +784,144 @@ private slots:
         QVERIFY(bytes < Q_INT64_C(100) * 1024 * 1024 * 1024);
     }
 
+    // ── #153: THE MEASUREMENT IS READ, AND THE OS IS LISTENED TO ───────────
+    //
+    // The container measured what the app weighed and printed it; nothing
+    // decided anything with it, and there was no memory-pressure handling in
+    // mobile/ at all. Both are pinned here.
+
+    // A ceiling of one byte is over the ceiling whatever this machine is doing,
+    // which is how a container test says "the app has grown" without being able
+    // to make it grow.
+    void aPageIsGivenUpWhenTheAppIsOverItsCeiling()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        // A COUNT OF THREE, so an eviction here cannot be the count: two pages
+        // are well inside it and only the weighing can take one away.
+        backend->install(m_runtimeDir, fakePlatform(),
+                         LiveRuntimeBudget(3, LiveRuntimeBudget::kDeviceRuntimeBytes, 1));
+        QSignalSpy backgrounded(backend, &MobileWebContainerBackend::uiEvicted);
+
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+        backend->show("counter_ui");
+        backend->show("notes_ui");
+
+        QCOMPARE(backgrounded.count(), 1);
+        QCOMPARE(backgrounded.at(0).at(0).toString(), QString("counter_ui"));
+        QCOMPARE(backend->budget().live(), QStringList{"notes_ui"});
+        QVERIFY(backend->hasUiPage("notes_ui"));
+    }
+
+    // ...and the same container with no ceiling keeps both, which is what says
+    // the line above was the ceiling and not something else.
+    void insideTheCeilingBothPagesStay()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(3));
+        QSignalSpy backgrounded(backend, &MobileWebContainerBackend::uiEvicted);
+
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+        backend->show("counter_ui");
+        backend->show("notes_ui");
+
+        QCOMPARE(backgrounded.count(), 0);
+        QCOMPARE(backend->budget().live().size(), 2);
+    }
+
+    // THE ONE SIGNAL THAT IS NOT THIS APP'S OPINION. iOS posts a memory warning
+    // and then kills the app; Android calls onTrimMemory. Either arrives here,
+    // and everything but the module the user is looking at gives its page up.
+    void aMemoryWarningKeepsOnlyTheVisiblePage()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(3));
+        QSignalSpy backgrounded(backend, &MobileWebContainerBackend::uiEvicted);
+
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+        backend->show("counter_ui");
+        backend->show("notes_ui");
+        QCOMPARE(backend->budget().live().size(), 2);
+
+        ConsoleLines console;
+        backend->memoryWarning();
+
+        QCOMPARE(backgrounded.count(), 1);
+        QCOMPARE(backgrounded.at(0).at(0).toString(), QString("counter_ui"));
+        QCOMPARE(backend->budget().live(), QStringList{"notes_ui"});
+        // The module is still loaded and still answering -- a warning is not an
+        // unload, it is the same eviction the budget makes for its own reasons.
+        QVERIFY(backend->hasView("counter_ui"));
+        QVERIFY(first->isAlive());
+        // AND IT IS ANNOUNCED. A shed nobody can see in the log is a shed
+        // nobody can attribute a cold start to afterwards.
+        QVERIFY2(!console.matching(QStringLiteral("memory warning")).isEmpty(),
+                 qPrintable(console.joined()));
+        QVERIFY2(!console.matching(QStringLiteral("live runtime(s)")).isEmpty(),
+                 qPrintable(console.joined()));
+    }
+
+    // A warning with nothing to give up is not an error and not a teardown: the
+    // visible page stays, because a container with no UI at all is not a
+    // container that saved anything.
+    void aMemoryWarningWithOnePageLeavesItAlone()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        auto view = load("counter_ui");
+        backend->show("counter_ui");
+        QSignalSpy backgrounded(backend, &MobileWebContainerBackend::uiEvicted);
+
+        backend->memoryWarning();
+
+        QCOMPARE(backgrounded.count(), 0);
+        QVERIFY(backend->hasUiPage("counter_ui"));
+    }
+
+    // ...and the budget stays tightened afterwards, so the next app the user
+    // opens does not put the app straight back to the size the OS complained
+    // about.
+    void afterAWarningTheNextShowStillKeepsOne()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(), LiveRuntimeBudget(3));
+        auto first = load("counter_ui");
+        auto second = load("notes_ui");
+        backend->show("counter_ui");
+        backend->show("notes_ui");
+        backend->memoryWarning();
+        QCOMPARE(backend->budget().liveAllowance(), 1);
+
+        // notes_ui ships no headless document, so its eviction is the other
+        // signal -- the host unloads it. Which signal fires is the package's
+        // business; that ONE of them fires is the budget's.
+        QSignalSpy unloadNeeded(backend, &MobileWebContainerBackend::uiEvictionRequired);
+        backend->show("counter_ui");
+        QCOMPARE(unloadNeeded.count(), 1);
+        QCOMPARE(unloadNeeded.at(0).at(0).toString(), QString("notes_ui"));
+    }
+
+    // WHAT THE DEVICE AFFORDS, stated once at install. A device run is read
+    // against this line: it is the only place the count, the ceiling and the
+    // device's own memory appear together.
+    void theContainerStatesWhatTheDeviceAffords()
+    {
+        ConsoleLines console;
+        MobileWebContainerBackend::instance()->install(
+            m_runtimeDir, fakePlatform(),
+            LiveRuntimeBudget(2, LiveRuntimeBudget::kDeviceRuntimeBytes,
+                              4LL * 1024 * 1024 * 1024));
+        const QStringList said = console.matching(QStringLiteral("live-runtime budget"));
+        QVERIFY2(!said.isEmpty(), qPrintable(console.joined()));
+        QVERIFY2(said.filter(QStringLiteral("2 runtimes")).size() == 1,
+                 qPrintable(said.join(QLatin1Char('\n'))));
+        // The ceiling belongs in the same sentence: a run that shows the app at
+        // 900 MB is only readable beside the number that would have shed a page.
+        QVERIFY2(said.filter(QStringLiteral("4096 MB")).size() == 1,
+                 qPrintable(said.join(QLatin1Char('\n'))));
+    }
+
     void theBudgetIsStated()
     {
         auto* backend = MobileWebContainerBackend::instance();

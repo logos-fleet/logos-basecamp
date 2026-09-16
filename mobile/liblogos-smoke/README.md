@@ -121,7 +121,8 @@ namespace's global group, and an app's libraries are never in the latter.
 ## The Web container's bring-up probe
 
 The host installs the **Web container** before the core starts -- a webview per
-Downloaded module, with a live-runtime budget of one QML runtime -- and then
+Downloaded module, with a live-runtime budget this device's memory decided
+(#153: one QML runtime on a small phone, up to three on a tablet) -- and then
 answers the one question no desktop can:
 
 ```

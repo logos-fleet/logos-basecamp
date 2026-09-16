@@ -30,6 +30,10 @@ namespace basecamp::shell {
 //             that puts itself back where it started
 //   WebApps   the step that hands the window to a platform page
 //   WebInput  ...and typing into the form on that page, which needs one open
+//   WebBudget what those pages COST -- it opens every `web` app the build has
+//             and weighs the app after each, so it has to run after the two
+//             passes that prove one page works and before the pass that
+//             unloads modules underneath it
 //   Modules   last: it is the one that changes what is loaded
 enum class DrivePass {
     Chat,
@@ -40,6 +44,7 @@ enum class DrivePass {
     Keyboard,
     WebApps,
     WebInput,
+    WebBudget,
     Modules,
 };
 

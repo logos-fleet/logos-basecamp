@@ -36,6 +36,7 @@
 #include "ShellPackageSectionDriver.h"
 #include "ShellPopupDriver.h"
 #include "ShellWebAppDriver.h"
+#include "ShellWebBudgetDriver.h"
 #include "ShellWebInputDriver.h"
 #include "ShellSections.h"
 #include "SmokeRunner.h"
@@ -154,7 +155,12 @@ int main(int argc, char* argv[])
     // 0003), so without a container the App Manager could install one and
     // there was nowhere for it to run.
     //
-    // The budget is the phone's: ONE live QML runtime, measured at 185-240 MB.
+    // THE BUDGET IS THE DEVICE'S, not a constant (#153). forThisDevice() reads
+    // how much memory this phone or tablet has and says how many UI pages it
+    // affords -- one on a small phone, up to three on a tablet -- and gives the
+    // container the ceiling it sheds a page above when the app grows past what
+    // the device can carry. `LOGOS_WEB_RUNTIME_BUDGET` overrides the count for a
+    // run that wants to measure a number the policy did not choose.
     QString shippedWebModulesDir;
     {
         using basecamp::web::MobileWebContainerBackend;
@@ -162,7 +168,8 @@ int main(int argc, char* argv[])
 #if defined(Q_OS_IOS)
         shippedWebModulesDir = basecamp::web::iosWebModulesDir();
         web->install(basecamp::web::iosQmlRuntimeDir(),
-                     basecamp::web::iosPlatformPageFactory());
+                     basecamp::web::iosPlatformPageFactory(),
+                     basecamp::web::LiveRuntimeBudget::forThisDevice(app.arguments()));
 #elif defined(Q_OS_ANDROID)
         // BEFORE THE CONTAINER: an APK's assets are not files, so the app's
         // `web` half is copied out once into the data directory and the
@@ -175,7 +182,8 @@ int main(int argc, char* argv[])
         // Fetch refuses a non-standard scheme there). See LogosWebPaths.h.
         web->install(basecamp::web::androidQmlRuntimeDir(),
                      basecamp::web::androidPlatformPageFactory(),
-                     basecamp::web::LiveRuntimeBudget(), /*shimInDocument=*/true,
+                     basecamp::web::LiveRuntimeBudget::forThisDevice(app.arguments()),
+                     /*shimInDocument=*/true,
                      basecamp::web::WebOrigin::android());
 #endif
     }
@@ -358,6 +366,13 @@ int main(int argc, char* argv[])
     auto* webInput = new ShellWebInputDriver(&host, shellWidget, &app);
     QObject::connect(webInput, &ShellWebInputDriver::log, &console);
 
+    // ...AND WHAT THOSE PAGES COST (#153). The two passes above prove a page
+    // works; this one opens every `web` app the build carries and says what the
+    // app weighs with each of them live, which is the measurement the
+    // live-runtime budget's policy is derived from.
+    auto* webBudget = new ShellWebBudgetDriver(&host, shellWidget, &app);
+    QObject::connect(webBudget, &ShellWebBudgetDriver::log, &console);
+
     // THE CATALOG, if this launch was pointed at one. It has work only when the
     // command line named a repository (`--repository`, `--trust-signer`,
     // `--install`), which is a developer's run against a local catalog release
@@ -420,8 +435,8 @@ int main(int argc, char* argv[])
 
     // The passes that press things in the Shell's own rendered scene, in the
     // order above. Each one runs only if this run named it.
-    auto scenePasses = [&drive, network, driver, apps, webApps, webInput, packages,
-                        catalogPage, popups, keyboard, finishOnTheApp]() {
+    auto scenePasses = [&drive, network, driver, apps, webApps, webInput, webBudget,
+                        packages, catalogPage, popups, keyboard, finishOnTheApp]() {
         // The CHAT half is what the app has to show, not the run's overall
         // verdict: the libp2p leg can fail on its own (an unanswered
         // local-network prompt on a device) with the group exchange perfectly
@@ -475,6 +490,12 @@ int main(int argc, char* argv[])
         // state that would not survive it.
         if (drive.wants(DrivePass::WebInput) && webInput->hasWork())
             webInput->run();
+        // AFTER both of those and BEFORE the Modules tab, for the same two
+        // reasons: it wants the pages already built (a cold start it did not
+        // pay for is not the figure it is reporting) and it wants them still
+        // loaded, which the Modules pass is precisely the one to change.
+        if (drive.wants(DrivePass::WebBudget) && webBudget->hasWork())
+            webBudget->run();
         if (drive.wants(DrivePass::Modules))
             driver->run();
         finishOnTheApp();
@@ -486,6 +507,7 @@ int main(int argc, char* argv[])
                               || drive.wants(DrivePass::Keyboard)
                               || drive.wants(DrivePass::WebApps)
                               || drive.wants(DrivePass::WebInput)
+                              || drive.wants(DrivePass::WebBudget)
                               || drive.wants(DrivePass::Modules);
     // Nothing at all to do is the DEFAULT case, and it costs no timer: the app
     // comes up and waits for whoever is holding the phone.

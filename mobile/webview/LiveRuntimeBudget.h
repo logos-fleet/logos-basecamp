@@ -47,10 +47,69 @@ public:
     // a container can do is count pages and multiply.
     static constexpr qint64 kDeviceRuntimeBytes = 290LL * 1024 * 1024;
 
-    // One runtime is the phone's answer and the DEFAULT, because 290 MB is
-    // already most of what a mid-range phone will let a foreground app keep.
+    // HOW MANY PAGES A DEVICE OF THIS SIZE MAY KEEP (#153).
+    //
+    // The count used to be 1 on every device, and the comment above admitted
+    // why that was wrong: a tablet can afford more than one and a phone cannot,
+    // and nothing asked the device which it was. This asks.
+    //
+    // ONE SIXTH OF THE DEVICE'S MEMORY is what the container may put into UI
+    // pages, and the count is that share divided by what one page costs. The
+    // fraction rather than an absolute number because the thing being defended
+    // scales with the device: a phone's whole foreground allowance is a
+    // fraction of its RAM on both platforms (iOS jetsam charges a footprint
+    // limit that tracks the device's memory; Android's LMK kills against what
+    // is left of it), and a page that is 290 MB of a 6 GB phone is a different
+    // proposition from the same page on a 2 GB one.
+    //
+    // CAPPED AT THREE however much memory there is, for two reasons that are
+    // not about memory: a user flips between two or three apps and a fourth
+    // live runtime buys nothing, and the pages' real cost is in a RENDERER
+    // PROCESS this app cannot weigh (see AppMemory.h) -- so every page past the
+    // third is a bet against a number nobody here can read. A simulator makes
+    // the same point loudly: it reports the Mac's 64 GB.
+    static constexpr int kMaxLiveRuntimes = 3;
+    static int runtimesForDeviceMemory(qint64 deviceMemoryBytes,
+                                       qint64 runtimeFootprintBytes = kDeviceRuntimeBytes);
+
+    // WHAT THE APP AS A WHOLE MAY WEIGH on a device of this size, which is a
+    // different number from the pages' share above: this covers the core, the
+    // modules, the QML scene and the pages together, because
+    // appResidentBytes() cannot separate them.
+    //
+    // A THIRD OF THE DEVICE, and the point of the fraction is that it is UNDER
+    // what the OS acts on rather than at it: iOS jetsam's foreground limit is
+    // roughly half a device's memory, and a container that shed its first page
+    // there would be shedding at the moment it was already being killed. A
+    // third leaves a page's worth of margin on every device the venue has.
+    //
+    // Zero means "there is nothing to weigh against" -- a device that will not
+    // say its memory -- and a budget with a ceiling of zero counts and does not
+    // weigh, which is what this class did before #153.
+    static qint64 ceilingForDeviceMemory(qint64 deviceMemoryBytes);
+
+    // THE BUDGET THIS DEVICE GETS, measured rather than assumed. The count and
+    // the ceiling both come from deviceMemoryBytes().
+    //
+    // A RUN CAN STATE THE COUNT, and has to be able to: measuring what two and
+    // three live runtimes cost on a phone whose policy says one is exactly the
+    // measurement #153 asks for, and a policy that could not be overridden
+    // could not be checked. `--web-budget <n>` on the app's own command line,
+    // or `LOGOS_WEB_RUNTIME_BUDGET` where there is a shell to set one -- the
+    // flag because there is no environment to speak of on a phone: an APK's
+    // process inherits nothing a developer typed, while the launcher forwards
+    // arguments on both platforms.
+    static LiveRuntimeBudget forThisDevice(const QStringList& args = {});
+
+    // One runtime is the DEFAULT still, and deliberately: a host that states no
+    // number gets the conservative one rather than a guess, and the hosts that
+    // ship on a phone call forThisDevice() instead.
+    //
+    // `appCeilingBytes` of zero is "no ceiling": observe() then changes nothing,
+    // whatever it is told.
     explicit LiveRuntimeBudget(int maxLiveRuntimes = 1,
-                               qint64 runtimeFootprintBytes = kDeviceRuntimeBytes);
+                               qint64 runtimeFootprintBytes = kDeviceRuntimeBytes,
+                               qint64 appCeilingBytes = 0);
 
     // `module` is now the visible Downloaded module. Returns the modules whose
     // UI page the caller must drop to stay inside the budget, LEAST RECENTLY
@@ -67,6 +126,37 @@ public:
     // named for eviction a second time, which on every platform here is a use
     // after free rather than a no-op.
     void forget(const QString& module);
+
+    // WHAT THE APP WEIGHS RIGHT NOW, answered rather than logged (#153).
+    //
+    // `appResidentBytes` is what AppMemory measured, or -1 where the platform
+    // will not say -- and a platform that will not say is not a reason to
+    // evict, so -1 changes nothing. Over the ceiling, ONE page is given up per
+    // observation, least recently visible first: one at a time because the
+    // number is the host's and not the page's (AppMemory.h), so the container
+    // cannot know which page is the expensive one and shedding the lot on one
+    // reading would cost three cold starts to answer a spike.
+    //
+    // Never the visible module: one page is the floor here exactly as it is in
+    // the constructor.
+    QStringList observe(qint64 appResidentBytes);
+
+    // THE OS ASKED FOR MEMORY BACK, which is the one signal in this file that
+    // is not this app's own opinion. Everything but the module the user is
+    // looking at gives its page up, at once rather than one per observation:
+    // iOS kills an app rather than ask it twice.
+    //
+    // The allowance stays where this left it until a later observe() finds the
+    // app well under its ceiling again -- a warning answered and then
+    // immediately forgotten would refill the app to the size the OS just
+    // complained about.
+    QStringList shedUnderPressure();
+
+    // HOW MANY PAGES MAY LIVE RIGHT NOW, which is the device's number until a
+    // measurement or a warning tightens it and again once the app is small
+    // enough for it to be relaxed. maxLiveRuntimes() is what the device
+    // affords; this is what the app has earned.
+    int liveAllowance() const { return m_allowance; }
 
     // Live UI runtimes, most recently visible first.
     QStringList live() const { return m_live; }
@@ -85,10 +175,21 @@ public:
     qint64 budgetBytes() const { return qint64(m_maxLive) * m_footprintBytes; }
     qint64 projectedBytes() const { return qint64(m_live.size()) * m_footprintBytes; }
     qint64 runtimeFootprintBytes() const { return m_footprintBytes; }
+    qint64 appCeilingBytes() const { return m_ceilingBytes; }
 
 private:
+    // Trim to the current allowance, least recently visible first.
+    QStringList trimToAllowance();
+    // WHERE A TIGHTENED BUDGET IS ALLOWED TO GROW AGAIN. Three quarters of the
+    // ceiling: a budget that relaxed the moment the reading dipped under the
+    // ceiling would follow a number that moves by megabytes between two frames,
+    // and the user would pay a 3-second cold start for each oscillation.
+    qint64 relaxBelowBytes() const { return m_ceilingBytes / 4 * 3; }
+
     int m_maxLive;
+    int m_allowance;
     qint64 m_footprintBytes;
+    qint64 m_ceilingBytes;
     // Most recently visible first. Short by construction (the budget is 1 on a
     // phone), so a list beats anything with a bucket in it.
     QStringList m_live;
