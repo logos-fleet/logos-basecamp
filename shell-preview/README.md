@@ -41,6 +41,13 @@ What does **not** render: any UI plugin. Package Manager is
 and pulls in `LogosAPI` and `ui-host`. Have the fixture report no installed UI
 plugins and the sidebar simply shows no app icons.
 
+Pressing an app tile therefore **refuses**, and the preview says so: the host
+answers `loadUiModule` through `IShellObserver::onUiModuleUnavailable`, and the
+shell docks a tab carrying the reason (`src/AppNotices.h`,
+`src/AppUnavailablePane.h`). That is the same surface a phone puts up for an app
+whose declared module is not on the device — until logos-workspace#205 both were
+a press that did nothing at all — so the preview is also where to look at it.
+
 ## Build and run
 
 ```bash
