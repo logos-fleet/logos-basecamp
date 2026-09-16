@@ -17,6 +17,10 @@ namespace basecamp::shell {
 //   Apps      then the app, opened from the sidebar -- before the Modules tab,
 //             which unloads and reloads a core module underneath it
 //   Packages  the Shell's own chrome, while the Shell still has the window
+//   Catalog   ...and the other page of it: the catalog, read off the screen.
+//             Beside Packages because it is the same kind of claim about the
+//             same kind of page, and ahead of everything that hands the window
+//             away
 //   Popups    whether a QtQuick Popup reaches the screen at all, in every scene
 //             the Shell has -- ahead of Keyboard because Keyboard's whole path
 //             runs through two of them, so "the menu is not drawn" is a fact
@@ -31,6 +35,7 @@ enum class DrivePass {
     Chat,
     Apps,
     Packages,
+    Catalog,
     Popups,
     Keyboard,
     WebApps,

@@ -61,7 +61,7 @@ reason.
 
 ## Driving is a per-run choice
 
-The Shell knows how to drive itself through seven acceptance passes, and it runs
+The Shell knows how to drive itself through nine acceptance passes, and it runs
 **none of them** unless the launch asks:
 
 ```
@@ -71,6 +71,10 @@ The Shell knows how to drive itself through seven acceptance passes, and it runs
                     app's OWN handles are on screen
 --drive packages    open the Package Manager section and report what the page
                     says (#145)
+--drive catalog     open the Applications section and read the CATALOG off the
+                    page: a row for every entry, an install control only where
+                    the row may be installed, and a refused row carrying the
+                    reason it was refused in (#169)
 --drive popups      open a Popup, a modal Dialog and a Menu in EVERY scene the
                     Shell has on screen, and read the pixels: does the surface
                     draw them? (#187) Needs no module and no network

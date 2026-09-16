@@ -1502,7 +1502,7 @@
           # Bundled-set release is read by a BUILD, this one by
           # logos-package-downloader on a phone at run time.
           #
-          # Three rows, and none of them is filler.
+          # Four rows, and none of them is filler.
           #
           # `web_counter_b` is a `ui_qml` `web` variant -- which is all a Store
           # shell may download (ADR 0003) -- and it is the SECOND counter rather
@@ -1521,6 +1521,11 @@
           # which is what makes "listed as unavailable with the reason, and NO
           # install control" observable against a real catalog instead of only
           # in a unit test.
+          #
+          # `wallet_ui` is the OTHER refusal, and the one this shell DERIVES
+          # rather than reads: a `web` variant that is perfectly installable in
+          # itself and depends on a Platform module (#169). See the comment at
+          # its entry below.
           localCatalog = import ./nix/local-catalog.nix {
             inherit pkgs;
             icon = ./mobile/catalog/icon.png;
@@ -1531,6 +1536,7 @@
               let
                 builderPkgs = logos-module-builder.packages.${system} or { };
                 keystorePkgs = logos-evm-keystore-module.packages.${system} or { };
+                walletUiPkgs = logos-evm-wallet-ui.packages.${system} or { };
               in
               nixpkgs.lib.optionalAttrs (builderPkgs ? web-view-counter-b)
                 { web_counter_b.drv = builderPkgs.web-view-counter-b; }
@@ -1547,6 +1553,35 @@
                     # cannot judge -- and the judgement is the whole point.
                     dependencies =
                       (logos-evm-keystore-module.config or { }).dependencies or [ ];
+                  };
+                }
+              # AND ONE ROW THIS SHELL CANNOT HONESTLY OFFER (#169). The wallet's
+              # `web` half depends on `token_list_module`, which is a PLATFORM
+              # module by its own declaration (`platform: true`: it owns a socket
+              # a webview cannot lend it), so it ships no `web` variant and a
+              # Downloaded module reaches a token list by CALLING it. On a shell
+              # that bundled token_list this row is installable; on one that did
+              # not, installing it would succeed and the wallet would have
+              # nothing to ask -- which is exactly the pair ADR 0009's second
+              # rule is about.
+              #
+              # Publishing it here is what makes the DERIVED floor's refusal
+              # something a user can be shown rather than only something a unit
+              # test asserts: on a default `--bundle` the catalog page lists it
+              # "requires token_list_module, not in this build", with no install
+              # control.
+              // nixpkgs.lib.optionalAttrs (walletUiPkgs ? web)
+                { wallet_ui = {
+                    drv = walletUiPkgs.web;
+                    type = "ui_qml";
+                    category = "wallet";
+                    description = "Wallet: accounts, balances and swaps, as a `web` variant";
+                    # BOTH read off its own metadata.json, for the reason
+                    # keystore's dependencies are: a package published with a
+                    # list written here is a package this file has an opinion
+                    # about, and the floor's whole point is that nobody does.
+                    view = logos-evm-wallet-ui.config.view;
+                    dependencies = logos-evm-wallet-ui.config.dependencies;
                   };
                 };
             prebuilt.desktop_only = bundledSetFixture.drvs.desktop_only;

@@ -25,6 +25,12 @@ Item {
     }
 
     Shortcut {
+        // NAMED, because three views declare ⌘K -- this page, the App Manager
+        // and Settings -- and only the one whose view is in front is enabled.
+        // A test that took "the first Shortcut whose text ends in K" asserted
+        // whichever the walk reached first, and adding an item anywhere in the
+        // content stack changed the answer (logos-workspace#169).
+        objectName: "welcomePage.searchShortcut"
         sequences: ["Ctrl+K"]
         context: Qt.WindowShortcut
         enabled: root.visible

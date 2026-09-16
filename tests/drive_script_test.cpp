@@ -33,8 +33,8 @@ class DriveScriptTest : public QObject
     static QList<DrivePass> allPasses()
     {
         return { DrivePass::Chat, DrivePass::Apps, DrivePass::Packages,
-                 DrivePass::Popups, DrivePass::Keyboard, DrivePass::WebApps,
-                 DrivePass::WebInput, DrivePass::Modules };
+                 DrivePass::Catalog, DrivePass::Popups, DrivePass::Keyboard,
+                 DrivePass::WebApps, DrivePass::WebInput, DrivePass::Modules };
     }
 
 private slots:
@@ -73,6 +73,7 @@ private slots:
         QVERIFY(!s.wants(DrivePass::WebInput));
         QVERIFY(!s.wants(DrivePass::Chat));
         QVERIFY(!s.wants(DrivePass::Packages));
+        QVERIFY(!s.wants(DrivePass::Catalog));
         QVERIFY(!s.wants(DrivePass::Keyboard));
         QCOMPARE(s.passes(), QStringList{ "modules" });
     }
@@ -82,6 +83,7 @@ private slots:
         QVERIFY(parse({ "--drive", "chat" }).wants(DrivePass::Chat));
         QVERIFY(parse({ "--drive", "apps" }).wants(DrivePass::Apps));
         QVERIFY(parse({ "--drive", "packages" }).wants(DrivePass::Packages));
+        QVERIFY(parse({ "--drive", "catalog" }).wants(DrivePass::Catalog));
         QVERIFY(parse({ "--drive", "popups" }).wants(DrivePass::Popups));
         QVERIFY(parse({ "--drive", "keyboard" }).wants(DrivePass::Keyboard));
         QVERIFY(parse({ "--drive", "web-apps" }).wants(DrivePass::WebApps));
@@ -89,8 +91,8 @@ private slots:
         QVERIFY(parse({ "--drive", "modules" }).wants(DrivePass::Modules));
         // ...and the vocabulary says so, which is what a refusal quotes.
         QCOMPARE(DriveScript::knownPasses(),
-                 (QStringList{ "chat", "apps", "packages", "popups", "keyboard",
-                               "web-apps", "web-input", "modules" }));
+                 (QStringList{ "chat", "apps", "packages", "catalog", "popups",
+                               "keyboard", "web-apps", "web-input", "modules" }));
     }
 
     // Composable two ways, because an acceptance run names what it is proving
@@ -118,10 +120,10 @@ private slots:
     void passesAreReportedInTheOrderTheyRun()
     {
         const DriveScript s =
-            parse({ "--drive", "modules,chat,web-input,keyboard,popups,web-apps" });
+            parse({ "--drive", "modules,chat,web-input,keyboard,catalog,popups,web-apps" });
         QCOMPARE(s.passes(),
-                 (QStringList{ "chat", "popups", "keyboard", "web-apps", "web-input",
-                               "modules" }));
+                 (QStringList{ "chat", "catalog", "popups", "keyboard", "web-apps",
+                               "web-input", "modules" }));
     }
 
     // The historic behaviour, for the runs that really do want all of it -- and
