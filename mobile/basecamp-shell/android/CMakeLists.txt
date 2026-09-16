@@ -55,6 +55,7 @@ qt_add_executable(BasecampShell
     ${SMOKE_SRC}/ViewModuleRunner.cpp ${SMOKE_SRC}/ViewModuleRunner.h
     ${SHELL_SRC}/DriveScript.cpp ${SHELL_SRC}/DriveScript.h
     ${SHELL_SRC}/ShellModuleRows.cpp ${SHELL_SRC}/ShellModuleRows.h
+    ${SHELL_SRC}/ViewDependencies.cpp ${SHELL_SRC}/ViewDependencies.h
     ${SHELL_SRC}/InstalledPackages.cpp ${SHELL_SRC}/InstalledPackages.h
     ${SHELL_SRC}/ShellModulesBackend.cpp ${SHELL_SRC}/ShellModulesBackend.h
     ${SHELL_SRC}/BundledSetShellHost.cpp ${SHELL_SRC}/BundledSetShellHost.h

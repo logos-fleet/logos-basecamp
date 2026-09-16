@@ -25,6 +25,7 @@
 #include "ICoreRuntime.h"
 #include "ModuleInstanceModel.h"
 #include "ShellModuleRows.h"
+#include "ViewDependencies.h"
 #include "appmanager/ModuleDirectories.h"
 
 #include <QObject>
@@ -148,6 +149,29 @@ public:
     // False when this device does not have it -- which is not an error, it is
     // the state of a device that never installed it.
     bool ensureRunning(const QString& name);
+
+    // BRING UP WHAT A NATIVE VIEW DECLARES, before its framework is
+    // instantiated (logos-workspace#205).
+    //
+    // A `ui_qml` member is the host's to instantiate and the modules it calls
+    // are the core's to load, and nothing used to join the two: chat_ui called
+    // chat_module.init() from its own construction, on a plain launch, while
+    // chat_module sat registered and unloaded -- and then drew a perfectly
+    // ordinary conversation list over a backend that was never there. The Web
+    // container has always done this for a page (mountWebApp), which is why the
+    // wallet's whole chain comes up on its tile press and chat's did not.
+    //
+    // The rule and its verdict are ViewDependencies.h; this is the half that
+    // needs a core to answer.
+    basecamp::shell::ViewMountVerdict openViewDependencies(const QString& name);
+
+    // The modules a Bundled member declares, straight off the manifest, in
+    // declaration order. Empty for a name the manifest does not carry.
+    QStringList declaredDependencies(const QString& name) const;
+    // What the CORE reports as running -- not `mountedViews`, and not the
+    // rows. The one reading that can say whether a mounted view has anything
+    // behind it (logos-workspace#205).
+    QStringList loadedModuleNames() const;
 
     // Record a decision for a pair that has no prompt on screen. The ordinary
     // path is StoreAppManager::answerConsent, which pops the queue; this is for

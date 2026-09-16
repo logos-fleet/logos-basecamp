@@ -184,6 +184,40 @@ bool ShellModulesBackend::ensureRunning(const QString& name)
     return loaded;
 }
 
+basecamp::shell::ViewMountVerdict
+ShellModulesBackend::openViewDependencies(const QString& name)
+{
+    // ONE READING of the facts for the whole walk, and `ensureRunning` is what
+    // loads: it is already the one place that says "this device has it and
+    // nothing has asked for it yet", and the core loads each name's closure
+    // behind it (LoadPolicy::RequiredDeps).
+    //
+    // The snapshot's `loaded` goes stale inside the walk -- loading the first
+    // name can bring the second up with it, and chat_module pulling
+    // delivery_module is exactly the set #205 was found on. Harmless, because
+    // `ensureRunning` asks the core afresh and answers true without loading
+    // anything: the second name costs a lookup, not a second load.
+    const basecamp::shell::ViewMountVerdict verdict =
+        basecamp::shell::openViewDependencies(
+            facts(), name,
+            [this](const QString& dep) { return ensureRunning(dep); });
+
+    if (!verdict.loaded.isEmpty())
+        emit log(QStringLiteral("app %1 declares %2; brought up before mounting it")
+                     .arg(name, verdict.loaded.join(QStringLiteral(", "))));
+    return verdict;
+}
+
+QStringList ShellModulesBackend::declaredDependencies(const QString& name) const
+{
+    return basecamp::shell::declaredDependencies(facts(), name);
+}
+
+QStringList ShellModulesBackend::loadedModuleNames() const
+{
+    return m_modules->loadedModules();
+}
+
 bool ShellModulesBackend::decideConsent(const QString& caller, const QString& target,
                                         bool granted)
 {
