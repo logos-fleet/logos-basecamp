@@ -335,7 +335,7 @@ device that the mounted app's declared modules are actually loaded behind it.
 ```
 [shell] shell: the sidebar carries a tile for chat_ui
 [shell] drive: press 'sidebar.app.chat_ui' at (44, 268) in 88x1326
-[shell] app chat_ui declares chat_module, delivery_module; brought up before mounting it
+[shell] app chat_ui: brought up chat_module, delivery_module before mounting it
 [shell] view image opened in 41 ms
 [shell] view model remoted: chat_ui/conversationModel (9 roles)
 [shell] replica valid: chat_ui

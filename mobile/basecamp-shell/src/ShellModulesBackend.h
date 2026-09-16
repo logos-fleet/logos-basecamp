@@ -151,19 +151,10 @@ public:
     bool ensureRunning(const QString& name);
 
     // BRING UP WHAT A NATIVE VIEW DECLARES, before its framework is
-    // instantiated (logos-workspace#205).
-    //
-    // A `ui_qml` member is the host's to instantiate and the modules it calls
-    // are the core's to load, and nothing used to join the two: chat_ui called
-    // chat_module.init() from its own construction, on a plain launch, while
-    // chat_module sat registered and unloaded -- and then drew a perfectly
-    // ordinary conversation list over a backend that was never there. The Web
-    // container has always done this for a page (mountWebApp), which is why the
-    // wallet's whole chain comes up on its tile press and chat's did not.
-    //
-    // The rule and its verdict are ViewDependencies.h; this is the half that
-    // needs a core to answer.
-    basecamp::shell::ViewMountVerdict openViewDependencies(const QString& name);
+    // instantiated (logos-workspace#205). The rule, the verdict and why a view
+    // needs this are ViewDependencies.h; this is the half that needs a core to
+    // answer -- the facts to decide on, and `ensureRunning` as the loader.
+    basecamp::shell::ViewMountVerdict bringUpViewDependencies(const QString& name);
 
     // The modules a Bundled member declares, straight off the manifest, in
     // declaration order. Empty for a name the manifest does not carry.

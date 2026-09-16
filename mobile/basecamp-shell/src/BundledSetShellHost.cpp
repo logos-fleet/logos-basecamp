@@ -120,14 +120,8 @@ void BundledSetShellHost::mountApp(const QString& name)
 
     // ── THE MODULES THIS APP DECLARES, FIRST (logos-workspace#205) ──────────
     //
-    // A native view calls its module from its own construction -- chat_ui calls
-    // chat_module.init() before the QML exists -- and until this ran, nothing
-    // had loaded that module: only the three the Shell's own surfaces need come
-    // up at startup. So the call was refused ("No token found for module
-    // chat_module"), the view reported it to a log nobody reads, and went on to
-    // remote its three models and draw an ordinary conversation list over a
-    // dead backend. Invisible on screen, and it survived every driver pass
-    // because `--drive chat` loads chat_module itself.
+    // Why a native view needs this at all is ViewDependencies.h. Two things
+    // about it belong here, where the mount is:
     //
     // BEFORE the runner, not after it. The point is the ORDER: the framework's
     // constructor is the first thing that calls out, so a load that happened
@@ -137,7 +131,7 @@ void BundledSetShellHost::mountApp(const QString& name)
     // does not have has nothing behind it, and an intact UI over nothing is the
     // defect itself -- so the Shell is told, through the one negative edge the
     // observer has, in the host's own words (IShellHost.h).
-    const basecamp::shell::ViewMountVerdict deps = m_backend.openViewDependencies(name);
+    const basecamp::shell::ViewMountVerdict deps = m_backend.bringUpViewDependencies(name);
     if (!deps.ready) {
         QStringList parts;
         if (!deps.missing.isEmpty()) {

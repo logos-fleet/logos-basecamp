@@ -20,6 +20,19 @@ constexpr int kModelBudgetMs = 15000;
 // source -- seconds of work on a phone. Spent once per mount, and step 6
 // mounts the app a second time.
 constexpr int kMountBudgetMs = 30000;
+
+// The names in `declared` that the core is not running, in declaration order.
+// Asked twice about the same app -- once before the tile is pressed and once
+// after -- and the pair is the whole check (logos-workspace#205).
+QStringList notLoaded(const QStringList& declared, const QStringList& loaded)
+{
+    QStringList out;
+    for (const QString& dep : declared) {
+        if (!loaded.contains(dep))
+            out << dep;
+    }
+    return out;
+}
 } // namespace
 
 ShellAppDriver::ShellAppDriver(BundledSetShellHost* host, QWidget* shellWidget,
@@ -85,12 +98,7 @@ void ShellAppDriver::run(bool expectLiveContent)
     // already driven chat arrives here with chat_module up; the line then
     // records that rather than asserting it.
     const QStringList declared = backend->declaredDependencies(app);
-    const QStringList loadedBefore = backend->loadedModuleNames();
-    QStringList unloadedBefore;
-    for (const QString& dep : declared) {
-        if (!loadedBefore.contains(dep))
-            unloadedBefore << dep;
-    }
+    const QStringList unloadedBefore = notLoaded(declared, backend->loadedModuleNames());
     emit log(QStringLiteral("shell app: %1 declares [%2]; of those, [%3] are not loaded "
                             "before the tile is pressed")
                  .arg(app, declared.join(QStringLiteral(", ")),
@@ -165,23 +173,14 @@ void ShellAppDriver::run(bool expectLiveContent)
 
     // ── 3b. AND ITS MODULES ARE RUNNING BEHIND IT (logos-workspace#205) ──
     //
-    // The failure this catches is invisible on screen, which is the whole
-    // reason it is checked here: chat_ui mounted with chat_module unloaded
-    // renders its conversation list, remotes its three models, and reports
-    // "Failed to initialise chat" to a log nobody reads. Every assertion above
-    // passes on that app. So the question is asked of the CORE instead -- is
-    // the module this view calls actually up -- and it is asked AFTER the
-    // mount because the mount is what is supposed to have brought it up.
+    // Every assertion above passes on a view drawing over a dead backend
+    // (ViewDependencies.h). So the question is put to the CORE instead -- is
+    // the module this view calls actually up -- and it is put AFTER the mount,
+    // because the mount is what is supposed to have brought it up.
     //
-    // Note the driver passes did not catch this until now: `--drive chat`
-    // loads chat_module itself, which is precisely why a no-flags run was the
-    // first thing to find it.
-    const QStringList loadedAfter = backend->loadedModuleNames();
-    QStringList stillDown;
-    for (const QString& dep : declared) {
-        if (!loadedAfter.contains(dep))
-            stillDown << dep;
-    }
+    // Note this is why the check lives in a no-flags run: `--drive chat` loads
+    // chat_module itself, so the chat pass could never have caught it.
+    const QStringList stillDown = notLoaded(declared, backend->loadedModuleNames());
     if (!stillDown.isEmpty()) {
         emit log(QStringLiteral("WRONG: '%1' is mounted and [%2] -- which it declares --"
                                 " %3 not loaded. The view is drawing over a dead backend.")

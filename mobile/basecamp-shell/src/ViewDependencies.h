@@ -63,7 +63,7 @@ QStringList declaredDependencies(const ModuleFacts& facts, const QString& name);
 // Only the DIRECT dependencies are offered to it: the core loads a closure
 // (LoadPolicy::RequiredDeps), so whatever sits under each name is its to walk
 // -- which is also why this must not pre-expand the chain itself.
-ViewMountVerdict openViewDependencies(const ModuleFacts& facts, const QString& name,
-                                      const std::function<bool(const QString&)>& load);
+ViewMountVerdict bringUpViewDependencies(const ModuleFacts& facts, const QString& name,
+                                         const std::function<bool(const QString&)>& load);
 
 } // namespace basecamp::shell

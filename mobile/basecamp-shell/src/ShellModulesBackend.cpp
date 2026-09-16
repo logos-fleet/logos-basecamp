@@ -185,7 +185,7 @@ bool ShellModulesBackend::ensureRunning(const QString& name)
 }
 
 basecamp::shell::ViewMountVerdict
-ShellModulesBackend::openViewDependencies(const QString& name)
+ShellModulesBackend::bringUpViewDependencies(const QString& name)
 {
     // ONE READING of the facts for the whole walk, and `ensureRunning` is what
     // loads: it is already the one place that says "this device has it and
@@ -198,12 +198,15 @@ ShellModulesBackend::openViewDependencies(const QString& name)
     // `ensureRunning` asks the core afresh and answers true without loading
     // anything: the second name costs a lookup, not a second load.
     const basecamp::shell::ViewMountVerdict verdict =
-        basecamp::shell::openViewDependencies(
+        basecamp::shell::bringUpViewDependencies(
             facts(), name,
             [this](const QString& dep) { return ensureRunning(dep); });
 
+    // What this call LOADED, not what the app declares: a dependency that was
+    // already running is not news, and naming it here would report a load that
+    // did not happen.
     if (!verdict.loaded.isEmpty())
-        emit log(QStringLiteral("app %1 declares %2; brought up before mounting it")
+        emit log(QStringLiteral("app %1: brought up %2 before mounting it")
                      .arg(name, verdict.loaded.join(QStringLiteral(", "))));
     return verdict;
 }

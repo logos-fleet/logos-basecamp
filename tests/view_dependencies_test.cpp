@@ -1,22 +1,12 @@
 // srcdeps: basecamp-shell/src/ViewDependencies.cpp
 //
-// WHAT HAS TO BE RUNNING BEFORE A NATIVE VIEW IS MOUNTED.
+// WHAT HAS TO BE RUNNING BEFORE A NATIVE VIEW IS MOUNTED (logos-workspace#205).
 //
-// A `ui_qml` member of the Bundled set is the HOST's to instantiate (ADR 0006),
-// and the host used to instantiate it and nothing else: the framework was
-// dlopened, its backend built and its QML loaded, while the modules the member
-// DECLARES sat registered with the core and unloaded. chat_ui then called
-// chat_module.init() from its own constructor and was told "No token found for
-// module chat_module" -- and went on to remote its three models and draw a
-// perfectly ordinary conversation list over a backend that was never there
-// (logos-workspace#205).
-//
-// The Web container never had this: a page's module is brought up on the tile
-// press (BundledSetShellHost::mountWebApp), so its whole chain is loaded before
-// anything can call into it. This is the same rule for the native half, and it
-// is a pure function of the facts so that "the app came up dead" is decided
-// here rather than on a phone, six minutes and a hand-load away from the
-// evidence.
+// The rule, and the defect it closes, are ViewDependencies.h. It is a pure
+// function of the facts precisely so that it can be decided here: on a phone
+// "the app came up dead" is six minutes and a hand-load away from the evidence,
+// and the app works the moment you load the module by hand -- which is what
+// made this look like a chat defect for as long as it did.
 //
 // Run: nix build .#unit-tests -L
 
@@ -25,7 +15,7 @@
 #include <QtTest/QtTest>
 
 using basecamp::shell::ModuleFacts;
-using basecamp::shell::openViewDependencies;
+using basecamp::shell::bringUpViewDependencies;
 
 namespace {
 
@@ -98,12 +88,12 @@ void ViewDependenciesTest::bringsUpWhatTheViewDeclares()
 {
     ModuleFacts facts = chatSet();
     QStringList asked;
-    const auto verdict = openViewDependencies(facts, QStringLiteral("chat_ui"),
-                                              [&](const QString& name) {
-                                                  asked << name;
-                                                  facts.loaded << name;
-                                                  return true;
-                                              });
+    const auto verdict = bringUpViewDependencies(facts, QStringLiteral("chat_ui"),
+                                                 [&](const QString& name) {
+                                                     asked << name;
+                                                     facts.loaded << name;
+                                                     return true;
+                                                 });
     QVERIFY(verdict.ready);
     QCOMPARE(asked, QStringList({ QStringLiteral("chat_module"),
                                   QStringLiteral("delivery_module") }));
@@ -117,11 +107,11 @@ void ViewDependenciesTest::skipsWhatIsAlreadyRunning()
     ModuleFacts facts = chatSet();
     facts.loaded << QStringLiteral("chat_module") << QStringLiteral("delivery_module");
     QStringList asked;
-    const auto verdict = openViewDependencies(facts, QStringLiteral("chat_ui"),
-                                              [&](const QString& name) {
-                                                  asked << name;
-                                                  return true;
-                                              });
+    const auto verdict = bringUpViewDependencies(facts, QStringLiteral("chat_ui"),
+                                                 [&](const QString& name) {
+                                                     asked << name;
+                                                     return true;
+                                                 });
     QVERIFY(verdict.ready);
     QVERIFY(asked.isEmpty());
     QVERIFY(verdict.loaded.isEmpty());
@@ -132,8 +122,8 @@ void ViewDependenciesTest::viewWithNoDependenciesIsReady()
     ModuleFacts facts;
     facts.bundledSet = { member(QStringLiteral("view_counter"), QStringLiteral("ui_qml")) };
     int calls = 0;
-    const auto verdict = openViewDependencies(facts, QStringLiteral("view_counter"),
-                                              [&](const QString&) { ++calls; return true; });
+    const auto verdict = bringUpViewDependencies(facts, QStringLiteral("view_counter"),
+                                                 [&](const QString&) { ++calls; return true; });
     QVERIFY(verdict.ready);
     QCOMPARE(calls, 0);
 }
@@ -142,8 +132,8 @@ void ViewDependenciesTest::unknownMemberIsReady()
 {
     const ModuleFacts facts = chatSet();
     int calls = 0;
-    const auto verdict = openViewDependencies(facts, QStringLiteral("wallet_ui"),
-                                              [&](const QString&) { ++calls; return true; });
+    const auto verdict = bringUpViewDependencies(facts, QStringLiteral("wallet_ui"),
+                                                 [&](const QString&) { ++calls; return true; });
     QVERIFY(verdict.ready);
     QCOMPARE(calls, 0);
 }
@@ -153,12 +143,12 @@ void ViewDependenciesTest::absentDependencyRefusesTheMount()
     ModuleFacts facts = chatSet();
     facts.known.removeAll(QStringLiteral("chat_module"));
     QStringList asked;
-    const auto verdict = openViewDependencies(facts, QStringLiteral("chat_ui"),
-                                              [&](const QString& name) {
-                                                  asked << name;
-                                                  facts.loaded << name;
-                                                  return true;
-                                              });
+    const auto verdict = bringUpViewDependencies(facts, QStringLiteral("chat_ui"),
+                                                 [&](const QString& name) {
+                                                     asked << name;
+                                                     facts.loaded << name;
+                                                     return true;
+                                                 });
     QVERIFY(!verdict.ready);
     QCOMPARE(verdict.missing, QStringList({ QStringLiteral("chat_module") }));
     // An absent dependency is not offered to the loader: there is nothing to
@@ -170,10 +160,10 @@ void ViewDependenciesTest::absentDependencyRefusesTheMount()
 void ViewDependenciesTest::refusedDependencyRefusesTheMount()
 {
     const ModuleFacts facts = chatSet();
-    const auto verdict = openViewDependencies(facts, QStringLiteral("chat_ui"),
-                                              [](const QString& name) {
-                                                  return name != QStringLiteral("chat_module");
-                                              });
+    const auto verdict = bringUpViewDependencies(facts, QStringLiteral("chat_ui"),
+                                                 [](const QString& name) {
+                                                     return name != QStringLiteral("chat_module");
+                                                 });
     QVERIFY(!verdict.ready);
     QVERIFY(verdict.missing.isEmpty());
     QCOMPARE(verdict.refused, QStringList({ QStringLiteral("chat_module") }));
@@ -193,11 +183,11 @@ void ViewDependenciesTest::loadsInManifestOrder()
     };
     facts.known = { QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c") };
     QStringList asked;
-    const auto verdict = openViewDependencies(facts, QStringLiteral("z_ui"),
-                                              [&](const QString& name) {
-                                                  asked << name;
-                                                  return true;
-                                              });
+    const auto verdict = bringUpViewDependencies(facts, QStringLiteral("z_ui"),
+                                                 [&](const QString& name) {
+                                                     asked << name;
+                                                     return true;
+                                                 });
     QVERIFY(verdict.ready);
     QCOMPARE(asked, QStringList({ QStringLiteral("c"), QStringLiteral("a"),
                                   QStringLiteral("b") }));

@@ -23,8 +23,8 @@ QStringList declaredDependencies(const ModuleFacts& facts, const QString& name)
     return { };
 }
 
-ViewMountVerdict openViewDependencies(const ModuleFacts& facts, const QString& name,
-                                      const std::function<bool(const QString&)>& load)
+ViewMountVerdict bringUpViewDependencies(const ModuleFacts& facts, const QString& name,
+                                         const std::function<bool(const QString&)>& load)
 {
     ViewMountVerdict verdict;
     for (const QString& dep : declaredDependencies(facts, name)) {
