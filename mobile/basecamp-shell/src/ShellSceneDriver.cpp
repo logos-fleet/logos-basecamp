@@ -262,52 +262,21 @@ void ShellSceneDriver::scrollIntoView(QQuickItem* item)
     }
 }
 
-// WHETHER A FINGER COULD LAND ON THIS CONTROL, without landing on it.
+// WHERE A PRESS ON THIS ITEM WOULD GO, and whether a finger could have made it.
 //
-// Split out of tap() for the one case that must NOT press what it is checking:
-// the catalog page's Install control starts a download and an install, and
-// "the control is where a finger can reach it" is a claim about the LAYOUT
-// that a driver has to be able to make without buying the consequence.
-// Everything it asks is what tap() asks, in the same order and with the same
-// sentences, so a reachability verdict reads the same wherever it came from.
-bool ShellSceneDriver::pressWouldReach(QQuickItem* item)
+// Both halves of the question tap() has to answer before it presses anything,
+// and the whole of the one pressWouldReach() answers instead of pressing -- the
+// catalog page's Install control starts a download and an install, and "the
+// control is where a finger can reach it" is a claim about the LAYOUT that a
+// driver has to be able to make without buying the consequence. One copy, so a
+// reachability verdict reads the same sentence wherever it came from.
+std::optional<ShellSceneDriver::Press> ShellSceneDriver::resolvePress(QQuickItem* item)
 {
     QQuickWidget* surface = surfaceOf(item);
     if (!surface) {
         emit log(QStringLiteral("drive: '%1' is in no scene this host owns")
                      .arg(item ? item->objectName() : QString()));
-        return false;
-    }
-    if (!basecamp::shell::sceneIsOnScreen(surface)) {
-        emit log(QStringLiteral("WRONG: '%1' is in a scene that is not on screen "
-                                "-- no touch can reach it")
-                     .arg(item->objectName()));
-        return false;
-    }
-    const QPointF centre = settledCentre(item);
-    const QPointF global = surface->mapToGlobal(centre);
-    const QRectF screen = screenRect(surface);
-    if (!basecamp::shell::pressIsReachable(centre, QSizeF(surface->size()), global, screen)) {
-        emit log(QStringLiteral("WRONG: '%1' is at (%2, %3) of a %4x%5 view, "
-                                "at (%6, %7) on a %8x%9 screen "
-                                "-- no touch can reach it on this screen")
-                     .arg(item->objectName())
-                     .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
-                     .arg(surface->width()).arg(surface->height())
-                     .arg(global.x(), 0, 'f', 0).arg(global.y(), 0, 'f', 0)
-                     .arg(screen.width(), 0, 'f', 0).arg(screen.height(), 0, 'f', 0));
-        return false;
-    }
-    return true;
-}
-
-bool ShellSceneDriver::tap(QQuickItem* item)
-{
-    QQuickWidget* surface = surfaceOf(item);
-    if (!surface) {
-        emit log(QStringLiteral("drive: '%1' is in no scene this host owns")
-                     .arg(item ? item->objectName() : QString()));
-        return false;
+        return {};
     }
     // ...and one that is on the screen. A lookup already refuses an off-screen
     // scene, so this only catches an item that went off screen between being
@@ -318,7 +287,7 @@ bool ShellSceneDriver::tap(QQuickItem* item)
         emit log(QStringLiteral("WRONG: '%1' is in a scene that is not on screen "
                                 "-- no touch can reach it")
                      .arg(item->objectName()));
-        return false;
+        return {};
     }
     // Scene coordinates ARE widget coordinates for a QQuickWidget, so the
     // centre of the item in the scene is where the press goes -- once the
@@ -350,19 +319,35 @@ bool ShellSceneDriver::tap(QQuickItem* item)
                      .arg(surface->width()).arg(surface->height())
                      .arg(global.x(), 0, 'f', 0).arg(global.y(), 0, 'f', 0)
                      .arg(screen.width(), 0, 'f', 0).arg(screen.height(), 0, 'f', 0));
-        return false;
+        return {};
     }
+    return Press{ surface, centre, global };
+}
+
+bool ShellSceneDriver::pressWouldReach(QQuickItem* item)
+{
+    return resolvePress(item).has_value();
+}
+
+bool ShellSceneDriver::tap(QQuickItem* item)
+{
+    const std::optional<Press> press = resolvePress(item);
+    if (!press)
+        return false;
+    QQuickWidget* surface = press->surface;
+    const QPointF centre = press->centre;
+    const QPointF global = press->global;
 
     emit log(QStringLiteral("drive: press '%1' at (%2, %3) in %4x%5")
                  .arg(item->objectName())
                  .arg(centre.x(), 0, 'f', 0).arg(centre.y(), 0, 'f', 0)
                  .arg(surface->width()).arg(surface->height()));
 
-    QMouseEvent press(QEvent::MouseButtonPress, centre, global,
-                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent release(QEvent::MouseButtonRelease, centre, global,
-                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QGuiApplication::sendEvent(surface, &press);
+    QMouseEvent pressEvent(QEvent::MouseButtonPress, centre, global,
+                           Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent releaseEvent(QEvent::MouseButtonRelease, centre, global,
+                             Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QGuiApplication::sendEvent(surface, &pressEvent);
     // A gap between the two, and an event loop turn to spend it in. The table
     // rides in a Flickable, and a Flickable does not hand a press straight to
     // the child under it -- it holds it until the gesture has declared itself,
@@ -370,7 +355,7 @@ bool ShellSceneDriver::tap(QQuickItem* item)
     // that replay is a coin flip: the row's control got the pair on some runs
     // and nothing at all on others. A finger takes about this long.
     QCoreApplication::processEvents(QEventLoop::AllEvents, kPressHoldMs);
-    QGuiApplication::sendEvent(surface, &release);
+    QGuiApplication::sendEvent(surface, &releaseEvent);
     QCoreApplication::processEvents(QEventLoop::AllEvents, kAfterReleaseMs);
     return true;
 }

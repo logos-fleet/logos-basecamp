@@ -11,6 +11,7 @@
 #include <QStandardPaths>
 #include <QQuickItem>
 #include <QSet>
+#include <QStringList>
 #include <QVariantMap>
 
 namespace {
@@ -28,6 +29,11 @@ QString textOf(QQuickItem* item)
     return item ? item->property("text").toString() : QString();
 }
 
+QString nameOf(const QVariant& entry)
+{
+    return entry.toMap().value(QStringLiteral("name")).toString();
+}
+
 // Whether this refusal is the PLATFORM FLOOR'S rather than package_manager's.
 //
 // Told apart by the shape PlatformFloor::reasonFor gives its sentence, taken
@@ -37,12 +43,18 @@ QString textOf(QQuickItem* item)
 // "requires <module>" is the one #169 derives.
 bool isFloorRefusal(const QString& reason)
 {
+    // The sentence with a mark where the module name goes, so the two ends of
+    // it are whatever reasonFor writes rather than a copy kept in step by hand.
     static const QString mark = QStringLiteral("\x01");
     static const QString shape = basecamp::appmanager::PlatformFloor::reasonFor(mark);
     const int split = shape.indexOf(mark);
-    return split >= 0 && reason.size() > shape.size() - mark.size()
-           && reason.startsWith(shape.left(split))
-           && reason.endsWith(shape.mid(split + mark.size()));
+    if (split < 0)
+        return false;
+    const QString head = shape.left(split);
+    const QString tail = shape.mid(split + mark.size());
+    // Longer than both ends together, so a name was named.
+    return reason.size() > head.size() + tail.size()
+           && reason.startsWith(head) && reason.endsWith(tail);
 }
 
 } // namespace
@@ -111,13 +123,13 @@ bool ShellCatalogPageDriver::checkRows()
         // (ADR 0007) and the smallest useful shell carries no package modules at
         // all. What is NOT legitimate is an empty page, which reads as a catalog
         // with nothing in it.
-        QQuickItem* message = waitFor(kNoCatalog, 2000);
         const QString why = manager->catalogUnavailableReason();
         if (why.isEmpty()) {
             emit log(QStringLiteral("CATALOG PAGE: this launch is pointed at no "
                                     "repository, so there is nothing to list"));
             return true;
         }
+        QQuickItem* message = waitFor(kNoCatalog, 2000);
         if (!message || !message->isVisible() || textOf(message) != why) {
             emit log(QStringLiteral("WRONG: there is no catalog (\"%1\") and the page "
                                     "does not say so -- an empty list reads as a catalog "
@@ -134,8 +146,9 @@ bool ShellCatalogPageDriver::checkRows()
     // nothing else, so "the page draws a row for every entry" is a claim about
     // what a finger reaches by swiping rather than about one frame. This walks
     // the page the way a user does -- top to bottom, a bit less than a viewport
-    // at a time -- and judges each row while it is on screen, because a row
-    // scrolled far enough away is destroyed again.
+    // at a time, stopping short on a row a stop had to cut in half -- and
+    // judges each row while it is on screen, because a row scrolled far enough
+    // away is destroyed again.
     QQuickItem* list = find(kList);
     if (!list) {
         dumpNames(QStringLiteral("the catalog page has no list"));
@@ -152,7 +165,7 @@ bool ShellCatalogPageDriver::checkRows()
     const auto judgeVisibleRows = [&]() {
         for (const QVariant& value : entries) {
             const QVariantMap entry = value.toMap();
-            const QString name = entry.value(QStringLiteral("name")).toString();
+            const QString name = nameOf(value);
             if (judged.contains(name))
                 continue;
             QQuickItem* row = find(kRowPrefix + name);
@@ -238,28 +251,62 @@ bool ShellCatalogPageDriver::checkRows()
 
     // The first rows exist a few ticks after the page appears; everything below
     // them exists only once the list has been scrolled to it.
-    waitFor(kRowPrefix + entries.first().toMap().value(QStringLiteral("name")).toString(),
-            kRowTimeoutMs);
-    judgeVisibleRows();
+    waitFor(kRowPrefix + nameOf(entries.first()), kRowTimeoutMs);
 
     const qreal viewport = list->height();
-    const qreal step = viewport > 0 ? viewport * 0.8 : 0;
-    qreal end = list->property("contentHeight").toReal() - viewport;
-    for (qreal y = step; step > 0 && y < end + step; y += step) {
-        list->setProperty("contentY", qMin(y, end));
-        settle(kScrollSettleMs);
+    const qreal step = viewport * 0.8;
+
+    // Where the first row this stop could NOT take whole begins, or -1 when
+    // there is none: one that exists, starts below the top edge and is not
+    // judged yet -- so either it is cut off by the bottom edge or it is out of
+    // the viewport altogether, and the rows above it are all done. A pixel of
+    // slack, so that scrolling there puts it just inside the top edge rather
+    // than exactly on it. A row taller than the viewport is never whole
+    // anywhere and is not one of these: stopping on it would be stopping for
+    // ever.
+    const auto unfinishedRowTop = [&]() -> qreal {
+        for (const QVariant& value : entries) {
+            const QString name = nameOf(value);
+            if (judged.contains(name))
+                continue;
+            QQuickItem* row = find(kRowPrefix + name);
+            if (!row)
+                continue;
+            const qreal top = row->mapToItem(list, QPointF(0, 0)).y();
+            if (top > 1 && row->height() + 2 <= viewport)
+                return top - 1;
+        }
+        return -1;
+    };
+
+    for (qreal contentY = 0;;) {
         judgeVisibleRows();
         // The list grows as it is walked -- a delegate's height is not known
-        // until it exists -- so the end is re-read rather than fixed up front.
-        end = list->property("contentHeight").toReal() - viewport;
+        // until it exists -- so the end is re-read at every stop rather than
+        // fixed up front.
+        const qreal end = list->property("contentHeight").toReal() - viewport;
+        if (step <= 0 || contentY >= end)
+            break;
+        // THE NEXT STOP is the start of a row this one had to leave half
+        // drawn, and a step down the list when there is none. Stepping blindly
+        // would leave a delegate taller than the OVERLAP between two stops
+        // straddling the bottom edge at one and the top edge at the next --
+        // never whole on screen, and then reported missing for a reason that is
+        // this driver's step size rather than the page. Always at least a pixel
+        // further down and never past the end, so the walk reaches the bottom
+        // and stops there.
+        const qreal unfinished = unfinishedRowTop();
+        const qreal target = contentY + (unfinished > 0 ? unfinished : step);
+        contentY = qMin(qMax(target, contentY + 1), end);
+        list->setProperty("contentY", contentY);
+        settle(kScrollSettleMs);
     }
     list->setProperty("contentY", 0);
 
     QStringList missing;
     for (const QVariant& value : entries) {
-        const QString name = value.toMap().value(QStringLiteral("name")).toString();
-        if (!judged.contains(name))
-            missing << name;
+        if (!judged.contains(nameOf(value)))
+            missing << nameOf(value);
     }
     if (!missing.isEmpty()) {
         dumpNames(QStringLiteral("the catalog page draws no row for %1")

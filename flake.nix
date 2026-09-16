@@ -1570,8 +1570,7 @@
               # test asserts: on a default `--bundle` the catalog page lists it
               # "requires token_list_module, not in this build", with no install
               # control.
-              //
-              nixpkgs.lib.optionalAttrs (walletUiPkgs ? web)
+              // nixpkgs.lib.optionalAttrs (walletUiPkgs ? web)
                 { wallet_ui = {
                     drv = walletUiPkgs.web;
                     type = "ui_qml";

@@ -41,7 +41,16 @@ Rectangle {
     readonly property string unavailableReason:
         appManager ? appManager.catalogUnavailableReason : ""
 
+    // Pressed Install on a row. The App Manager owns the gate that follows
+    // (signer prompt, consent, the core's load); nothing here decides any of it.
+    signal installRequested(string packageName)
+
     color: Theme.palette.background
+
+    onInstallRequested: function(packageName) {
+        if (appManager)
+            appManager.beginInstall(packageName)
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -173,14 +182,5 @@ Rectangle {
                 }
             }
         }
-    }
-
-    // Pressed Install on a row. The App Manager owns the gate that follows
-    // (signer prompt, consent, the core's load); nothing here decides any of it.
-    signal installRequested(string packageName)
-
-    onInstallRequested: function(packageName) {
-        if (appManager)
-            appManager.beginInstall(packageName)
     }
 }
