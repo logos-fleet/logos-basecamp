@@ -64,6 +64,9 @@ private slots:
     // re-load of a module whose widget is already docked, and replacing that
     // with an error message is the worse bug.
     void aRefusalIsIgnoredWhileTheAppIsOnScreen();
+    // ...but the tab under a refused app's name is usually OUR OWN notice, and
+    // that one is refreshed rather than mistaken for the app.
+    void aRefusalRefreshesItsOwnTabRatherThanYieldingToIt();
     // The app comes up after all -- the user loaded the module by hand from
     // the Modules tab, which is exactly how #205 was diagnosed. The notice
     // goes before the widget arrives, or the app has two tabs.
@@ -86,7 +89,7 @@ void AppNoticesTest::aRefusalWithNothingOnScreenBecomesOne()
 {
     Screen screen;
     AppNotices notices = screen.make();
-    notices.unavailable(kChatUi, kWhy, /*mounted=*/false);
+    notices.unavailable(kChatUi, kWhy, /*docked=*/false);
 
     QCOMPARE(screen.raised, QStringList({ QString(kChatUi) + QStringLiteral(": ") + kWhy }));
     QVERIFY(notices.holds(kChatUi));
@@ -104,17 +107,31 @@ void AppNoticesTest::asecondRefusalRefreshesTheSameScreen()
     QVERIFY(screen.raised.last().endsWith(QStringLiteral("and now for another reason")));
     // One screen, refreshed -- never taken away and put back.
     QVERIFY(screen.dropped.isEmpty());
-    QCOMPARE(notices.names(), QStringList({ QString(kChatUi) }));
+    QCOMPARE(notices.count(), 1);
 }
 
 void AppNoticesTest::aRefusalIsIgnoredWhileTheAppIsOnScreen()
 {
     Screen screen;
     AppNotices notices = screen.make();
-    notices.unavailable(kChatUi, kWhy, /*mounted=*/true);
+    notices.unavailable(kChatUi, kWhy, /*docked=*/true);
 
     QVERIFY(screen.raised.isEmpty());
     QVERIFY(!notices.holds(kChatUi));
+}
+
+void AppNoticesTest::aRefusalRefreshesItsOwnTabRatherThanYieldingToIt()
+{
+    Screen screen;
+    AppNotices notices = screen.make();
+    notices.unavailable(kChatUi, kWhy, /*docked=*/false);
+    // The notice is on screen now, so the workspace holds a tab under this
+    // name -- and a retry must still rewrite it.
+    notices.unavailable(kChatUi, QStringLiteral("still not here"), /*docked=*/true);
+
+    QCOMPARE(screen.raised.size(), 2);
+    QCOMPARE(notices.reasonFor(kChatUi), QStringLiteral("still not here"));
+    QCOMPARE(notices.count(), 1);
 }
 
 void AppNoticesTest::theNoticeGoesWhenTheRealAppArrives()
@@ -126,7 +143,7 @@ void AppNoticesTest::theNoticeGoesWhenTheRealAppArrives()
 
     QCOMPARE(screen.dropped, QStringList({ QString(kChatUi) }));
     QVERIFY(!notices.holds(kChatUi));
-    QVERIFY(notices.names().isEmpty());
+    QCOMPARE(notices.count(), 0);
 }
 
 void AppNoticesTest::anArrivalWithNoNoticeIsQuiet()

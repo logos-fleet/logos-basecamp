@@ -8,7 +8,7 @@ AppUnavailablePane::AppUnavailablePane(const QString& displayLabel,
                                        const QString& reason,
                                        QWidget* parent)
     : QWidget(parent)
-    , m_label_text(displayLabel)
+    , m_appLabel(displayLabel)
     , m_reason(reason)
 {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -44,7 +44,7 @@ void AppUnavailablePane::render()
     // The headline names the app even when there is no reason to give: a
     // refusal with no words is still an outcome, and a blank page is the silent
     // tile press this class exists to end.
-    const QString headline = tr("%1 cannot open.").arg(m_label_text);
+    const QString headline = tr("%1 cannot open.").arg(m_appLabel);
     const QString detail = m_reason.trimmed();
     m_label->setText(detail.isEmpty() ? headline
                                       : headline + QStringLiteral("\n\n") + detail);

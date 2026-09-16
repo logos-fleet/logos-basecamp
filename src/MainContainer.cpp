@@ -68,14 +68,15 @@ void applyDevQmlImportPath(QQmlEngine* engine) {
 
 MainContainer::MainContainer(IShellHost* host, QWidget* parent)
     : QWidget(parent)
-    // Safe in the initialiser list: the two lambdas capture `this` but neither
-    // runs until a refusal arrives, long after everything they touch exists.
-    , m_notices([this](const QString& name, const QString& reason) { raiseNotice(name, reason); },
-                [this](const QString& name) { dropNotice(name); })
     , m_host(host)
     , m_sidebarWidget(nullptr)
     , m_contentStack(nullptr)
     , m_workspaceArea(nullptr)
+    // In declaration order, and safe there: the two lambdas capture `this` but
+    // neither runs until a refusal arrives, long after everything they touch
+    // exists.
+    , m_notices([this](const QString& name, const QString& reason) { raiseNotice(name, reason); },
+                [this](const QString& name) { dropNotice(name); })
     , m_contentWidget(nullptr)
     , m_overlayWidget(nullptr)
 {
@@ -591,10 +592,8 @@ void MainContainer::onUiModuleUnavailable(const QString& name, const QString& re
     // does not have, and for a `web` app whose page never opened. The app is
     // docked anyway now, and what is in the tab is the reason. AppNotices.h has
     // the rule; this supplies its two hands.
-    const bool mounted = m_workspaceArea
-                      && m_workspaceArea->dockFor(name)
-                      && !m_notices.holds(name);
-    m_notices.unavailable(name, reason, mounted);
+    const bool docked = m_workspaceArea && m_workspaceArea->dockFor(name) != nullptr;
+    m_notices.unavailable(name, reason, docked);
 }
 
 

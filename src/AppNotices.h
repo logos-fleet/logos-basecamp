@@ -21,7 +21,6 @@
 
 #include <QHash>
 #include <QString>
-#include <QStringList>
 
 #include <functional>
 
@@ -38,11 +37,13 @@ public:
 
     AppNotices(RaiseFn raise, DropFn drop);
 
-    // The host says `name` is not coming, in its own words. `mounted` is
-    // whether the Shell already has that app's REAL widget on screen: a host
-    // can refuse a re-load of a module whose window is up, and replacing a
-    // working app with an error message would be the worse bug.
-    void unavailable(const QString& name, const QString& reason, bool mounted);
+    // The host says `name` is not coming, in its own words. `docked` is whether
+    // the Shell's workspace already holds a tab under that name -- the caller's
+    // raw fact, not its meaning: one this class put up is a notice to rewrite,
+    // and any other is the app's REAL widget. A host can refuse a re-load of a
+    // module whose window is up, and replacing a working app with an error
+    // message would be the worse bug.
+    void unavailable(const QString& name, const QString& reason, bool docked);
 
     // `name`'s real widget has arrived after all -- the user loaded the module
     // by hand from the Modules tab, which is exactly how #205 was diagnosed.
@@ -54,18 +55,20 @@ public:
     // which case there is nothing behind it for the host to unload.
     bool closed(const QString& name);
 
-    bool        holds(const QString& name) const { return m_reasons.contains(name); }
-    QStringList names() const { return m_order; }
-    QString     reasonFor(const QString& name) const { return m_reasons.value(name); }
+    bool    holds(const QString& name) const { return m_reasons.contains(name); }
+    int     count() const { return static_cast<int>(m_reasons.size()); }
+    QString reasonFor(const QString& name) const { return m_reasons.value(name); }
 
 private:
-    void forget(const QString& name);
+    // Forget `name`'s notice and take its screen away. False if there was no
+    // notice under that name -- the whole difference between arrived() and
+    // closed() is which of them the caller wants to hear about.
+    bool takeDown(const QString& name);
 
     RaiseFn m_raise;
     DropFn  m_drop;
-    // The words each notice is showing, and the order they went up in.
+    // The words each notice is showing.
     QHash<QString, QString> m_reasons;
-    QStringList             m_order;
 };
 
 } // namespace basecamp::shell

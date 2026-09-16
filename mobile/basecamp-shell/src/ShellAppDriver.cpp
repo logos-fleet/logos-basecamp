@@ -5,8 +5,8 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
-#include <QLabel>
 #include <QEventLoop>
+#include <QLabel>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QVariant>

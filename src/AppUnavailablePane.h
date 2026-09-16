@@ -42,6 +42,6 @@ private:
     void render();
 
     QLabel* m_label = nullptr;
-    QString m_label_text;
+    QString m_appLabel;
     QString m_reason;
 };

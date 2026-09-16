@@ -10,40 +10,37 @@ AppNotices::AppNotices(RaiseFn raise, DropFn drop)
 {
 }
 
-void AppNotices::unavailable(const QString& name, const QString& reason, bool mounted)
+void AppNotices::unavailable(const QString& name, const QString& reason, bool docked)
 {
-    if (name.isEmpty() || mounted)
+    if (name.isEmpty())
+        return;
+    // A tab under this name that is not one of ours is the app itself, already
+    // on screen: leave it alone.
+    if (docked && !m_reasons.contains(name))
         return;
     // REFRESHED, never taken down and put back: the tab is where the user is
     // looking, and a drop/raise pair would move it to the end of the strip and
     // steal the focus back on every retry.
-    const bool fresh = !m_reasons.contains(name);
     m_reasons.insert(name, reason);
-    if (fresh) m_order << name;
     if (m_raise) m_raise(name, reason);
 }
 
 void AppNotices::arrived(const QString& name)
 {
-    if (!m_reasons.contains(name))
-        return;
-    forget(name);
-    if (m_drop) m_drop(name);
+    takeDown(name);
 }
 
 bool AppNotices::closed(const QString& name)
 {
-    if (!m_reasons.contains(name))
-        return false;
-    forget(name);
-    if (m_drop) m_drop(name);
-    return true;
+    return takeDown(name);
 }
 
-void AppNotices::forget(const QString& name)
+bool AppNotices::takeDown(const QString& name)
 {
-    m_reasons.remove(name);
-    m_order.removeAll(name);
+    if (m_reasons.remove(name) == 0)
+        return false;
+    if (m_drop) m_drop(name);
+    return true;
 }
 
 } // namespace basecamp::shell
