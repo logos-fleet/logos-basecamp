@@ -48,6 +48,11 @@ signals:
     void appShown(const QString& name, qint64 elapsedMs);
 
 private:
+    // Step 7: ask the host for an app this build does not have, and check the
+    // Shell says so on screen rather than doing nothing at all (#205). Its own
+    // method because it shares nothing with the mount above except the host.
+    void runRefusal();
+
     // What this driver knows about one app's rendered view. One entry per
     // known app, because an app's own view is the only thing that can say it
     // rendered -- there is no generic "did the QML load" an objectName-based

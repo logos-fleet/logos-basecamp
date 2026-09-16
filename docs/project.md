@@ -46,6 +46,8 @@ logos-basecamp/
 │   ├── MainShellView.h/cpp               # IShellView entry point
 │   ├── MainContainer.h/cpp               # UI coordinator (sidebar + content)
 │   ├── PackageManagerPane.h/cpp          # The Package Manager page without PMUI
+│   ├── AppNotices.h/cpp                  # Which refusals get a screen, and what becomes of it
+│   ├── AppUnavailablePane.h/cpp          # ...the screen: "X cannot open", in the host's words
 │   ├── WorkspaceArea.h/cpp               # Dock-based app workspace
 │   ├── Basecamp/                         # QML UI files, by feature
 ├── nix/                                  # Nix build modules
@@ -227,6 +229,8 @@ The shell's entire contract is `IShellHost`: a `QWidget*` out, eight named opera
 **Purpose:** UI coordinator that assembles the sidebar (QML `SidebarPanel`) and content area (stacked widget with `WorkspaceArea` + QML system views), and routes navigation between them. It does **not** create `MainUIBackend` any more — `Window` owns that and the shell borrows it through `IShellHost`, reaching it from QML as an opaque `QObject*` via `backendObject()`.
 
 Slot 2 of that stack is the Package Manager section, and it is the one page that waits for a widget: `package_manager_ui` is hoisted into it rather than docked. `PackageManagerPane` is what sits there in the meantime, and it has three states rather than the single "Loading…" label it used to be — idle, loading, and unavailable-with-a-reason. A build that does not ship the plugin (a Store shell's Bundled set is data, ADR 0007) now gets the host's refusal on screen via `IShellObserver::onUiModuleUnavailable`, and a load that is neither delivered nor refused is declared dead on the pane's own deadline. See logos-workspace#145.
+
+`package_manager_ui` is the only name `onUiModuleUnavailable` used to act on, though, and every other refusal stopped at a `qWarning`. A tile press for an app the host would not mount produced no window, no message and no way to tell a refusal from a slow load — for a `ui_qml` app whose declared module this device does not have, and for a `web` app whose page never opened. A refused app is DOCKED anyway now, and what is in the tab is the reason: `AppNotices` holds the rule (which refusals deserve a screen, what happens to that screen when the app arrives after all, and what closing it means — a notice's × is not an unload) and `AppUnavailablePane` is the screen. See logos-workspace#205.
 
 ### LogosQmlBridge
 

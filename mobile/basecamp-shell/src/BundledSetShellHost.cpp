@@ -296,14 +296,24 @@ void BundledSetShellHost::mountWebApp(const QString& name)
     // BEFORE the docked-already branch, not after it: a module can lose its
     // page while the Shell still holds its tab, and raising that tab without
     // this would present an empty one.
+    //
+    // AND A REFUSAL HERE IS TOLD TO THE SHELL, like the native half's
+    // (logos-workspace#205). Both of these used to stop at the report, which
+    // reaches the Modules tab's log and nothing the person who pressed the tile
+    // can see -- so a `web` app that is not on this device was a press that did
+    // nothing at all.
     if (!web->hasView(name)) {
         if (!m_backend.ensureRunning(name)) {
-            m_backend.report(QStringLiteral("web app %1 is not on this device").arg(name));
+            const QString why = QStringLiteral("web app %1 is not on this device").arg(name);
+            m_backend.report(why);
+            if (m_observer) m_observer->onUiModuleUnavailable(name, why);
             return;
         }
         if (!web->hasView(name)) {
-            m_backend.report(QStringLiteral("web app %1 came up with no page; there is "
-                                            "nothing to put on screen").arg(name));
+            const QString why = QStringLiteral("web app %1 came up with no page; there is "
+                                               "nothing to put on screen").arg(name);
+            m_backend.report(why);
+            if (m_observer) m_observer->onUiModuleUnavailable(name, why);
             return;
         }
     }

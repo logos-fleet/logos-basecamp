@@ -42,6 +42,10 @@ set(SOURCES
     MainShellView.cpp
     MainContainer.h
     MainContainer.cpp
+    AppNotices.h
+    AppNotices.cpp
+    AppUnavailablePane.h
+    AppUnavailablePane.cpp
     PackageManagerPane.h
     PackageManagerPane.cpp
     WorkspaceArea.h

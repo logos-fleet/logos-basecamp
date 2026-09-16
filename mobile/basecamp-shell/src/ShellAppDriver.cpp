@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QLabel>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QVariant>
@@ -301,4 +302,67 @@ void ShellAppDriver::run(bool expectLiveContent)
                  .arg(shownWidth).arg(shownHeight).arg(shownMs));
     emit log(QStringLiteral("SHELL SHOWS THE BUNDLED APP"));
     emit appShown(app, shownMs);
+
+    runRefusal();
+}
+
+// ── 7. AND AN APP THAT CANNOT COME UP SAYS SO (logos-workspace#205) ──────────
+//
+// The other half of the mount rule. A `ui_qml` app whose declared module is not
+// on this device has its mount refused -- which is right, and used to be the
+// end of it: the host reported to the Modules tab's log and the Shell acted on
+// one name, package_manager_ui. The press produced no window and no message,
+// which the person holding the phone cannot tell from a slow load.
+//
+// A SHIPPED SET CANNOT BE PUT IN THAT STATE FROM A TILE. `--bundle` resolves a
+// closure, so every app on the sidebar has its dependencies in the image by
+// construction -- that is the point of the build. So the request is made the
+// way a stale tile makes it, through the host's own entry point with a name the
+// set does not carry, and the refusal path that answers it
+// (BundledSetShellHost::mountApp) is the shipped one, unmodified.
+void ShellAppDriver::runRefusal()
+{
+    // A name no Bundled set carries, and obviously so in a log.
+    const QString absent = QStringLiteral("no_such_app_ui");
+    if (m_host->backend()->isViewModule(absent)
+        || m_host->backend()->isWebContainerApp(absent)) {
+        emit log(QStringLiteral("shell app: '%1' is real in this build, so it cannot "
+                                "stand in for an app that is not here").arg(absent));
+        return;
+    }
+
+    m_host->loadUiModule(absent);
+    settle(500);
+
+    // The pane is a WIDGET, not a QML item -- the refusal must be readable
+    // without a scene, because a refused app never gets one -- so it is found
+    // on the Shell's own object tree rather than through find().
+    auto* message = m_shell->findChild<QLabel*>(
+        QStringLiteral("appUnavailablePane.message"));
+    if (!message) {
+        emit log(QStringLiteral("WRONG: the Shell refused '%1' and put nothing on "
+                                "screen about it").arg(absent));
+        return;
+    }
+    if (!message->isVisible()) {
+        emit log(QStringLiteral("WRONG: the Shell's refusal of '%1' exists and is not "
+                                "visible").arg(absent));
+        return;
+    }
+    const QString said = message->text();
+    if (!said.contains(absent)) {
+        emit log(QStringLiteral("WRONG: the Shell's refusal does not name '%1'; it says "
+                                "'%2'").arg(absent, said));
+        return;
+    }
+    emit log(QStringLiteral("shell app: refusing '%1' put this on screen: %2")
+                 .arg(absent, QString(said).replace(QLatin1Char('\n'),
+                                                    QLatin1Char(' '))));
+
+    // The tab it is in is closed by its x, which is the Shell's own chrome and
+    // reaches AppNotices through WorkspaceArea::pluginClosed -- a path with no
+    // IShellHost entry point, so it is not driven from here. What closing it
+    // means (it is NOT an unload: nothing is loaded behind a refusal) is
+    // tests/app_notices_test.cpp.
+    emit log(QStringLiteral("SHELL SAYS WHY AN APP CANNOT COME UP"));
 }
