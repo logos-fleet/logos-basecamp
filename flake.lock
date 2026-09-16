@@ -18935,11 +18935,11 @@
         "verified_proxy_module": "verified_proxy_module"
       },
       "locked": {
-        "lastModified": 1789323370,
-        "narHash": "sha256-DO/j6DViDu3mWW++ofLVY1p1Pq3GbdWFk4gl8aXhTdA=",
+        "lastModified": 1789547843,
+        "narHash": "sha256-tq5MiAfUwJby/gJwR6x5YeNRyxTldfesYZOePiDRsRc=",
         "owner": "logos-fleet",
         "repo": "logos-evm-eth-rpc-module",
-        "rev": "bc360375a21541fcb541d3d3c6b71132c3eeb22e",
+        "rev": "2329a38b9573c4196d1a6c0a1e88390c109587ae",
         "type": "github"
       },
       "original": {
