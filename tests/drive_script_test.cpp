@@ -88,11 +88,13 @@ private slots:
         QVERIFY(parse({ "--drive", "keyboard" }).wants(DrivePass::Keyboard));
         QVERIFY(parse({ "--drive", "web-apps" }).wants(DrivePass::WebApps));
         QVERIFY(parse({ "--drive", "web-input" }).wants(DrivePass::WebInput));
+        QVERIFY(parse({ "--drive", "web-budget" }).wants(DrivePass::WebBudget));
         QVERIFY(parse({ "--drive", "modules" }).wants(DrivePass::Modules));
         // ...and the vocabulary says so, which is what a refusal quotes.
         QCOMPARE(DriveScript::knownPasses(),
                  (QStringList{ "chat", "apps", "packages", "catalog", "popups",
-                               "keyboard", "web-apps", "web-input", "modules" }));
+                               "keyboard", "web-apps", "web-input", "web-budget",
+                               "modules" }));
     }
 
     // Composable two ways, because an acceptance run names what it is proving
@@ -120,10 +122,11 @@ private slots:
     void passesAreReportedInTheOrderTheyRun()
     {
         const DriveScript s =
-            parse({ "--drive", "modules,chat,web-input,keyboard,catalog,popups,web-apps" });
+            parse({ "--drive",
+                    "modules,chat,web-budget,web-input,keyboard,catalog,popups,web-apps" });
         QCOMPARE(s.passes(),
                  (QStringList{ "chat", "catalog", "popups", "keyboard", "web-apps",
-                               "web-input", "modules" }));
+                               "web-input", "web-budget", "modules" }));
     }
 
     // The historic behaviour, for the runs that really do want all of it -- and

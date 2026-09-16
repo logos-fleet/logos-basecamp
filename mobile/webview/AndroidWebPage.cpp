@@ -1,5 +1,6 @@
 #include "webview/AndroidWebPage.h"
 
+#include "webview/AppMemory.h"
 #include "webview/MobileWebBridge.h"
 #include "webview/MobileWebContainerBackend.h"
 
@@ -28,6 +29,7 @@ namespace basecamp::web {
 namespace {
 
 constexpr const char* kPageClass = "co/logos/webview/LogosWebPage";
+constexpr const char* kPressureClass = "co/logos/webview/LogosMemoryPressure";
 constexpr const char* kReplyClass = "co/logos/webview/LogosWebPage$Reply";
 
 using ServeFn = std::function<void(const QByteArray&, const QUrl&, const QByteArray&,
@@ -138,6 +140,60 @@ bool registerNatives()
     return done;
 }
 
+// ── Android's memory warning (#153) ────────────────────────────────────────
+
+// WHICH TRIM LEVELS MEAN "YOU ARE NEXT". ComponentCallbacks2's constants, and
+// the line is drawn where Android's own documentation draws it:
+//
+//   RUNNING_MODERATE (5)   the device is starting to run low. Nothing yet.
+//   RUNNING_LOW     (10)   trim now; the app is still in the foreground.
+//   RUNNING_CRITICAL(15)   background processes are already being killed.
+//   UI_HIDDEN       (20)   NOT pressure -- the app's UI merely went away, and
+//                          a container that shed pages here would tear down
+//                          the app the user just switched away from and be
+//                          holding nothing when they came back.
+//   BACKGROUND/MODERATE/COMPLETE (40/60/80)
+//                          this process is on the kill list.
+constexpr jint kTrimRunningLow = 10;
+constexpr jint kTrimUiHidden = 20;
+
+bool trimLevelIsPressure(jint level)
+{
+    return level >= kTrimRunningLow && level != kTrimUiHidden;
+}
+
+std::function<void()>& pressureSink()
+{
+    static std::function<void()> sink;
+    return sink;
+}
+
+void JNICALL nativeTrimMemory(JNIEnv*, jclass, jint level)
+{
+    if (!trimLevelIsPressure(level)) return;
+    const std::function<void()> sink = pressureSink();
+    if (!sink) return;
+    // ON THE QT MAIN THREAD. Android calls this on ITS main thread, which under
+    // Qt for Android is not the thread Qt's event loop, the container and every
+    // view live on -- touching the registry from here would be the same race
+    // that puts a page's console line through a queued connection.
+    QMetaObject::invokeMethod(qApp, [sink] { sink(); }, Qt::QueuedConnection);
+}
+
+bool registerPressureNatives()
+{
+    static bool done = false;
+    if (done) return true;
+    JNINativeMethod concrete[] = {
+        { const_cast<char*>("nativeTrimMemory"), const_cast<char*>("(I)V"),
+          reinterpret_cast<void*>(nativeTrimMemory) },
+    };
+    QJniEnvironment env;
+    done = env.registerNativeMethods(kPressureClass, concrete, 1);
+    if (!done) qWarning() << "Web container: could not register" << kPressureClass << "natives";
+    return done;
+}
+
 jlong nextHandle()
 {
     static jlong handle = 0;
@@ -145,6 +201,25 @@ jlong nextHandle()
 }
 
 } // namespace
+
+bool watchAppMemoryPressure(std::function<void()> onWarning)
+{
+    pressureSink() = std::move(onWarning);
+    if (!registerPressureNatives()) return false;
+    QJniObject context = QNativeInterface::QAndroidApplication::context();
+    if (!context.isValid()) {
+        qWarning() << "Web container: no Android context; memory warnings will not arrive";
+        return false;
+    }
+    QJniObject::callStaticMethod<void>(kPressureClass, "watch",
+                                       "(Landroid/content/Context;)V", context.object());
+    QJniEnvironment env;
+    if (env.checkAndClearExceptions()) {
+        qWarning() << "Web container: registerComponentCallbacks threw";
+        return false;
+    }
+    return true;
+}
 
 QString androidQmlRuntimeDir()
 {

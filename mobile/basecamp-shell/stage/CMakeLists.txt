@@ -70,6 +70,8 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/ShellWebAppDriver.h
     ${SRC}/ShellWebInputDriver.cpp
     ${SRC}/ShellWebInputDriver.h
+    ${SRC}/ShellWebBudgetDriver.cpp
+    ${SRC}/ShellWebBudgetDriver.h
     ${SRC}/ShellCatalogDriver.cpp
     ${SRC}/ShellCatalogDriver.h
     ${SRC}/ShellConsentDriver.cpp
@@ -135,6 +137,7 @@ install(FILES
     ${SRC}/ShellAppDriver.h
     ${SRC}/ShellWebAppDriver.h
     ${SRC}/ShellWebInputDriver.h
+    ${SRC}/ShellWebBudgetDriver.h
     ${SRC}/ShellCatalogDriver.h
     ${SRC}/ShellConsentDriver.h
     ${SRC}/ShellCallDriver.h

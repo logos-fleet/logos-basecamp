@@ -72,6 +72,7 @@ qt_add_executable(BasecampShell
     ${SHELL_SRC}/ShellKeyboardDriver.cpp ${SHELL_SRC}/ShellKeyboardDriver.h
     ${SHELL_SRC}/ShellWebAppDriver.cpp ${SHELL_SRC}/ShellWebAppDriver.h
     ${SHELL_SRC}/ShellWebInputDriver.cpp ${SHELL_SRC}/ShellWebInputDriver.h
+    ${SHELL_SRC}/ShellWebBudgetDriver.cpp ${SHELL_SRC}/ShellWebBudgetDriver.h
     ${SHELL_SRC}/ShellCatalogDriver.cpp ${SHELL_SRC}/ShellCatalogDriver.h
     ${SHELL_SRC}/ShellConsentDriver.cpp ${SHELL_SRC}/ShellConsentDriver.h
     ${SHELL_SRC}/ShellCallDriver.cpp ${SHELL_SRC}/ShellCallDriver.h

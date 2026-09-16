@@ -184,9 +184,11 @@ int main(int argc, char* argv[])
     // opening a page. Installing it here -- not at the first load -- is also
     // what pins the Qt main thread as the one a webview is built on.
     //
-    // The budget is the phone's: ONE live QML runtime, which the spike measured
-    // at 185-240 MB. A tablet could afford more and this is where that decision
-    // would be made.
+    // THE BUDGET IS THE DEVICE'S, not a constant (#153): forThisDevice() reads
+    // this device's memory and says how many UI pages it affords, and gives the
+    // container the ceiling it sheds one above. The probe and the Shell answer
+    // the same way, because a number measured by the probe has to be the number
+    // the Shell runs with.
     QString webModulesDir;
     {
         using basecamp::web::MobileWebContainerBackend;
@@ -194,7 +196,8 @@ int main(int argc, char* argv[])
 #if defined(Q_OS_IOS)
         webModulesDir = basecamp::web::iosWebModulesDir();
         web->install(basecamp::web::iosQmlRuntimeDir(),
-                     basecamp::web::iosPlatformPageFactory());
+                     basecamp::web::iosPlatformPageFactory(),
+                     basecamp::web::LiveRuntimeBudget::forThisDevice(app.arguments()));
 #elif defined(Q_OS_ANDROID)
         // BEFORE THE CONTAINER, because the runtime directory the container is
         // installed with has to exist by then: an APK's assets are not files,
@@ -209,7 +212,8 @@ int main(int argc, char* argv[])
         // LogosWebPaths.h.
         web->install(basecamp::web::androidQmlRuntimeDir(),
                      basecamp::web::androidPlatformPageFactory(),
-                     basecamp::web::LiveRuntimeBudget(), /*shimInDocument=*/true,
+                     basecamp::web::LiveRuntimeBudget::forThisDevice(app.arguments()),
+                     /*shimInDocument=*/true,
                      basecamp::web::WebOrigin::android());
 #endif
         QObject::connect(web, &MobileWebContainerBackend::uiEvicted,

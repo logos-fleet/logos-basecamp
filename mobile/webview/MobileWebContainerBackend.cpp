@@ -54,6 +54,12 @@ void MobileWebContainerBackend::armPollTimer()
     m_pollTimer->setInterval(MobileWebBridge::kPollParkMs);
     connect(m_pollTimer, &QTimer::timeout, this, [this] {
         for (MobileWebModuleView* view : m_views) view->expireWaits();
+        // AND THE APP IS WEIGHED ON THE SAME WAKE-UP (#153). A page that grows
+        // after it was shown is noticed by nothing else in this class -- the
+        // container is asleep between two taps -- and this timer is already
+        // running whenever there are pages at all, so the alternative was a
+        // second timer to do something that costs microseconds.
+        observeMemory(appResidentBytes());
     });
     m_pollTimer->start();
 }
@@ -147,12 +153,34 @@ void MobileWebContainerBackend::install(const QString& runtimeDir,
     } else {
         qInfo() << "Web container: bundled QML runtime at" << runtimeDir;
     }
-    qInfo().noquote() << QStringLiteral("Web container: live-runtime budget %1 "
-                                        "(%2 runtime%3 x %4)")
-                             .arg(megabytes(m_budget.budgetBytes()),
-                                  QString::number(m_budget.maxLiveRuntimes()),
-                                  m_budget.maxLiveRuntimes() == 1 ? QString() : QStringLiteral("s"),
-                                  megabytes(m_budget.runtimeFootprintBytes()));
+    // THE WHOLE POLICY IN ONE LINE, because a device run is read against it:
+    // how many pages this device affords, what one costs, and the figure the
+    // app's own weight is shed against. Before #153 the first number was 1
+    // everywhere and the last did not exist.
+    qInfo().noquote()
+        << QStringLiteral("Web container: live-runtime budget %1 (%2 runtime%3 x %4); %5")
+               .arg(megabytes(m_budget.budgetBytes()),
+                    QString::number(m_budget.maxLiveRuntimes()),
+                    m_budget.maxLiveRuntimes() == 1 ? QString() : QStringLiteral("s"),
+                    megabytes(m_budget.runtimeFootprintBytes()),
+                    m_budget.appCeilingBytes() > 0
+                        ? QStringLiteral("a page is shed above %1 of app memory")
+                              .arg(megabytes(m_budget.appCeilingBytes()))
+                        : QStringLiteral("no ceiling was stated, so nothing is shed on "
+                                         "weight alone"));
+
+    // THE OS'S OWN SIGNAL, subscribed to once. Installed here rather than by
+    // each host because the container is the thing that can DO something about
+    // it, and a host that forgot to subscribe would be a phone with no answer
+    // to the one warning it gets before it is killed.
+    if (!m_watchingPressure) {
+        m_watchingPressure = watchAppMemoryPressure([this] { memoryWarning(); });
+        if (!m_watchingPressure) {
+            qInfo().noquote()
+                << QStringLiteral("Web container: this platform sends no memory warning; "
+                                  "growth is noticed by weighing the app instead");
+        }
+    }
 
     // The thread install() was called on — see the header: a webview may only be
     // built on the platform's UI thread, whatever thread the core loads from.
@@ -285,26 +313,13 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
                              .arg(moduleName, budgetLine());
     qInfo().noquote() << appMemoryLine(QStringLiteral("with %1 visible").arg(moduleName));
 
-    for (const QString& name : evicted) {
-        MobileWebModuleView* view = m_views.value(name, nullptr);
-        // THE MODULE STAYS, THE RUNTIME GOES. A variant with a headless entry
-        // document is swapped onto it: same view, same bridge, same channel,
-        // and the core is not told because from its side nothing happened.
-        if (view && view->evictUi()) {
-            qInfo().noquote()
-                << QStringLiteral("Web container: over budget -- %1 gives up its UI page "
-                                  "and keeps its Wasm host (%2 reclaimed)")
-                       .arg(name, megabytes(m_budget.runtimeFootprintBytes()));
-            emit uiEvicted(name);
-            continue;
-        }
-        qInfo().noquote()
-            << QStringLiteral("Web container: over budget -- %1 gives up its UI page "
-                              "(%2 reclaimed); its package ships no headless document, "
-                              "so it has to be unloaded")
-                   .arg(name, megabytes(m_budget.runtimeFootprintBytes()));
-        emit uiEvictionRequired(name);
-    }
+    applyEvictions(evicted, QStringLiteral("over budget"));
+
+    // ...AND WHAT THE APP WEIGHS, which is the half #153 is about: the count
+    // says how many pages MAY live and the measurement says whether this device
+    // is still standing up under the ones that do. A page shown is the moment
+    // the app is at its biggest, so it is the honest moment to read.
+    const QStringList tooHeavy = observeMemory(appResidentBytes());
 
     // ...AND THE MODULE THE USER CHOSE GETS ITS UI BACK. Last, so that the page
     // coming up is the only live runtime at the moment it starts: a restore
@@ -317,6 +332,59 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
             << QStringLiteral("Web container: %1 was in the background; its UI page is "
                               "coming back").arg(moduleName);
     }
+    return evicted + tooHeavy;
+}
+
+void MobileWebContainerBackend::applyEvictions(const QStringList& evicted,
+                                               const QString& because)
+{
+    for (const QString& name : evicted) {
+        MobileWebModuleView* view = m_views.value(name, nullptr);
+        // THE MODULE STAYS, THE RUNTIME GOES. A variant with a headless entry
+        // document is swapped onto it: same view, same bridge, same channel,
+        // and the core is not told because from its side nothing happened.
+        if (view && view->evictUi()) {
+            qInfo().noquote()
+                << QStringLiteral("Web container: %1 -- %2 gives up its UI page "
+                                  "and keeps its Wasm host (%3 reclaimed); %4")
+                       .arg(because, name, megabytes(m_budget.runtimeFootprintBytes()),
+                            budgetLine());
+            emit uiEvicted(name);
+            continue;
+        }
+        qInfo().noquote()
+            << QStringLiteral("Web container: %1 -- %2 gives up its UI page "
+                              "(%3 reclaimed); its package ships no headless document, "
+                              "so it has to be unloaded; %4")
+                   .arg(because, name, megabytes(m_budget.runtimeFootprintBytes()),
+                        budgetLine());
+        emit uiEvictionRequired(name);
+    }
+}
+
+QStringList MobileWebContainerBackend::observeMemory(qint64 bytes)
+{
+    const QStringList evicted = m_budget.observe(bytes);
+    if (evicted.isEmpty()) return {};
+    qInfo().noquote()
+        << QStringLiteral("Web container: the app weighs %1, over its %2 ceiling -- "
+                          "%3 page(s) to give up")
+               .arg(megabytes(bytes), megabytes(m_budget.appCeilingBytes()))
+               .arg(evicted.size());
+    applyEvictions(evicted, QStringLiteral("over the app's memory ceiling"));
+    return evicted;
+}
+
+QStringList MobileWebContainerBackend::memoryWarning()
+{
+    const QStringList evicted = m_budget.shedUnderPressure();
+    // STATED WHETHER OR NOT THERE WAS ANYTHING TO DO. A warning the container
+    // answered with nothing is the interesting case in a device log: it says
+    // the pages were not what the OS was complaining about.
+    qInfo().noquote()
+        << QStringLiteral("Web container: the OS sent a memory warning (%1); %2")
+               .arg(appMemoryLine(QStringLiteral("at the warning")), budgetLine());
+    applyEvictions(evicted, QStringLiteral("the OS asked for memory back"));
     return evicted;
 }
 

@@ -138,6 +138,28 @@ public:
     // device run.
     QStringList show(const QString& moduleName);
 
+    // THE APP HAS GROWN, OR THE OS HAS ASKED (#153).
+    //
+    // memoryWarning() is the platform's own signal arriving -- iOS's
+    // UIApplicationDidReceiveMemoryWarningNotification, Android's onTrimMemory
+    // at a level that means "you are next" -- and it keeps only the page the
+    // user is looking at. It is subscribed to in install(), through
+    // watchAppMemoryPressure(), and is public because a host and a test both
+    // have reason to fire it.
+    //
+    // observeMemory() is the other, quieter half: what the app weighs RIGHT NOW,
+    // read against the budget's ceiling. The container calls it whenever a page
+    // is shown and on the poll timer's cadence while pages are live, which is
+    // the only way growth inside a page is ever noticed -- nothing else in this
+    // class wakes up between two taps. `bytes` is what AppMemory measured, or
+    // -1 for a platform that will not say, and -1 changes nothing.
+    //
+    // Both answer with the modules whose UI page was given up, and both give it
+    // up the same way a count eviction does (uiEvicted / uiEvictionRequired):
+    // there is one way out of a page in this container, whatever decided.
+    QStringList memoryWarning();
+    QStringList observeMemory(qint64 bytes);
+
     // NOBODY IS LOOKING AT A MODULE. Every page goes behind the host's own
     // surface and the budget's books are not touched: closing an app is not
     // showing another one, and it is not an eviction -- the module stays loaded
@@ -222,6 +244,11 @@ private:
                                     const QString& runtimeDir);
     void forget(const QString& moduleName);
     void armPollTimer();
+    // Give up the pages the budget named, by the only two routes there are.
+    // `because` is the half-sentence the log line is built round, so a device
+    // run says WHY a page went -- over the count, over the ceiling, or asked
+    // for by the OS.
+    void applyEvictions(const QStringList& evicted, const QString& because);
 
     // WHAT THE BOOKS SAY RIGHT NOW, as the tail of a log line: how many UI
     // runtimes are alive and what they weigh against the budget. Three lines
@@ -238,6 +265,10 @@ private:
     bool m_shimInDocument = false;
     WebOrigin m_origin;
     QTimer* m_pollTimer = nullptr;
+    // Subscribed once, however many times install() is called: the platform's
+    // notification outlives an install and a second subscription would answer
+    // one warning twice.
+    bool m_watchingPressure = false;
 };
 
 } // namespace basecamp::web

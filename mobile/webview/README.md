@@ -91,9 +91,49 @@ being worked around.
 ## The live-runtime budget
 
 The Qt-wasm QML runtime measured 185–240 MB resident and 2.6–3 s of cold start
-per page. A shell that kept one per installed module would be killed by the OS,
-so the budget is **one** on a phone: the runtime is alive for the module the
-user is looking at and the others give theirs up.
+per page (290 MB on a Samsung SM-G990B, measured 2026-09-12). A shell that kept
+one per installed module would be killed by the OS, so the runtime is alive for
+the module the user is looking at and, on a small device, for nothing else.
+
+**The count comes from the device** (logos-workspace#153). It used to be a
+fixed **one** everywhere, with the constant above carried only for the log line
+and `AppMemory`'s reading consulted by nothing — so an iPad destroyed and rebuilt
+a page on every flip between two apps, and a page that ballooned to 600 MB still
+read as `1 runtime … 290 MB of 290 MB` and was evicted by nothing until the OS
+killed the app. `LiveRuntimeBudget::forThisDevice()` now reads
+`deviceMemoryBytes()` and gives the container two numbers:
+
+| | how it is derived | what it does |
+|---|---|---|
+| the **count** | a sixth of the device's memory, divided by one page's 290 MB, floored at 1 and capped at 3 | how many UI pages may be live at once |
+| the **ceiling** | a third of the device's memory — under what the OS acts on, not at it | what the app as a whole may weigh before a page is shed on weight alone |
+
+The cap is not about memory: a user flips between two or three apps, and the
+pages' real cost is in a renderer process this app cannot weigh (below), so
+every page past the third is a bet against a number nobody here can read. A
+simulator makes the same point loudly — it reports the Mac's 64 GB.
+
+A run states its own count with `--web-budget <n>` (or
+`LOGOS_WEB_RUNTIME_BUDGET`), which is what the `--drive web-budget` pass uses to
+measure what two and three live runtimes cost on a device whose policy says one.
+
+**And the measurement is read.** Two entry points, both ending in the same
+eviction the count makes:
+
+* `observeMemory()` — what the app weighs right now, against the ceiling. Called
+  when a page is shown and on the container's existing 20 s poll-timer cadence,
+  which is the only way growth *inside* a page is ever noticed. Over the
+  ceiling it gives up ONE page per observation (the reading is the host's, not
+  the page's, so the container cannot know which page grew); it relaxes again
+  only well under the ceiling, so it cannot oscillate around a number that moves
+  by megabytes between frames.
+* `memoryWarning()` — the OS asking, which is the one signal here that is not
+  this app's own opinion. Everything but the visible page goes at once, because
+  iOS kills an app rather than ask it twice. Subscribed through
+  `watchAppMemoryPressure()`: `UIApplicationDidReceiveMemoryWarningNotification`
+  on iOS, `ComponentCallbacks2.onTrimMemory` on Android (`LogosMemoryPressure.java`,
+  levels `RUNNING_LOW` and worse — `UI_HIDDEN` is not pressure). Checkable on a
+  device: `adb shell am send-trim-memory co.logos.basecamp.shell RUNNING_CRITICAL`.
 
 `LiveRuntimeBudget` decides (least recently *visible* first, so flipping between
 two modules does not evict the one being flipped to) and
@@ -129,7 +169,8 @@ number: both phones run a webview's content in a separate process — WebKit's
 WebContent, Chromium's sandboxed renderer — that an embedder cannot ask about
 (iOS offers no API for another task's footprint, and Android's renderer runs
 under an isolated uid, so its `/proc` is not ours). What a shell controls, and
-what the budget states, is how many pages are alive.
+what the budget states, is how many pages are alive — so the ceiling above is
+honestly "the app is getting close", never "that page is the problem".
 
 **Known limit, and it is the artifact's.** A `ui_qml` module's `web` variant
 today is ONE page carrying both the QML runtime and the module's own Qt-wasm
@@ -148,6 +189,7 @@ Nothing here changes when it does: the budget already governs UI pages only.
 | `nix build .#mobile-bridge-test` | seconds, any desktop with Qt WebEngine | the JavaScript the bridge ships — the poll loop, the chunked sender, the console wrapper — in a real browser |
 | the smoke host's `web probe` line | a device or simulator | that THIS platform's webview delivers a request to its interceptor when the page is entered under Qt's separate main stack |
 | the smoke host's `web modules` line (`WebModuleRunner`) | a device or simulator | that a `ui_qml` module's `web` variant LOADS through the real core into this platform's webview, what its UI costs to cold-start here, and that showing a second one puts the first over the budget |
+| the Shell's `--drive web-budget` pass (`ShellWebBudgetDriver`) | a device or simulator | what the app WEIGHS with one, two and three `web` runtimes live on this device, and what a memory warning sheds |
 
 ### A page's console arrives on a background thread
 
