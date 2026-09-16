@@ -18,7 +18,10 @@
 //
 // WHAT IT ASSERTS, per row, against the App Manager's own model:
 //
-//   1. the page draws a row for every entry the catalog published
+//   1. the page draws a row for every entry the catalog published -- SCROLLED
+//      end to end, because a ListView instantiates only the delegates around
+//      its viewport and a claim about one frame would be a claim about the
+//      first dozen rows
 //   2. a row that may be installed HAS an install control, and that control is
 //      where a finger could reach it -- checked without pressing it, because
 //      pressing it starts a download
@@ -64,4 +67,8 @@ private:
     // next few ticks, and the catalog's rows arrive from a network fetch that
     // may still be in flight when the section opens.
     static constexpr int kRowTimeoutMs = 8000;
+    // And how long a scroll step is given before the rows it brought into the
+    // viewport are looked for. Delegate creation is asynchronous, and a step
+    // read too early reports a page that is merely slower than this driver.
+    static constexpr int kScrollSettleMs = 400;
 };
