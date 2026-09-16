@@ -20,6 +20,19 @@ constexpr int kModelBudgetMs = 15000;
 // source -- seconds of work on a phone. Spent once per mount, and step 6
 // mounts the app a second time.
 constexpr int kMountBudgetMs = 30000;
+
+// The names in `declared` that the core is not running, in declaration order.
+// Asked twice about the same app -- once before the tile is pressed and once
+// after -- and the pair is the whole check (logos-workspace#205).
+QStringList notLoaded(const QStringList& declared, const QStringList& loaded)
+{
+    QStringList out;
+    for (const QString& dep : declared) {
+        if (!loaded.contains(dep))
+            out << dep;
+    }
+    return out;
+}
 } // namespace
 
 ShellAppDriver::ShellAppDriver(BundledSetShellHost* host, QWidget* shellWidget,
@@ -77,6 +90,20 @@ void ShellAppDriver::run(bool expectLiveContent)
     // driver sets Settings; the tile inside it is the Shell's and is pressed.
     m_host->setCurrentSectionIndex(ShellSection::Workspace);
     QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    // WHAT WAS RUNNING BEFORE THE PRESS, so the check below says something.
+    // On a plain launch this is the three modules the Shell's own surfaces
+    // need, and every module the app declares is registered and unloaded --
+    // which is the state logos-workspace#205 was found in. A run that has
+    // already driven chat arrives here with chat_module up; the line then
+    // records that rather than asserting it.
+    const QStringList declared = backend->declaredDependencies(app);
+    const QStringList unloadedBefore = notLoaded(declared, backend->loadedModuleNames());
+    emit log(QStringLiteral("shell app: %1 declares [%2]; of those, [%3] are not loaded "
+                            "before the tile is pressed")
+                 .arg(app, declared.join(QStringLiteral(", ")),
+                      unloadedBefore.isEmpty() ? QStringLiteral("none")
+                                               : unloadedBefore.join(QStringLiteral(", "))));
 
     const QString tileHandle = QStringLiteral("sidebar.app.%1").arg(app);
     QQuickItem* tile = waitFor(tileHandle, 5000);
@@ -142,6 +169,28 @@ void ShellAppDriver::run(bool expectLiveContent)
         emit log(QStringLiteral("WRONG: '%1' is mounted in the Shell at %2x%3")
                      .arg(app).arg(shownWidth).arg(shownHeight));
         return;
+    }
+
+    // ── 3b. AND ITS MODULES ARE RUNNING BEHIND IT (logos-workspace#205) ──
+    //
+    // Every assertion above passes on a view drawing over a dead backend
+    // (ViewDependencies.h). So the question is put to the CORE instead -- is
+    // the module this view calls actually up -- and it is put AFTER the mount,
+    // because the mount is what is supposed to have brought it up.
+    //
+    // Note this is why the check lives in a no-flags run: `--drive chat` loads
+    // chat_module itself, so the chat pass could never have caught it.
+    const QStringList stillDown = notLoaded(declared, backend->loadedModuleNames());
+    if (!stillDown.isEmpty()) {
+        emit log(QStringLiteral("WRONG: '%1' is mounted and [%2] -- which it declares --"
+                                " %3 not loaded. The view is drawing over a dead backend.")
+                     .arg(app, stillDown.join(QStringLiteral(", ")),
+                          stillDown.size() == 1 ? QStringLiteral("is") : QStringLiteral("are")));
+        return;
+    }
+    if (!declared.isEmpty()) {
+        emit log(QStringLiteral("shell app: mounting %1 left [%2] loaded")
+                     .arg(app, declared.join(QStringLiteral(", "))));
     }
 
     // ── 4. and the row moved with it ──

@@ -38,6 +38,8 @@ add_library(basecamp_shell_host STATIC
     ${SRC}/DriveScript.h
     ${SRC}/ShellModuleRows.cpp
     ${SRC}/ShellModuleRows.h
+    ${SRC}/ViewDependencies.cpp
+    ${SRC}/ViewDependencies.h
     ${SRC}/InstalledPackages.cpp
     ${SRC}/InstalledPackages.h
     ${SRC}/ShellModulesBackend.cpp
@@ -121,6 +123,7 @@ install(TARGETS basecamp_shell_host EXPORT BasecampShellHostTargets ARCHIVE DEST
 install(FILES
     ${SRC}/DriveScript.h
     ${SRC}/ShellModuleRows.h
+    ${SRC}/ViewDependencies.h
     ${SRC}/InstalledPackages.h
     ${SRC}/ShellModulesBackend.h
     ${SRC}/ShellStoreBackend.h

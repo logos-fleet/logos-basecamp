@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QStringList>
 #include <QVariantMap>
 
 #include <dlfcn.h>
@@ -306,6 +307,16 @@ QVariantList BundledSetCoreRuntime::bundledSet() const
         row["version"] = entry["version"].toString();
         row["type"] = entry["type"].toString();
         row["image"] = entry["image"].toString();
+        // WHAT THIS MEMBER DECLARES, carried through rather than dropped. The
+        // set's own load order covers the core's members -- it registers them
+        // and the core walks each closure -- but a `ui_qml` member is never
+        // registered at all (ADR 0006), so the only thing that can bring its
+        // dependencies up is the HOST, on the mount, and the only place the
+        // host can read them is here (logos-workspace#205).
+        QStringList deps;
+        for (const QJsonValue& dep : entry["dependencies"].toArray())
+            deps << dep.toString();
+        row["dependencies"] = deps;
         out.append(row);
     }
     return out;

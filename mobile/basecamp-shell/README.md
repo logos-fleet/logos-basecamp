@@ -311,9 +311,31 @@ shared with the smoke probe: dlopen the framework, instantiate the backend,
 publish it on a socketpair node, acquire the typed replica, load the module's
 QML out of the image's own qrc) and hands the Shell a `QQuickWidget`.
 
+**And the modules the app declares are loaded first** (logos-workspace#205).
+A `ui_qml` member is the host's to instantiate and the modules it calls are the
+core's to load, and nothing used to join the two: only the three modules the
+Shell's own surfaces need came up at startup, so `chat_ui` -- which calls
+`chat_module.init()` from its own construction -- was refused ("No token found
+for module `chat_module`"), reported it to a log, and went on to remote its
+three models and draw an ordinary conversation list over a backend that was
+never there. Invisible on screen, and invisible to every driver pass, because
+`--drive chat` loads `chat_module` itself; a plain launch with no `--drive`
+flags was the first thing to find it.
+
+The Web container has always done this for a page (`mountWebApp` calls
+`ensureRunning`), which is why the wallet's whole chain comes up on its tile
+press. `ViewDependencies.h` is the same rule for the native half: the manifest
+entry's `dependencies` are brought up in declaration order before the framework
+is dlopened, and a declared module this device does not have refuses the mount
+and reaches the Shell through `onUiModuleUnavailable` rather than leaving an
+intact UI over nothing. The rule is a pure function of the facts and is unit
+tested (`tests/view_dependencies_test.cpp`); `ShellAppDriver` then asserts on a
+device that the mounted app's declared modules are actually loaded behind it.
+
 ```
 [shell] shell: the sidebar carries a tile for chat_ui
 [shell] drive: press 'sidebar.app.chat_ui' at (44, 268) in 88x1326
+[shell] app chat_ui: brought up chat_module, delivery_module before mounting it
 [shell] view image opened in 41 ms
 [shell] view model remoted: chat_ui/conversationModel (9 roles)
 [shell] replica valid: chat_ui

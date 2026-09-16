@@ -118,6 +118,37 @@ void BundledSetShellHost::mountApp(const QString& name)
         return;
     }
 
+    // ── THE MODULES THIS APP DECLARES, FIRST (logos-workspace#205) ──────────
+    //
+    // Why a native view needs this at all is ViewDependencies.h. Two things
+    // about it belong here, where the mount is:
+    //
+    // BEFORE the runner, not after it. The point is the ORDER: the framework's
+    // constructor is the first thing that calls out, so a load that happened
+    // afterwards would be a race the view has already lost.
+    //
+    // And a REFUSAL is a refusal to mount. A view whose dependency this device
+    // does not have has nothing behind it, and an intact UI over nothing is the
+    // defect itself -- so the Shell is told, through the one negative edge the
+    // observer has, in the host's own words (IShellHost.h).
+    const basecamp::shell::ViewMountVerdict deps = m_backend.bringUpViewDependencies(name);
+    if (!deps.ready) {
+        QStringList parts;
+        if (!deps.missing.isEmpty()) {
+            parts << QStringLiteral("this device does not have %1")
+                         .arg(deps.missing.join(QStringLiteral(", ")));
+        }
+        if (!deps.refused.isEmpty()) {
+            parts << QStringLiteral("%1 would not load")
+                         .arg(deps.refused.join(QStringLiteral(", ")));
+        }
+        const QString why = QStringLiteral("app %1 needs modules it cannot have: %2")
+                                .arg(name, parts.join(QStringLiteral("; ")));
+        m_backend.report(why);
+        if (m_observer) m_observer->onUiModuleUnavailable(name, why);
+        return;
+    }
+
     // SizeRootObjectToView, because the Shell decides how big an app is: the
     // dock it goes into is laid out by the workspace, and a view sized by its
     // own implicitWidth would render a 1000x700 desktop window inside it.

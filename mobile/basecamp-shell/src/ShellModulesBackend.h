@@ -25,6 +25,7 @@
 #include "ICoreRuntime.h"
 #include "ModuleInstanceModel.h"
 #include "ShellModuleRows.h"
+#include "ViewDependencies.h"
 #include "appmanager/ModuleDirectories.h"
 
 #include <QObject>
@@ -148,6 +149,20 @@ public:
     // False when this device does not have it -- which is not an error, it is
     // the state of a device that never installed it.
     bool ensureRunning(const QString& name);
+
+    // BRING UP WHAT A NATIVE VIEW DECLARES, before its framework is
+    // instantiated (logos-workspace#205). The rule, the verdict and why a view
+    // needs this are ViewDependencies.h; this is the half that needs a core to
+    // answer -- the facts to decide on, and `ensureRunning` as the loader.
+    basecamp::shell::ViewMountVerdict bringUpViewDependencies(const QString& name);
+
+    // The modules a Bundled member declares, straight off the manifest, in
+    // declaration order. Empty for a name the manifest does not carry.
+    QStringList declaredDependencies(const QString& name) const;
+    // What the CORE reports as running -- not `mountedViews`, and not the
+    // rows. The one reading that can say whether a mounted view has anything
+    // behind it (logos-workspace#205).
+    QStringList loadedModuleNames() const;
 
     // Record a decision for a pair that has no prompt on screen. The ordinary
     // path is StoreAppManager::answerConsent, which pops the queue; this is for
