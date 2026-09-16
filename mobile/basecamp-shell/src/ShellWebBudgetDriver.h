@@ -47,8 +47,9 @@ public:
     ShellWebBudgetDriver(BundledSetShellHost* host, QWidget* shellWidget,
                          QObject* parent = nullptr);
 
-    // Whether this build carries a `web` module with a user interface. A build
-    // with none has nothing to weigh and says so rather than failing.
+    // Whether there is anything here to weigh: a `web` app the sidebar already
+    // carries, or a shipped module that might become one once it is loaded. A
+    // build with neither says so rather than failing.
     bool hasWork() const;
 
     void run();
@@ -57,6 +58,10 @@ private:
     // The `web` modules the sidebar carries a tile for -- the ones a user could
     // open, which is the set this measures.
     QStringList tiledWebApps() const;
+    // The shipped modules outside the Bundled set that have no page yet -- what
+    // loadShippedWebModules() is about to ask for, and the answer to whether
+    // there is anything to wait on.
+    QStringList shippedWebModulesToLoad() const;
     // Bring up the shipped `web` tree the way the Module Manager's Load button
     // does, so a measurement is not limited to whatever the Bundled set
     // happened to start.

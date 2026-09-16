@@ -89,7 +89,7 @@ The Shell knows how to drive itself through nine acceptance passes, and it runs
                     say what the app weighs with each of them live -- then
                     answer a memory warning and say what it shed (#153).
                     Pair it with `--web-budget <n>`, which states the
-                    live-runtime count instead of taking the device's
+                    live-runtime count instead of taking the device's own.
 --drive modules     the Modules tab: the rows, their install type, their stats,
                     and a Load/Unload round trip
 --drive all         every pass, in the order above
@@ -183,8 +183,8 @@ container's BOOKS as well as its pages:
 ```
 
 The runtime half is what #151 is left as. A module with no page still in the
-live set spends a 290 MB slot on nothing, so the next app the
-user opens has to evict a dead one — and the console said both things at once,
+live set spends a 290 MB slot on nothing, so the next app the user opens has
+to evict a dead one — and the console said both things at once,
 `web_counter is visible; 1 live runtime(s)` from the container beside `app
 web_counter is not mounted` from the Shell.
 

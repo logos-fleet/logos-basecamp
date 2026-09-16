@@ -154,9 +154,12 @@ bool registerNatives()
 //                          holding nothing when they came back.
 //   BACKGROUND/MODERATE/COMPLETE (40/60/80)
 //                          this process is on the kill list.
+constexpr jint kTrimRunningLow = 10;
+constexpr jint kTrimUiHidden = 20;
+
 bool trimLevelIsPressure(jint level)
 {
-    return level >= 10 && level != 20;
+    return level >= kTrimRunningLow && level != kTrimUiHidden;
 }
 
 std::function<void()>& pressureSink()
@@ -168,7 +171,7 @@ std::function<void()>& pressureSink()
 void JNICALL nativeTrimMemory(JNIEnv*, jclass, jint level)
 {
     if (!trimLevelIsPressure(level)) return;
-    auto sink = pressureSink();
+    const std::function<void()> sink = pressureSink();
     if (!sink) return;
     // ON THE QT MAIN THREAD. Android calls this on ITS main thread, which under
     // Qt for Android is not the thread Qt's event loop, the container and every

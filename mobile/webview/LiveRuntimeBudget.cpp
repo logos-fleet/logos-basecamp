@@ -19,6 +19,27 @@ constexpr qint64 kRuntimeShareDivisor = 6;
 // observe() is read against.
 constexpr qint64 kAppCeilingDivisor = 3;
 
+// THE COUNT THIS RUN ASKED FOR, or 0 when it asked for nothing usable and the
+// policy should answer instead.
+//
+// The flag is read first because it is the spelling a phone has: an APK's
+// process inherits nothing a developer typed, while both launchers forward
+// arguments. A flag that PARSED is the run's answer either way, so
+// `--web-budget 0` falls back to the policy rather than to an environment the
+// run did not mean to consult.
+int statedRuntimeCount(const QStringList& args)
+{
+    const int flag = args.indexOf(QStringLiteral("--web-budget"));
+    if (flag >= 0 && flag + 1 < args.size()) {
+        bool isNumber = false;
+        const int asked = args.at(flag + 1).toInt(&isNumber);
+        if (isNumber) return asked > 0 ? asked : 0;
+    }
+    bool stated = false;
+    const int asked = qEnvironmentVariableIntValue("LOGOS_WEB_RUNTIME_BUDGET", &stated);
+    return stated && asked > 0 ? asked : 0;
+}
+
 } // namespace
 
 int LiveRuntimeBudget::runtimesForDeviceMemory(qint64 deviceMemoryBytes,
@@ -42,21 +63,11 @@ qint64 LiveRuntimeBudget::ceilingForDeviceMemory(qint64 deviceMemoryBytes)
 LiveRuntimeBudget LiveRuntimeBudget::forThisDevice(const QStringList& args)
 {
     const qint64 device = deviceMemoryBytes();
-    int runtimes = runtimesForDeviceMemory(device);
 
     // THE RUN'S OWN NUMBER WINS, and the policy is what happens when nobody
-    // states one. The flag is read first because it is the one a phone has.
-    const int flag = args.indexOf(QStringLiteral("--web-budget"));
-    bool fromFlag = false;
-    if (flag >= 0 && flag + 1 < args.size()) {
-        const int asked = args.at(flag + 1).toInt(&fromFlag);
-        if (fromFlag && asked > 0) runtimes = asked;
-    }
-    if (!fromFlag) {
-        bool stated = false;
-        const int asked = qEnvironmentVariableIntValue("LOGOS_WEB_RUNTIME_BUDGET", &stated);
-        if (stated && asked > 0) runtimes = asked;
-    }
+    // states one.
+    const int stated = statedRuntimeCount(args);
+    const int runtimes = stated > 0 ? stated : runtimesForDeviceMemory(device);
     return LiveRuntimeBudget(runtimes, kDeviceRuntimeBytes, ceilingForDeviceMemory(device));
 }
 

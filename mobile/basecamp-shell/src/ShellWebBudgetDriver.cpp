@@ -21,9 +21,20 @@ constexpr int kPageBudgetMs = 60000;
 // A page that has just loaded is still allocating; the figure this pass exists
 // to report is the settled one, not the peak of the load.
 constexpr int kSettleMs = 4000;
+
+// A MEASURED FIGURE, or what to say where the platform will not report one.
+// appResidentBytes() and deviceMemoryBytes() both answer -1 there, and every
+// line this pass prints has to stay readable on such a device rather than
+// claiming it weighed -0 MB.
+QString reportedAs(qint64 bytes, const QString& whenUnknown)
+{
+    return bytes < 0 ? whenUnknown : basecamp::web::megabytes(bytes);
+}
 } // namespace
 
+using basecamp::web::LiveRuntimeBudget;
 using basecamp::web::MobileWebContainerBackend;
+using basecamp::web::megabytes;
 
 ShellWebBudgetDriver::ShellWebBudgetDriver(BundledSetShellHost* host, QWidget* shellWidget,
                                            QObject* parent)
@@ -43,13 +54,29 @@ QStringList ShellWebBudgetDriver::tiledWebApps() const
     return apps;
 }
 
-void ShellWebBudgetDriver::loadShippedWebModules()
+QStringList ShellWebBudgetDriver::shippedWebModulesToLoad() const
 {
     ShellModulesBackend* backend = m_host->backend();
     const QStringList bundled = backend->bundledSetNames();
+    QStringList tree;
     for (const QString& name : backend->shippedModuleNames()) {
         if (bundled.contains(name)) continue;
         if (MobileWebContainerBackend::instance()->hasView(name)) continue;
+        tree.append(name);
+    }
+    return tree;
+}
+
+void ShellWebBudgetDriver::loadShippedWebModules()
+{
+    const QStringList tree = shippedWebModulesToLoad();
+    // NOTHING ASKED FOR IS NOTHING TO WAIT FOR. A build whose `web` half is all
+    // inside the Bundled set would otherwise spend the whole page budget below
+    // spinning an event loop over a load that was never started.
+    if (tree.isEmpty()) return;
+
+    ShellModulesBackend* backend = m_host->backend();
+    for (const QString& name : tree) {
         emit log(QStringLiteral("web budget: loading the shipped `web` module %1").arg(name));
         backend->loadCoreModule(name);
     }
@@ -69,20 +96,18 @@ bool ShellWebBudgetDriver::hasWork() const
 
 void ShellWebBudgetDriver::weigh(const QString& occasion)
 {
-    auto* web = MobileWebContainerBackend::instance();
-    const qint64 bytes = basecamp::web::appResidentBytes();
+    const LiveRuntimeBudget& budget = MobileWebContainerBackend::instance()->budget();
+    const qint64 ceiling = budget.appCeilingBytes();
     emit log(QStringLiteral("WEB BUDGET: %1 -- %2 live runtime(s), app %3, budget %4 "
                             "(%5 x %6), ceiling %7")
-                 .arg(occasion)
-                 .arg(web->budget().live().size())
-                 .arg(bytes < 0 ? QStringLiteral("not reported by this platform")
-                                : basecamp::web::megabytes(bytes),
-                      basecamp::web::megabytes(web->budget().budgetBytes()),
-                      QString::number(web->budget().maxLiveRuntimes()),
-                      basecamp::web::megabytes(web->budget().runtimeFootprintBytes()),
-                      web->budget().appCeilingBytes() > 0
-                          ? basecamp::web::megabytes(web->budget().appCeilingBytes())
-                          : QStringLiteral("none")));
+                 .arg(occasion,
+                      QString::number(budget.live().size()),
+                      reportedAs(basecamp::web::appResidentBytes(),
+                                 QStringLiteral("not reported by this platform")),
+                      megabytes(budget.budgetBytes()),
+                      QString::number(budget.maxLiveRuntimes()),
+                      megabytes(budget.runtimeFootprintBytes()),
+                      ceiling > 0 ? megabytes(ceiling) : QStringLiteral("none")));
 }
 
 bool ShellWebBudgetDriver::openAndWeigh(const QString& app)
@@ -123,14 +148,12 @@ void ShellWebBudgetDriver::run()
 {
     auto* web = MobileWebContainerBackend::instance();
 
+    const qint64 deviceMemory = basecamp::web::deviceMemoryBytes();
     emit log(QStringLiteral("web budget: this device reports %1 of memory; the policy "
                             "affords %2 runtime(s) and the container is running with %3")
-                 .arg(basecamp::web::deviceMemoryBytes() < 0
-                          ? QStringLiteral("no memory figure")
-                          : basecamp::web::megabytes(basecamp::web::deviceMemoryBytes()))
-                 .arg(basecamp::web::LiveRuntimeBudget::runtimesForDeviceMemory(
-                     basecamp::web::deviceMemoryBytes()))
-                 .arg(web->budget().maxLiveRuntimes()));
+                 .arg(reportedAs(deviceMemory, QStringLiteral("no memory figure")),
+                      QString::number(LiveRuntimeBudget::runtimesForDeviceMemory(deviceMemory)),
+                      QString::number(web->budget().maxLiveRuntimes())));
     weigh(QStringLiteral("before any web app is open"));
 
     loadShippedWebModules();
@@ -157,10 +180,10 @@ void ShellWebBudgetDriver::run()
     const qint64 after = basecamp::web::appResidentBytes();
     emit log(QStringLiteral("WEB BUDGET: a memory warning shed %1 page(s) [%2]; the app "
                             "went from %3 to %4")
-                 .arg(shed.size())
-                 .arg(shed.isEmpty() ? QStringLiteral("nothing to give up")
+                 .arg(QString::number(shed.size()),
+                      shed.isEmpty() ? QStringLiteral("nothing to give up")
                                      : shed.join(QStringLiteral(", ")),
-                      before < 0 ? QStringLiteral("?") : basecamp::web::megabytes(before),
-                      after < 0 ? QStringLiteral("?") : basecamp::web::megabytes(after)));
+                      reportedAs(before, QStringLiteral("?")),
+                      reportedAs(after, QStringLiteral("?"))));
     emit log(QStringLiteral("SHELL WEIGHED ITS WEB RUNTIMES"));
 }
