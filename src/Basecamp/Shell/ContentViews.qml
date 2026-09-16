@@ -87,30 +87,63 @@ Item {
         currentIndex: backend.currentActiveSectionIndex === root.sidebarSettings ? 1 : 0
 
         // App Manager (sidebar sidebarAppManager -> stack index 0)
-        AppManagerView {
-            id: appManagerView
+        //
+        // TWO VIEWS, ONE SECTION, and which one draws is a fact about the
+        // BACKEND rather than about the platform. The desktop's backend
+        // (MainUIBackend) has an `appsModel` and no App Manager object; a Store
+        // shell's (ShellModulesBackend) has the opposite -- no UI-plugin
+        // directory to scan (ADR 0003) and a StoreAppManager over
+        // package_downloader. Asking `Qt.platform` instead would be asking the
+        // wrong question: a Store shell is a build, not an operating system.
+        //
+        // Until this existed a phone's Applications section drew the desktop
+        // grid over a null model -- an empty page -- while the catalog and its
+        // verdicts (logos-workspace#169) lived only in a console line.
+        StackLayout {
+            id: appManagerSlot
 
-            appsProxy:      uiAppsProxy
-            repositories:   backend.repositories
-            loading:        backend.appsLoading
-            onAppClicked: function(name, repositoryUrl) {
-                // Primary click — fast-path launch for installed apps.
-                backend.openApp(name, repositoryUrl, ({}), true)
+            readonly property var storeAppManager:
+                (backend && backend.appManager) ? backend.appManager : null
+
+            // A STACK, not two `visible` bindings. Which view is shown is the
+            // same kind of choice the layout around it already makes, and a
+            // layout OWNS the `visible` of its children: a hand-written binding
+            // beside it takes that ownership away, and the first thing that
+            // noticed was a ⌘K Shortcut whose `enabled: root.visible` then read
+            // false on a page that was in front (tests/ui-tests.mjs, "the page
+            // declares a ⌘K shortcut for the bridge to mirror").
+            currentIndex: storeAppManager ? 0 : 1
+
+            StoreCatalogView {
+                objectName: "storeCatalogView"
+                appManager: appManagerSlot.storeAppManager
             }
-            onManageAppRequested: function(name, repositoryUrl) {
-                // Context menu's Install… / App details… — force the dialog
-                // open. The modal is the install confirmation (version picker
-                // + required packages), so both items land here.
-                backend.openApp(name, repositoryUrl, ({}), false)
+
+            AppManagerView {
+                id: appManagerView
+
+                appsProxy:      uiAppsProxy
+                repositories:   backend.repositories
+                loading:        backend.appsLoading
+                onAppClicked: function(name, repositoryUrl) {
+                    // Primary click — fast-path launch for installed apps.
+                    backend.openApp(name, repositoryUrl, ({}), true)
+                }
+                onManageAppRequested: function(name, repositoryUrl) {
+                    // Context menu's Install… / App details… — force the dialog
+                    // open. The modal is the install confirmation (version picker
+                    // + required packages), so both items land here.
+                    backend.openApp(name, repositoryUrl, ({}), false)
+                }
+                onUninstallAppRequested: function(name, repositoryUrl) {
+                    backend.uninstallApp(name, repositoryUrl)
+                }
+                onNavigateToRepositories: {
+                    backend.setCurrentActiveSectionIndex(root.sidebarSettings)
+                    settingsView.showRepositories()
+                }
+                onRefreshRequested: backend.refreshAppCatalog()
             }
-            onUninstallAppRequested: function(name, repositoryUrl) {
-                backend.uninstallApp(name, repositoryUrl)
-            }
-            onNavigateToRepositories: {
-                backend.setCurrentActiveSectionIndex(root.sidebarSettings)
-                settingsView.showRepositories()
-            }
-            onRefreshRequested: backend.refreshAppCatalog()
         }
 
         // Settings (backend index 3 -> internal index 1)

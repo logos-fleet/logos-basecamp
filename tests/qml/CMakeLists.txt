@@ -65,13 +65,24 @@ function(basecamp_mirror_qml_module uri source_dir)
         get_filename_component(base "${qml}" NAME_WE)
         get_filename_component(file "${qml}" NAME)
         configure_file("${qml}" "${out}/${file}" COPYONLY)
-        string(APPEND qmldir "${base} 1.0 ${file}\n")
+        # `pragma Singleton` is half a declaration: the engine refuses a type
+        # that declares it and is not ALSO declared singleton in the qmldir
+        # ("is a singleton, but was registered as a non-singleton"). The shell's
+        # real qt_add_qml_module says so via QT_QML_SINGLETON_TYPE; a mirror
+        # that dropped it would fail the moment a view imported a colour set.
+        file(READ "${qml}" _contents)
+        if(_contents MATCHES "pragma[ \t]+Singleton")
+            string(APPEND qmldir "singleton ${base} 1.0 ${file}\n")
+        else()
+            string(APPEND qmldir "${base} 1.0 ${file}\n")
+        endif()
     endforeach()
     file(WRITE "${out}/qmldir" "${qmldir}")
 endfunction()
 
-basecamp_mirror_qml_module(Basecamp.Common   "${BASECAMP_SHELL}/Basecamp/Common")
-basecamp_mirror_qml_module(Basecamp.Settings "${BASECAMP_SHELL}/Basecamp/Settings")
+basecamp_mirror_qml_module(Basecamp.Common     "${BASECAMP_SHELL}/Basecamp/Common")
+basecamp_mirror_qml_module(Basecamp.Settings   "${BASECAMP_SHELL}/Basecamp/Settings")
+basecamp_mirror_qml_module(Basecamp.AppManager "${BASECAMP_SHELL}/Basecamp/AppManager")
 
 if(LogosDesignSystem_FOUND)
     target_link_libraries(qml_tests PRIVATE Logos::DesignSystem)

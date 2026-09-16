@@ -18,6 +18,7 @@ const Named kPasses[] = {
     { DrivePass::Chat,     QLatin1String("chat") },
     { DrivePass::Apps,     QLatin1String("apps") },
     { DrivePass::Packages, QLatin1String("packages") },
+    { DrivePass::Catalog,  QLatin1String("catalog") },
     { DrivePass::Popups,   QLatin1String("popups") },
     { DrivePass::Keyboard, QLatin1String("keyboard") },
     { DrivePass::WebApps,  QLatin1String("web-apps") },

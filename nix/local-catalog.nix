@@ -65,12 +65,15 @@
 let
   inherit (pkgs) lib;
 
-  # The module's QML entry, as buildWebViewModule lays it out: everything in the
-  # declared directory ships under `view/`. Asserted against the payload below
-  # rather than trusted -- `lgx sign` refuses a ui_qml package whose declared
-  # view is not a file in the variant, and failing there would name the view and
-  # not the assumption that produced it.
-  viewEntry = "view/Counter.qml";
+  # The module's QML entry AS PACKAGED. buildWebViewModule flattens the
+  # directory a module declares its view in: `qml/WalletView.qml` in
+  # metadata.json ships as `view/WalletView.qml`, so the packaged entry is the
+  # module's own answer with its directory replaced -- never a second path
+  # written here. Asserted against the payload below rather than trusted --
+  # `lgx sign` refuses a ui_qml package whose declared view is not a file in the
+  # variant, and failing there would name the view and not the assumption that
+  # produced it.
+  viewEntryOf = spec: "view/" + baseNameOf spec.view;
 
   # One entry of `webVariants` with its defaults filled in, so that every
   # question below asks `spec.type` rather than re-deciding what an unspecified
@@ -87,6 +90,9 @@ let
     # floor cannot judge, so the caller passes the module's own
     # `config.dependencies` rather than letting this default stand.
     dependencies = [ ];
+    # The module's own `view` from metadata.json. Only a `ui_qml` package has
+    # one, and the default is the counter fixture's.
+    view = "qml/Counter.qml";
   } // spec;
 
   # One `web` variant, out of a module's `web` output.
@@ -107,8 +113,8 @@ let
         || { echo "error: ${name}'s manifest does not name it" >&2; exit 1; }
       test -f $out/index.html || { echo "error: ${name} has no index.html to be its main" >&2; exit 1; }
     '' + lib.optionalString (spec.type == "ui_qml") ''
-      test -f $out/${viewEntry} \
-        || { echo "error: ${name} ships no ${viewEntry}; the view contract would fail at sign time" >&2; exit 1; }
+      test -f $out/${viewEntryOf spec} \
+        || { echo "error: ${name} ships no ${viewEntryOf spec}; the view contract would fail at sign time" >&2; exit 1; }
     '');
   };
 
@@ -125,7 +131,7 @@ let
       signingKey = { inherit (testKey) jwk name; };
     } // lib.optionalAttrs (spec.type == "ui_qml") {
       inherit icon;
-      view = viewEntry;
+      view = viewEntryOf spec;
     });
 
   webPackages = lib.mapAttrs mkWebPackage webVariants;
