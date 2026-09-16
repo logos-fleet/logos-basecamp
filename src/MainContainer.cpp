@@ -1,4 +1,5 @@
 #include "MainContainer.h"
+#include "AppUnavailablePane.h"
 #include "PackageManagerPane.h"
 #include "ShellSections.h"
 #include "AppsFilterProxy.h"
@@ -67,6 +68,10 @@ void applyDevQmlImportPath(QQmlEngine* engine) {
 
 MainContainer::MainContainer(IShellHost* host, QWidget* parent)
     : QWidget(parent)
+    // Safe in the initialiser list: the two lambdas capture `this` but neither
+    // runs until a refusal arrives, long after everything they touch exists.
+    , m_notices([this](const QString& name, const QString& reason) { raiseNotice(name, reason); },
+                [this](const QString& name) { dropNotice(name); })
     , m_host(host)
     , m_sidebarWidget(nullptr)
     , m_contentStack(nullptr)
@@ -109,8 +114,13 @@ MainContainer::MainContainer(IShellHost* host, QWidget* parent)
     m_host->setObserver(this);
 
     // When user closes a plugin tab (× button), notify backend to unload.
+    //
+    // ...unless the tab was a REFUSAL rather than an app (#205). There is
+    // nothing loaded behind one, and asking the host to unload it answers
+    // "app is not mounted" at a user who has just dismissed a message.
     connect(m_workspaceArea, &WorkspaceArea::pluginClosed,
             this, [this](const QString& moduleName) {
+        if (m_notices.closed(moduleName)) return;
         m_host->unloadUiModule(moduleName);
     });
 
@@ -473,6 +483,12 @@ void MainContainer::onPluginWindowRequested(QWidget* widget, const QString& titl
     }
 
     if (m_workspaceArea && widget) {
+        // The app came up after all -- on a phone that is usually the user
+        // loading its module by hand from the Modules tab, which is exactly how
+        // #205 was diagnosed. The refusal's tab has to go FIRST: the workspace
+        // keys a dock by module name, and addPluginDock() on a name it already
+        // holds raises that dock and drops the widget on the floor.
+        m_notices.arrived(title);
         const QString resolved = m_host->displayNameFor(title);
         const QString label = resolved.isEmpty() ? title : resolved;
         m_workspaceArea->addPluginDock(widget, title, label);
@@ -521,16 +537,64 @@ void MainContainer::onPresentAppRequested(QWidget* widget)
     m_workspaceArea->activatePluginDock(widget);
 }
 
+void MainContainer::raiseNotice(const QString& name, const QString& reason)
+{
+    if (!m_workspaceArea) return;
+
+    // A refusal the user has already been shown is REWRITTEN in place. The tab
+    // is where they are looking, and taking it down to put it back would move
+    // it to the end of the strip on every retry.
+    if (AppUnavailablePane* pane = m_noticePanes.value(name)) {
+        pane->setReason(reason);
+        m_workspaceArea->activatePluginDock(name);
+        return;
+    }
+
+    const QString resolved = m_host->displayNameFor(name);
+    const QString label = resolved.isEmpty() ? name : resolved;
+    auto* pane = new AppUnavailablePane(label, reason);
+    m_noticePanes.insert(name, pane);
+    // The section FIRST: a tab raised behind the Settings page is no more on
+    // screen than the log line this replaces. A successful load lands on the
+    // workspace the same way, through onNavigateToApps().
+    m_host->setCurrentSectionIndex(ShellSection::Workspace);
+    m_workspaceArea->addPluginDock(pane, name, label);
+}
+
+void MainContainer::dropNotice(const QString& name)
+{
+    m_noticePanes.remove(name);
+    // The pane goes with the dock -- the workspace reparents it into the dock's
+    // card and deleteLater()s the lot, which is why m_noticePanes holds
+    // QPointers rather than owning anything.
+    if (m_workspaceArea) m_workspaceArea->removePluginDock(name);
+}
+
 void MainContainer::onUiModuleUnavailable(const QString& name, const QString& reason)
 {
-    if (name != kPackageManagerUi) return;
-    qWarning().noquote() << "MainContainer: package_manager_ui is not available:"
-                         << reason;
-    // A widget that is already mounted outranks a late refusal: the host can
-    // report a failed RE-load of a module whose page is still on screen, and
-    // replacing a working page with an error message would be the worse bug.
-    if (m_pmuiWidget) return;
-    if (m_pmuiPane) m_pmuiPane->showUnavailable(reason);
+    qWarning().noquote() << "MainContainer:" << name << "is not available:" << reason;
+
+    // package_manager_ui is the one module this class hoists into a page of its
+    // own rather than docking, so its refusal belongs on that page.
+    if (name == kPackageManagerUi) {
+        // A widget that is already mounted outranks a late refusal: the host can
+        // report a failed RE-load of a module whose page is still on screen, and
+        // replacing a working page with an error message would be the worse bug.
+        if (m_pmuiWidget) return;
+        if (m_pmuiPane) m_pmuiPane->showUnavailable(reason);
+        return;
+    }
+
+    // EVERY OTHER REFUSAL USED TO STOP AT THAT qWarning (#205). The press of a
+    // sidebar tile produced no window, no message and no way to tell a refusal
+    // from a slow load -- for a `ui_qml` app whose declared module this device
+    // does not have, and for a `web` app whose page never opened. The app is
+    // docked anyway now, and what is in the tab is the reason. AppNotices.h has
+    // the rule; this supplies its two hands.
+    const bool mounted = m_workspaceArea
+                      && m_workspaceArea->dockFor(name)
+                      && !m_notices.holds(name);
+    m_notices.unavailable(name, reason, mounted);
 }
 
 

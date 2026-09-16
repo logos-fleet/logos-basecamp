@@ -332,6 +332,14 @@ intact UI over nothing. The rule is a pure function of the facts and is unit
 tested (`tests/view_dependencies_test.cpp`); `ShellAppDriver` then asserts on a
 device that the mounted app's declared modules are actually loaded behind it.
 
+AND THE REFUSAL IS ON SCREEN. `onUiModuleUnavailable` reached one name in the
+Shell — `package_manager_ui`, the one module it hoists into a page of its own —
+so a refused mount was a tile press that did nothing at all. The Shell docks the
+app anyway now and puts the host's reason in the tab (`src/AppNotices.h`,
+`src/AppUnavailablePane.h`), which covers BOTH containers: `mountWebApp`'s two
+refusals — the app is not on this device, the module came up with no page — go
+through the same edge rather than stopping at the Modules tab's log.
+
 ```
 [shell] shell: the sidebar carries a tile for chat_ui
 [shell] drive: press 'sidebar.app.chat_ui' at (44, 268) in 88x1326

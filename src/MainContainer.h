@@ -1,7 +1,9 @@
 #pragma once
 
+#include "AppNotices.h"
 #include "IShellHost.h"
 
+#include <QHash>
 #include <QWidget>
 #include <QHBoxLayout>
 #include <QPointer>
@@ -11,6 +13,7 @@ class QQuickWidget;
 class WorkspaceArea;
 class ShortcutBridge;
 class PackageManagerPane;
+class AppUnavailablePane;
 
 // MainContainer — the UI shell. Holds exactly one host-side pointer, an
 // IShellHost*: no LogosAPI*, no QtLogosCore*, no MainUIBackend*. QML reaches
@@ -41,10 +44,11 @@ public:
     // Presentation seam. Branches on the widget pointer because this class
     // decided where each widget was mounted.
     void onPresentAppRequested(QWidget* widget) override;
-    // Only package_manager_ui is acted on: it is the one module this class
-    // mounts into a page of its own, so it is the one whose absence leaves a
-    // page with nothing on it. Every other UI module goes into a dock, and a
-    // dock that never appears is not a screen the user is stuck on.
+    // package_manager_ui is answered on its own page; every other refusal is
+    // DOCKED, under the app's own name, with the host's reason in the tab
+    // (AppNotices.h). A dock that never appeared was the #205 defect's visible
+    // half: a tile press that did nothing at all, which the person holding the
+    // phone could not tell from a slow load.
     void onUiModuleUnavailable(const QString& name, const QString& reason) override;
 
 protected:
@@ -63,6 +67,11 @@ private slots:
     void onAddApplicationDialogRequested(const QVariantMap& metadata);
 
 private:
+    // AppNotices' two hands: put an "X cannot open" tab on screen (or rewrite
+    // the one already there), and take it away again.
+    void raiseNotice(const QString& name, const QString& reason);
+    void dropNotice(const QString& name);
+
     void applyAppManagerSearch(const QString& query);
     void invokeOpenApp(const QString& name, const QString& repositoryUrl);
     void setupUi();
@@ -88,6 +97,15 @@ private:
     // real widget takes its place.
     QPointer<PackageManagerPane> m_pmuiPane;
     bool m_suppressNextNavToApps = false;
+
+    // ── "this app cannot come up", on screen (#205) ──────────────────────────
+    //
+    // The rule is AppNotices'; these are the two hands it drives. The panes are
+    // QPointers because the workspace owns each one the moment it is docked and
+    // deleteLater()s it with the dock -- the same ownership m_pmuiPane has, and
+    // the same reason.
+    basecamp::shell::AppNotices m_notices;
+    QHash<QString, QPointer<AppUnavailablePane>> m_noticePanes;
 
     // Content views (QML for Dashboard, Modules, PackageManager, Settings)
     QQuickWidget* m_contentWidget;
