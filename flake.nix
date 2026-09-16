@@ -1835,6 +1835,10 @@
             # a core and a transport build.
             logosLiblogosSrc = logos-liblogos.outPath;
             logosProtocolSrc = logos-protocol.outPath;
+            # Same reason, one repo further out: view_mount_teardown_test
+            # compiles logos-plugin-qt's cpp/logos_plugin_unload.cpp (pure
+            # QtCore) so it drives the SHIPPING teardown hook runner.
+            logosPluginQtSrc = logos-plugin-qt.outPath;
           };
 
           # QML component tests (Qt Quick Test)
@@ -1850,6 +1854,7 @@
           coverage = import ./nix/coverage.nix {
             inherit pkgs src logosPackageHeaders;
             logosViewModuleRuntimeSrc = logos-view-module-runtime;
+            logosPluginQtSrc = logos-plugin-qt.outPath;
             failUnderLine = 0;
           };
 

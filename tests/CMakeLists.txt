@@ -70,6 +70,21 @@ foreach(_candidate
     endif()
 endforeach()
 
+# logos-plugin-qt's cpp/ -- the host side of the module teardown hook
+# (logos_plugin_unload.{h,cpp}). A SOURCE root like the three above rather than
+# a link: that file is pure QtCore, and view_mount_teardown_test compiles it in
+# so the sequence it asserts is driven by the SHIPPING hook runner and not by a
+# lookalike written for the test. Probed in both layouts, like every other root.
+foreach(_candidate
+        "${LOGOS_PLUGIN_QT_ROOT}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../logos-plugin-qt")
+    if(EXISTS "${_candidate}/cpp/logos_plugin_unload.cpp")
+        set(LOGOS_PLUGIN_QT_SRC_ROOT "${_candidate}")
+        set(LOGOS_PLUGIN_UNLOAD_INCLUDE "${_candidate}/cpp")
+        break()
+    endif()
+endforeach()
+
 # -----------------------------------------------------------------------
 # Auto-discovery: any tests/*_test.cpp file is picked up automatically.
 # -----------------------------------------------------------------------
@@ -97,10 +112,14 @@ foreach(test_src IN LISTS TEST_SOURCES)
                     list(APPEND _extra_srcs "${BASECAMP_SHELL}/${dep}")
                 elseif(EXISTS "${BASECAMP_MOBILE}/${dep}")
                     list(APPEND _extra_srcs "${BASECAMP_MOBILE}/${dep}")
+                elseif(LOGOS_PLUGIN_QT_SRC_ROOT AND
+                       EXISTS "${LOGOS_PLUGIN_QT_SRC_ROOT}/${dep}")
+                    list(APPEND _extra_srcs "${LOGOS_PLUGIN_QT_SRC_ROOT}/${dep}")
                 else()
                     message(FATAL_ERROR
                         "srcdep '${dep}' for ${test_name} not found under "
-                        "${BASECAMP_SRC}, ${BASECAMP_SHELL} or ${BASECAMP_MOBILE}")
+                        "${BASECAMP_SRC}, ${BASECAMP_SHELL}, ${BASECAMP_MOBILE} "
+                        "or ${LOGOS_PLUGIN_QT_SRC_ROOT}")
                 endif()
             endif()
         endforeach()
@@ -121,6 +140,7 @@ foreach(test_src IN LISTS TEST_SOURCES)
         ${LOGOS_INTENT_INCLUDE}
         ${LOGOS_WEB_SEAM_INCLUDE}
         ${LOGOS_MESSAGE_CHANNEL_INCLUDE}
+        ${LOGOS_PLUGIN_UNLOAD_INCLUDE}
     )
     target_link_libraries(${test_name} PRIVATE
         Qt6::Core

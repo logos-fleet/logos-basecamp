@@ -5,6 +5,8 @@
 #include "WebAppSurface.h"
 #include "webview/MobileWebContainerBackend.h"
 
+#include <QCoreApplication>
+#include <QEvent>
 #include <QQuickWidget>
 #include <QTimer>
 
@@ -149,6 +151,30 @@ void BundledSetShellHost::mountApp(const QString& name)
         return;
     }
 
+    // ── A CLOSE'S DELETES ARE DEFERRED, AND THIS MOUNT MUST NOT OVERTAKE THEM ──
+    //
+    // unmountApp below queues the widget and the runner with deleteLater(),
+    // which is right -- the close arrives from inside the widget's own event
+    // delivery. But a deferred delete is only delivered when the event loop
+    // that queued it RETURNS, and processEvents() does not count: a re-open
+    // that happens before then finds the previous mount's plugin still alive.
+    //
+    // And the plugin is a SINGLETON PER IMAGE. The framework's C edge hands
+    // back Qt's own `qt_plugin_instance()`, a static QPointer, so the second
+    // mount gets the FIRST mount's plugin object -- whose generated
+    // `initLogos` sees its typed deps already wired and returns at once. The
+    // app draws, and its backend never runs onContextReady again: measured on
+    // the iPad Air 13-inch (M2) simulator as one `chat_module.init` for two
+    // mounts. The first runner's delete then destroys the object the second
+    // mount is using.
+    //
+    // So the queued deletes are delivered HERE, which is exactly what
+    // returning to the event loop would have done. Nothing else in this file
+    // depends on the timing; what it buys is that a mount always starts from a
+    // torn-down predecessor, whether the re-open came from a user or from a
+    // driver that never let go of the loop (ShellAppDriver step 6).
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+
     // SizeRootObjectToView, because the Shell decides how big an app is: the
     // dock it goes into is laid out by the workspace, and a view sized by its
     // own implicitWidth would render a 1000x700 desktop window inside it.
@@ -216,6 +242,14 @@ void BundledSetShellHost::unmountApp(const QString& name)
     // order for the same reason (IShellObserver's contract).
     if (m_observer)
         m_observer->onPluginWindowRemoveRequested(mounted.widget);
+    // THE VIEW IS TOLD NOW, not by the delete below (logos-workspace#212).
+    // Closing an app is not an unload, so the module behind it keeps whatever
+    // the view opened in it unless the view closes it -- and this is the moment
+    // the user closed the app, which is the only moment at which "close my
+    // session" means this mount's. The deletes are deferred, and a deferred
+    // delete can land after the user has re-opened the app: said from there,
+    // the same sentence closes the SECOND mount's session instead.
+    mounted.runner->finish();
     // BOTH deferred, and in this order: the widget still holds the module's
     // QML scene, whose bindings reach the runner's bridge. Deleting the runner
     // here would leave those bindings pointing at freed objects for exactly as
