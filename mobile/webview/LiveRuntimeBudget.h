@@ -45,6 +45,17 @@ public:
     // lets an embedder weigh another process (iOS offers no API for another
     // task's footprint, Android's renderer runs under a different uid), so what
     // a container can do is count pages and multiply.
+    //
+    // AND MULTIPLYING IS WHERE IT OVER-STATES (logos-workspace#230). Weighed
+    // from the host side on 2026-09-17, every page of a build shares ONE
+    // Chromium renderer: 290 MB with one page live, 298 MB with two and 300 MB
+    // with three on a Xiaomi 25028RN03Y; 345/345/348 MB on a Samsung SM-G990B.
+    // The figure below is right for the FIRST page and about 60x too large for
+    // each one after it, so budgetBytes() states 870 MB for three pages that
+    // cost about 300 MB. Left as it is rather than re-fitted here: it makes the
+    // budget conservative rather than dangerous, and the count it feeds is
+    // capped at three anyway. What the measurement DOES falsify is the idea
+    // that the cap is a memory decision -- see kMaxLiveRuntimes.
     static constexpr qint64 kDeviceRuntimeBytes = 290LL * 1024 * 1024;
 
     // HOW MANY PAGES A DEVICE OF THIS SIZE MAY KEEP (#153).
