@@ -7,6 +7,11 @@
 
 namespace basecamp::appmanager {
 
+// What a call waits when nothing on the line says otherwise, and what every call
+// waited before #235. Generous for a read and far short of a private send, which
+// is why it is now a floor rather than a ceiling -- see ModuleCallScript.
+inline constexpr int kDefaultTimeoutMs = 60000;
+
 // ONE CALL A LAUNCH WAS ASKED TO MAKE.
 struct ModuleCall {
     QString      module;
@@ -14,8 +19,8 @@ struct ModuleCall {
     QVariantList args;
     // The whole `<module>.<method>(...)` as it was written, for the console.
     QString      source;
-    // How long the driver waits for THIS call's answer. See kDefaultTimeoutMs.
-    int          timeoutMs = 60000;
+    // How long the driver waits for THIS call's answer.
+    int          timeoutMs = kDefaultTimeoutMs;
 };
 
 // THE ON-DEVICE `logoscore call`, parsed once from the app's own command line.
@@ -77,11 +82,6 @@ struct ModuleCall {
 // not answer.
 class ModuleCallScript {
 public:
-    // What a call waits by default, and what it waited always before #235.
-    // Generous for a read and far short of a private send, which is why it is
-    // now a floor rather than a ceiling.
-    static constexpr int kDefaultTimeoutMs = 60000;
-
     // Parse an argument list -- QCoreApplication::arguments(), program name
     // included. Anything unrecognised belongs to Qt or to the platform and is
     // left alone.
