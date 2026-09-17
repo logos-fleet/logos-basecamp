@@ -50,6 +50,33 @@ private slots:
         QVERIFY(script.contains(QLatin1String("window.logosWebViewReady")));
     }
 
+    // A READ IS NOT A PRESS (logos-workspace#250). A control is REACHABLE when
+    // a finger could hit it -- at least 20x20 and wholly inside the canvas --
+    // because Qt gives every item on a page that is not showing a 16x6 rect at
+    // the window's origin, and a press at one of those lands in the corner of
+    // the scene. None of that is about READING one: `describeItem` answers the
+    // `text` PROPERTY, which is right whatever the rect says.
+    //
+    // Measured on the venue's physical iPad: the wallet's proxy status line is
+    // one line of secondary text, ~18 px tall, and a flow that asked what it
+    // holds was answered "'proxyStatusText' is on the page and not reachable"
+    // -- a readback refused for being too small to press.
+    void aReadReachesAControlAFingerCouldNotHit()
+    {
+        const QString script = WebPageInput::driverScript();
+        // The gate is turned off BY NAME, so this says which one.
+        QVERIFY(script.contains(QLatin1String("forReading")));
+        const int readAt = script.indexOf(QLatin1String("read: function (name)"));
+        QVERIFY(readAt > 0);
+        const QString readPath = script.mid(readAt);
+        // ...and it is the READ path that asks for it. A press or a type that
+        // passed this would dispatch a pointer event at a rect Qt made up.
+        QVERIFY(readPath.contains(QLatin1String("find(name, function (found) {")));
+        QVERIFY(readPath.contains(QLatin1String("}, true);")));
+        const QString beforeRead = script.left(readAt);
+        QVERIFY(!beforeRead.contains(QLatin1String("}, true);")));
+    }
+
     void theCallsNameTheControl()
     {
         QCOMPARE(WebPageInput::pressCall(QStringLiteral("Advanced")),
