@@ -6,6 +6,7 @@
 #include "appmanager/StoreAppManager.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QImage>
 #include <QPointF>
 #include <QStandardPaths>
@@ -215,45 +216,91 @@ bool ShellCatalogPageDriver::driveInstall(const QString& packageName)
     // with no gate, no error and a megabyte on disk -- which is what the
     // operator saw twice.
     QQuickItem* title = waitFor(kSignerTitle, kGateTimeoutMs);
-    if (!title) {
-        const QString why = manager->lastError();
-        if (why.isEmpty()) {
-            dumpNames(QStringLiteral("Install was pressed on '%1' and no signer gate came up")
-                          .arg(wanted));
-            emit log(QStringLiteral("WRONG: pressing Install on %1 produced no signer gate "
-                                    "and no refusal -- the press did nothing, which is "
-                                    "logos-workspace#249 exactly").arg(wanted));
-            return false;
-        }
-        // REFUSED BEFORE THE PROMPT, which is the common path under a Store
-        // shell's `require` policy: package_manager will not offer a package
-        // signed by a key this device does not vouch for (ADR 0008). The page
-        // has to SAY so -- a refusal that only reaches the console is the same
-        // inert button by another route.
-        QQuickItem* shown = find(kError);
-        if (!shown || !shown->isVisible() || textOf(shown) != why) {
-            dumpNames(QStringLiteral("'%1' was refused and the page does not carry it")
-                          .arg(wanted));
-            emit log(QStringLiteral("WRONG: %1 was refused (\"%2\") and the page does not "
-                                    "say so -- a press whose only outcome is a property "
-                                    "nobody drew is the defect this pass exists to catch")
-                         .arg(wanted, why));
-            return false;
-        }
-        emit log(QStringLiteral("CATALOG INSTALL REFUSED ON SCREEN: %1 -- %2")
-                     .arg(wanted, why));
-        if (QQuickItem* who = find(kRefusedSigner)) {
-            // The DID, which is the only way forward from that refusal and the
-            // thing a sentence cannot carry.
-            emit log(QStringLiteral("  refused signer on screen: %1")
-                         .arg(textOf(who).replace(QLatin1Char('\n'), QLatin1Char(' '))));
-        }
-        return true;
+    if (!title)
+        return checkRefusedWithoutGate(manager, wanted);
+    if (!checkGateOnScreen(title))
+        return false;
+
+    QQuickItem* approve = waitFor(kSignerInstall, 2000);
+    if (!approve) {
+        dumpNames(QStringLiteral("the signer gate has no way to approve"));
+        emit log(QStringLiteral("WRONG: the signer gate is on screen for %1 and offers no "
+                                "Install -- the gate IS the consent, so a gate that cannot "
+                                "be answered is the same dead flow one step further on")
+                     .arg(wanted));
+        return false;
+    }
+    if (!pressWouldReach(approve))
+        return false;
+    emit log(QStringLiteral("catalog page: approving the signer for %1").arg(wanted));
+    if (!tap(approve))
+        return false;
+
+    // AND THE PACKAGE ARRIVES. `downloadedModules()` is the Shell's own answer
+    // to "where did this module come from": everything the core discovered that
+    // neither the Bundled manifest nor the shipped tree accounts for.
+    ShellModulesBackend* backend = m_host->backend();
+    QElapsedTimer sinceApproval;
+    sinceApproval.start();
+    while (!backend->downloadedModules().contains(wanted)
+           && sinceApproval.elapsed() < kInstallTimeoutMs) {
+        settle(kPollSliceMs);
+    }
+    if (!backend->downloadedModules().contains(wanted)) {
+        emit log(QStringLiteral("WRONG: the signer was approved on screen and %1 is not a "
+                                "Downloaded module on this device%2")
+                     .arg(wanted,
+                          manager->lastError().isEmpty()
+                              ? QString()
+                              : QStringLiteral(": %1").arg(manager->lastError())));
+        return false;
     }
 
-    // WHAT A USER WOULD HAVE READ, taken off the SCENE rather than out of the
-    // model -- the model held all of this before the gate existed, and that was
-    // the whole problem.
+    return checkRowAfterInstall(wanted, list);
+}
+
+// REFUSED BEFORE THE PROMPT, which is the common path under a Store shell's
+// `require` policy: package_manager will not offer a package signed by a key
+// this device does not vouch for (ADR 0008). The page has to SAY so -- a
+// refusal that only reaches the console is the same inert button by another
+// route -- and a press that left neither a gate nor a sentence is #249 itself.
+bool ShellCatalogPageDriver::checkRefusedWithoutGate(
+    basecamp::appmanager::StoreAppManager* manager, const QString& wanted)
+{
+    const QString why = manager->lastError();
+    if (why.isEmpty()) {
+        dumpNames(QStringLiteral("Install was pressed on '%1' and no signer gate came up")
+                      .arg(wanted));
+        emit log(QStringLiteral("WRONG: pressing Install on %1 produced no signer gate "
+                                "and no refusal -- the press did nothing, which is "
+                                "logos-workspace#249 exactly").arg(wanted));
+        return false;
+    }
+    QQuickItem* shown = find(kError);
+    if (!shown || !shown->isVisible() || textOf(shown) != why) {
+        dumpNames(QStringLiteral("'%1' was refused and the page does not carry it")
+                      .arg(wanted));
+        emit log(QStringLiteral("WRONG: %1 was refused (\"%2\") and the page does not "
+                                "say so -- a press whose only outcome is a property "
+                                "nobody drew is the defect this pass exists to catch")
+                     .arg(wanted, why));
+        return false;
+    }
+    emit log(QStringLiteral("CATALOG INSTALL REFUSED ON SCREEN: %1 -- %2").arg(wanted, why));
+    if (QQuickItem* who = find(kRefusedSigner)) {
+        // The DID, which is the only way forward from that refusal and the
+        // thing a sentence cannot carry.
+        emit log(QStringLiteral("  refused signer on screen: %1")
+                     .arg(textOf(who).replace(QLatin1Char('\n'), QLatin1Char(' '))));
+    }
+    return true;
+}
+
+// WHAT A USER WOULD HAVE READ, taken off the SCENE rather than out of the
+// model -- the model held all of this before the gate existed, and that was the
+// whole problem.
+bool ShellCatalogPageDriver::checkGateOnScreen(QQuickItem* title)
+{
     emit log(QStringLiteral("catalog page: the signer gate is on screen -- %1")
                  .arg(textOf(title)));
     for (const QLatin1String& handle : {kSignerIdentity, kSignerStatus}) {
@@ -278,46 +325,16 @@ bool ShellCatalogPageDriver::driveInstall(const QString& packageName)
     if (const QString shot = savePicture(title, QStringLiteral("signer-gate"));
         !shot.isEmpty())
         emit log(QStringLiteral("signer gate picture: %1").arg(shot));
+    return true;
+}
 
-    QQuickItem* approve = waitFor(kSignerInstall, 2000);
-    if (!approve) {
-        dumpNames(QStringLiteral("the signer gate has no way to approve"));
-        emit log(QStringLiteral("WRONG: the signer gate is on screen for %1 and offers no "
-                                "Install -- the gate IS the consent, so a gate that cannot "
-                                "be answered is the same dead flow one step further on")
-                     .arg(wanted));
-        return false;
-    }
-    if (!pressWouldReach(approve))
-        return false;
-    emit log(QStringLiteral("catalog page: approving the signer for %1").arg(wanted));
-    if (!tap(approve))
-        return false;
-
-    // AND THE PACKAGE ARRIVES. `downloadedModules()` is the Shell's own answer
-    // to "where did this module come from": everything the core discovered that
-    // neither the Bundled manifest nor the shipped tree accounts for.
-    ShellModulesBackend* backend = m_host->backend();
-    for (int waited = 0;
-         waited < kInstallTimeoutMs && !backend->downloadedModules().contains(wanted);
-         waited += 100) {
-        settle(100);
-    }
-    if (!backend->downloadedModules().contains(wanted)) {
-        emit log(QStringLiteral("WRONG: the signer was approved on screen and %1 is not a "
-                                "Downloaded module on this device%2")
-                     .arg(wanted,
-                          manager->lastError().isEmpty()
-                              ? QString()
-                              : QStringLiteral(": %1").arg(manager->lastError())));
-        return false;
-    }
-
-    // ...AND THE PAGE TELLS THE TRUTH ABOUT IT AFTERWARDS. approveSigner()
-    // re-reads the catalog rather than patching the row, so this is the whole
-    // rendering rule re-asserted over a real install: the gate is down, the row
-    // offers no second one, and it says what is on the device.
-    if (!waitUntilGone(kSignerTitle, 5000)) {
+// ...AND THE PAGE TELLS THE TRUTH ABOUT IT AFTERWARDS. approveSigner() re-reads
+// the catalog rather than patching the row, so this is the whole rendering rule
+// re-asserted over a real install: the gate is down, the row offers no second
+// one, and it says what is on the device.
+bool ShellCatalogPageDriver::checkRowAfterInstall(const QString& wanted, QQuickItem* list)
+{
+    if (!waitUntilGone(kSignerTitle, kGateDownTimeoutMs)) {
         emit log(QStringLiteral("WRONG: %1 installed and the signer gate is still on screen "
                                 "-- the page is holding a modal over a finished install")
                      .arg(wanted));
@@ -364,7 +381,7 @@ QQuickItem* ShellCatalogPageDriver::scrollTo(const QString& objectName, QQuickIt
                 return item;
         }
         const qreal end = list->property("contentHeight").toReal() - viewport;
-        if (step <= 0 || contentY >= end)
+        if (contentY >= end)
             return nullptr;
         contentY = qMin(qMax(contentY + step, contentY + 1), end);
         list->setProperty("contentY", contentY);
@@ -373,12 +390,14 @@ QQuickItem* ShellCatalogPageDriver::scrollTo(const QString& objectName, QQuickIt
 
 bool ShellCatalogPageDriver::waitUntilGone(const QString& objectName, int timeoutMs)
 {
-    for (int waited = 0; waited < timeoutMs; waited += 100) {
-        if (!find(objectName))
-            return true;
-        settle(100);
+    QElapsedTimer since;
+    since.start();
+    while (find(objectName)) {
+        if (since.elapsed() >= timeoutMs)
+            return false;
+        settle(kPollSliceMs);
     }
-    return !find(objectName);
+    return true;
 }
 
 bool ShellCatalogPageDriver::checkRows()

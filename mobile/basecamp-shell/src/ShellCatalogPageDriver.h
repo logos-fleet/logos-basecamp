@@ -72,6 +72,8 @@ class QQuickItem;
 
 class BundledSetShellHost;
 
+namespace basecamp::appmanager { class StoreAppManager; }
+
 class ShellCatalogPageDriver : public ShellSceneDriver
 {
     Q_OBJECT
@@ -88,7 +90,7 @@ public:
     // `options` are `--drive catalog:<option>`, in the order the run asked:
     // `install` presses the first installable row, `install=<package>` that
     // one. Empty is the historic behaviour -- read the page, press nothing.
-    bool run(const QStringList& options = {});
+    bool run(const QStringList& options);
 
 private:
     // Every row, judged. Split from run() so that opening the section and
@@ -101,6 +103,20 @@ private:
     // arrived. `packageName` empty means "the first row the model says may be
     // installed here", which is what a bare `catalog:install` asks for.
     bool driveInstall(const QString& packageName);
+    // The three steps of that walk, each one a separable failure -- the same
+    // reason checkRows() is not part of run().
+    //
+    // What a press that raised NO gate has to have left behind instead: a
+    // refusal, on the page, in the words the App Manager refused it in. True
+    // when it did, which is a legitimate end to this pass.
+    bool checkRefusedWithoutGate(basecamp::appmanager::StoreAppManager* manager,
+                                 const QString& wanted);
+    // What the gate that DID come up has to say, read off the scene rather
+    // than out of the model -- and photographed while it is up.
+    bool checkGateOnScreen(QQuickItem* title);
+    // ...and what the page has to say once the install is done: no gate over
+    // it, no second install control, and a line naming what is on the device.
+    bool checkRowAfterInstall(const QString& wanted, QQuickItem* list);
     // Scroll `list` until an item with this objectName exists with its centre
     // inside the viewport, and return it. A ListView instantiates only the
     // delegates around its viewport, so a row further down the catalog has no
@@ -139,4 +155,12 @@ private:
     // bytes are already on disk, and what happens here is package_manager
     // unpacking them plus the core's rescan and load.
     static constexpr int kInstallTimeoutMs = 30000;
+    // ...and how long the gate has to come back down once it has. Shorter
+    // again: nothing is fetched or unpacked here, the model has already
+    // changed, and what is waited for is the frame that shows it.
+    static constexpr int kGateDownTimeoutMs = 5000;
+    // How much of the event loop one turn of a wait above spends. Small enough
+    // that the deadline is met closely, large enough that the work being
+    // waited on actually runs in it.
+    static constexpr int kPollSliceMs = 100;
 };

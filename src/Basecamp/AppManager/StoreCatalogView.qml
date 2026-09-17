@@ -54,11 +54,11 @@ Rectangle {
     // no install, no error and no visible change, twice.
     //
     // A map, and an EMPTY map is truthy in JavaScript -- `{}` passes `if (x)`.
-    // So "is one on screen" is a key count and not a null check; reading it as
-    // one puts the gate up from the first frame over an empty prompt.
+    // So "is one there" is a key count and not a null check (hasContent below);
+    // reading it as one puts the gate up from the first frame over an empty
+    // prompt.
     readonly property var signerPrompt: appManager ? appManager.signerPrompt : null
-    readonly property bool awaitingSigner:
-        !!signerPrompt && Object.keys(signerPrompt).length > 0
+    readonly property bool awaitingSigner: root.hasContent(signerPrompt)
 
     // WHO WAS REFUSED, when the refusal came from the signer step and named a
     // key. Identity WITHOUT an install control, which is the whole point of it
@@ -67,13 +67,20 @@ Rectangle {
     // is for that DID to be anchored, and the sentence in `lastError` cannot
     // carry a DID.
     readonly property var refusedSigner: appManager ? appManager.refusedSigner : null
-    readonly property bool hasRefusedSigner:
-        !!refusedSigner && Object.keys(refusedSigner).length > 0
+    readonly property bool hasRefusedSigner: root.hasContent(refusedSigner)
 
     // ...and the sentence itself. The one place a refused install is visible at
     // all: every step of the gate reports through it, and a download that
     // failed on the network looks exactly like an inert button without it.
     readonly property string lastError: appManager ? appManager.lastError : ""
+
+    // Whether one of those maps holds anything. The two above are the App
+    // Manager's QVariantMaps, so "absent" reaches QML as an empty map rather
+    // than as null, and every reader of them has to ask the same question the
+    // same way.
+    function hasContent(map) {
+        return !!map && Object.keys(map).length > 0
+    }
 
     // Pressed Install on a row. The App Manager owns the gate that follows
     // (signer prompt, consent, the core's load); nothing here decides any of it.
@@ -291,8 +298,7 @@ Rectangle {
 
             Rectangle {
                 anchors.centerIn: parent
-                width: Math.min(parent.width - 2 * Theme.spacing.large,
-                                480 - 2 * Theme.spacing.large)
+                width: Math.min(parent.width, 480) - 2 * Theme.spacing.large
                 implicitHeight: gateContent.implicitHeight + 2 * Theme.spacing.large
                 height: implicitHeight
                 radius: Theme.spacing.radiusMedium
