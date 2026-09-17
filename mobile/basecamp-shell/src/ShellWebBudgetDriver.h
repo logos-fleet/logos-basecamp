@@ -18,7 +18,34 @@
 //      after each one says what the app weighs and how many UI runtimes are
 //      live -- so the line for 1, 2 and 3 live runtimes is the same line three
 //      times and the difference between them is the cost of a page;
-//   3. asks the container to answer a memory warning, and says what that shed.
+//   3. asks the container to answer a memory warning, and says what that shed;
+//   4. ASSERTS that the figure the budget reads actually moved with the pages
+//      (logos-workspace#244).
+//
+// STEP 4 IS THE ONE THAT FAILS ON A BLIND METRIC. #153's ceiling was weighed
+// against this process's own resident size, which on Android is blind to the
+// pages: measured 2026-09-17, the app's figure read 435/434/435 MB for one, two
+// and three live runtimes, and on the warning that shed two pages it went UP
+// 3 MB while the renderer holding them fell 65 MB. A ceiling read off that can
+// never trip, and would drive the opposite decision if it did. So the pass
+// records the weighed figure at 0, 1, ... N live runtimes and again after the
+// shed, and checks three things:
+//
+//   * all the pages together moved it up by at least what a page is expected
+//     to move it on THIS platform -- a third of a renderer where the device's
+//     book carries the whole of it, and only the noise figure on iOS, where
+//     this process is charged part of the WebContent process and a page moved
+//     it 43 MB on an iPad Air 4 (#153);
+//   * the FIRST page did, on its own;
+//   * and SHEDDING TOOK IT BACK DOWN, which is the discriminating one. The
+//     blind reading passes the first two (the app does allocate to start a
+//     renderer; it just cannot see what the renderer then holds) and fails only
+//     on the sign.
+//
+// The steps past the first are PRINTED AND NOT ASSERTED, because #230 weighed
+// every page of a build into one renderer: pages two and three cost ~5 MB each,
+// under the noise of a figure the whole device is in. On the venue's 14.9 GB
+// Lenovo the second page's step read -62 MB with nothing shed.
 //
 // Step 3 is the synthetic half and says so: it drives the container's own
 // handler, which is the same code path the OS's notification lands on
@@ -36,6 +63,7 @@
 
 #include "ShellSceneDriver.h"
 
+#include <QList>
 #include <QStringList>
 
 class BundledSetShellHost;
@@ -75,9 +103,25 @@ private:
     // -- and then the pass stops, because every line after it would be about a
     // different number of runtimes than it claims.
     bool openAndWeigh(const QString& app);
-    // One line: the live count, the app's own footprint, and the budget it is
-    // being read against.
+    // One line: the live count, the app's own footprint, what the budget
+    // actually weighs on this platform, and the budget it is read against.
+    // Records the weighed figure against the live count for step 4.
     void weigh(const QString& occasion);
+    // Step 4's verdict, from what weigh() recorded plus the figure taken after
+    // the memory warning settled. Prints one WRONG line per broken claim and
+    // one OK line when the figure tracked the pages.
+    void reportWhetherTheFigureMoved(qint64 afterShedBytes, int pagesShed);
+
+    // One reading taken by weigh(): what the budget weighed, and how many
+    // runtimes were live when it was taken. The pair is what step 4 reasons
+    // about, so neither half means anything without the other.
+    struct Reading
+    {
+        int liveRuntimes;
+        qint64 weighedBytes;
+    };
 
     BundledSetShellHost* m_host;  // not owned
+    // Every reading the pass passed through, in the order it took them.
+    QList<Reading> m_weighed;
 };

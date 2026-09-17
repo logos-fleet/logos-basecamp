@@ -264,8 +264,16 @@ let
         fi
         pid=$("$adb" shell pidof "$pkg" | tr -d '\r')
         echo "run-${pname}-android: $pkg pid $pid; console follows (Ctrl-C to stop)"
+        # `Web container:` IS ON THE LIST (logos-workspace#244). The container's
+        # own decisions -- what it weighs, when a ceiling is crossed, which page
+        # it gave up and why -- are qInfo lines under the `[qt]` tag, and the
+        # `warning|error|fatal` clause let through only the ones that happen to
+        # contain the word "warning". So the line that says the budget acted
+        # (`the allowance goes 3 -> 1 page(s)`) was printed by the app, dropped
+        # here, and the run read as one where nothing had happened -- which is
+        # the same blindness #244 is about, one layer out.
         "$adb" logcat --pid="$pid" -v raw '*:V' \
-          | grep --line-buffered -E '^\[${consoleTag}\]|^\[qt\] .*(warning|error|fatal|Fatal)|libc|DEBUG|FATAL'
+          | grep --line-buffered -E '^\[${consoleTag}\]|^\[qt\] Web container:|^\[qt\] .*(warning|error|fatal|Fatal)|libc|DEBUG|FATAL'
       '';
     in
     {

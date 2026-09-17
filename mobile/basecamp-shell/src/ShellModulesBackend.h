@@ -336,6 +336,41 @@ public slots:
 signals:
     void log(const QString& line);
 
+    // ── THE SHARED SHELL'S OWN SUBSCRIPTIONS ──────────────────────────────
+    //
+    // `backend` is a context property and there are TWO objects behind it, but
+    // ContentViews.qml and MainContainer.cpp are the SAME FILES in both builds.
+    // So a signal the shell subscribes to has to exist on this class whether or
+    // not a phone ever emits it: a `Connections` handler that resolves to
+    // nothing is silently inert, and QML reports that as a warning rather than
+    // as an error. A Store shell printed three of them at every startup for at
+    // least two days (logos-workspace#249), one of which was the handler an
+    // install COMPLETING would have fired -- which is how an inert catalog page
+    // came to look like a button that does nothing.
+    //
+    // They are declared here and not faked: `ignoreUnknownSignals: true` in the
+    // QML would have silenced these three AND any future typo in the desktop's
+    // own wiring, which is the one thing that warning is good for. What is
+    // asserted about them is in tests/shell_backend_signal_contract_test.cpp.
+    //
+    // Emitted by this class: repositoryOperationCompleted, from the three
+    // repository calls -- one of which a Store shell implements (addRepository),
+    // two of which it refuses. Until it was declared, Settings' repository pane
+    // never heard the answer to anything it asked.
+    void repositoryOperationCompleted(const QString& operation,
+                                      const QString& url,
+                                      bool success,
+                                      const QString& error);
+    // NEVER emitted here, and that is the honest state rather than an omission:
+    // nothing on a phone routes app-to-app intents (respondToShellIntent is one
+    // of the stubs below) and nothing opens the desktop's Add-Application
+    // dialog. A handler for one of these is dormant on a Store shell; the
+    // difference from before is that it is dormant rather than broken, and the
+    // day a phone grows either path the QML above is already listening.
+    void shellIntentRequested(const QString& requestId, const QString& intent,
+                              const QVariantMap& params, const QString& requesterName);
+    void requestOpenAddApplicationDialog(const QVariantMap& metadata);
+
     // The sidebar asked for an app. BundledSetShellHost answers -- it owns the
     // observer the mounted widget has to reach, and the backend owns no
     // widgets. IShellHost::loadUiModule lands on the same two.

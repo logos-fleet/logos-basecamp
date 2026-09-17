@@ -16,8 +16,13 @@ namespace {
 constexpr qint64 kRuntimeShareDivisor = 6;
 
 // ...and the share the app as a WHOLE may weigh, which is the number
-// observe() is read against.
+// observe() is read against WHERE THE PAGES ARE IN THE APP (iOS, macOS).
 constexpr qint64 kAppCeilingDivisor = 3;
+
+// ...and the share of a device that stands in for the OS's own low-memory line
+// where the platform does not publish one. See
+// LiveRuntimeBudget::ceilingForDeviceInUse.
+constexpr qint64 kAssumedLowMemoryDivisor = 8;
 
 // THE COUNT THIS RUN ASKED FOR, or 0 when it asked for nothing usable and the
 // policy should answer instead.
@@ -40,6 +45,23 @@ int statedRuntimeCount(const QStringList& args)
     return stated && asked > 0 ? asked : 0;
 }
 
+// THE CEILING THIS RUN ASKED FOR, in bytes, or 0 when it asked for nothing and
+// the policy should answer instead. Stated in MEGABYTES, because that is the
+// unit every memory line in this container is printed in and a device run
+// types it off the pass's own output.
+qint64 statedCeilingBytes(const QStringList& args)
+{
+    const int flag = args.indexOf(QStringLiteral("--web-ceiling"));
+    if (flag >= 0 && flag + 1 < args.size()) {
+        bool isNumber = false;
+        const qint64 asked = args.at(flag + 1).toLongLong(&isNumber);
+        if (isNumber) return asked > 0 ? asked * 1024 * 1024 : 0;
+    }
+    bool stated = false;
+    const int asked = qEnvironmentVariableIntValue("LOGOS_WEB_APP_CEILING_MB", &stated);
+    return stated && asked > 0 ? qint64(asked) * 1024 * 1024 : 0;
+}
+
 } // namespace
 
 int LiveRuntimeBudget::runtimesForDeviceMemory(qint64 deviceMemoryBytes,
@@ -60,6 +82,23 @@ qint64 LiveRuntimeBudget::ceilingForDeviceMemory(qint64 deviceMemoryBytes)
     return deviceMemoryBytes / kAppCeilingDivisor;
 }
 
+qint64 LiveRuntimeBudget::ceilingForDeviceInUse(qint64 deviceMemoryBytes,
+                                                qint64 deviceLowMemoryBytes,
+                                                qint64 runtimeFootprintBytes)
+{
+    if (deviceMemoryBytes <= 0) return 0;
+    const qint64 keepFree = deviceLowMemoryBytes > 0
+                                ? deviceLowMemoryBytes
+                                : deviceMemoryBytes / kAssumedLowMemoryDivisor;
+    const qint64 ceiling =
+        deviceMemoryBytes - keepFree - std::max<qint64>(0, runtimeFootprintBytes);
+    // A DEVICE TOO SMALL TO HOLD ONE PAGE OVER ITS OWN LINE gets no ceiling
+    // rather than a negative one -- a negative ceiling is "evict on every
+    // observation", which would take the page the user is looking at down to
+    // the floor of one on the first poll of every run.
+    return ceiling > 0 ? ceiling : 0;
+}
+
 LiveRuntimeBudget LiveRuntimeBudget::forThisDevice(const QStringList& args)
 {
     const qint64 device = deviceMemoryBytes();
@@ -68,7 +107,29 @@ LiveRuntimeBudget LiveRuntimeBudget::forThisDevice(const QStringList& args)
     // states one.
     const int stated = statedRuntimeCount(args);
     const int runtimes = stated > 0 ? stated : runtimesForDeviceMemory(device);
-    return LiveRuntimeBudget(runtimes, kDeviceRuntimeBytes, ceilingForDeviceMemory(device));
+
+    // ...AND THE CEILING IS STATED IN WHATEVER FRAME THIS PLATFORM'S READING IS
+    // IN (logos-workspace#244). The pair has to match: observe() weighs
+    // AppMemory::budgetWeighedBytes() and knows nothing about which of the two
+    // it was handed, so the only place the two halves can be kept together is
+    // here, where both are chosen at once -- off the same answer that call
+    // chooses by (AppMemory::kBudgetWeighsTheDevice).
+    const qint64 fromDevice =
+        kBudgetWeighsTheDevice
+            ? ceilingForDeviceInUse(device, deviceLowMemoryBytes(), kDeviceRuntimeBytes)
+            : ceilingForDeviceMemory(device);
+
+    // ...AND A RUN CAN STATE THE CEILING TOO, for the same reason it can state
+    // the count (#244). A ceiling that cannot be reached is indistinguishable
+    // from one that never needed to be, and that is how #153's unreachable
+    // branch survived a full landing -- so a device run has to be able to put
+    // the ceiling where the device will cross it and watch the eviction
+    // happen. It is stated in MB against whatever frame this platform weighs:
+    // `--web-ceiling 1400` on a phone that idles with 1318 MB in use is one
+    // page's worth above the resting figure.
+    const qint64 statedCeiling = statedCeilingBytes(args);
+    return LiveRuntimeBudget(runtimes, kDeviceRuntimeBytes,
+                             statedCeiling > 0 ? statedCeiling : fromDevice);
 }
 
 LiveRuntimeBudget::LiveRuntimeBudget(int maxLiveRuntimes, qint64 runtimeFootprintBytes,
@@ -99,14 +160,14 @@ QStringList LiveRuntimeBudget::show(const QString& module)
     return trimToAllowance();
 }
 
-QStringList LiveRuntimeBudget::observe(qint64 appResidentBytes)
+QStringList LiveRuntimeBudget::observe(qint64 weighedBytes)
 {
     // NOTHING TO WEIGH AGAINST, or nothing weighed: either way this is not a
     // reason to take a page away. A host that states its own count and no
     // ceiling counts, exactly as this class did before #153.
-    if (m_ceilingBytes <= 0 || appResidentBytes < 0) return {};
+    if (m_ceilingBytes <= 0 || weighedBytes < 0) return {};
 
-    if (appResidentBytes > m_ceilingBytes) {
+    if (weighedBytes > m_ceilingBytes) {
         // ONE PAGE PER OBSERVATION. The reading is the host's and not the
         // page's, so the container cannot know which page grew; giving one up
         // and looking again converges on the same answer without spending three
@@ -117,7 +178,7 @@ QStringList LiveRuntimeBudget::observe(qint64 appResidentBytes)
 
     // ...AND IT GROWS BACK, but only from well under the ceiling. See
     // relaxBelowBytes().
-    if (appResidentBytes <= relaxBelowBytes()) m_allowance = m_maxLive;
+    if (weighedBytes <= relaxBelowBytes()) m_allowance = m_maxLive;
     return {};
 }
 

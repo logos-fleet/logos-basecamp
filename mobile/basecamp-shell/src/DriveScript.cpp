@@ -21,7 +21,11 @@ const Named kPasses[] = {
     { DrivePass::Chat,      QLatin1String("chat"),       false },
     { DrivePass::Apps,      QLatin1String("apps"),       false },
     { DrivePass::Packages,  QLatin1String("packages"),   false },
-    { DrivePass::Catalog,   QLatin1String("catalog"),    false },
+    // ...and whether it PRESSES the page it reads (logos-workspace#249):
+    // `install`, or `install=<package>` for a catalog with several installable
+    // rows. What the option MEANS is ShellCatalogPageDriver's, like every other
+    // option here.
+    { DrivePass::Catalog,   QLatin1String("catalog"),    true  },
     { DrivePass::Popups,    QLatin1String("popups"),     false },
     { DrivePass::Keyboard,  QLatin1String("keyboard"),   false },
     { DrivePass::WebApps,   QLatin1String("web-apps"),   false },

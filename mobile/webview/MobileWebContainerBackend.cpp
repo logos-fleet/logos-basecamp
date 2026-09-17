@@ -12,8 +12,17 @@
 #include <utility>
 
 namespace basecamp::web {
-
 namespace {
+
+// WHAT THE CEILING IS A CEILING ON, in words, so a device log says which of the
+// two frames its numbers are in (#244). AppMemory::budgetWeighedBytes() answers
+// this process's footprint on iOS and how much of the DEVICE is in use on
+// Android, and the two are nowhere near each other.
+QString weighedFigureName()
+{
+    return kBudgetWeighsTheDevice ? QStringLiteral("this device's memory in use")
+                                  : QStringLiteral("app memory");
+}
 
 // A directory holding the runtime's glue script IS the runtime; anything else
 // named as one is a misconfiguration, and saying so beats a page that comes up
@@ -59,7 +68,12 @@ void MobileWebContainerBackend::armPollTimer()
         // container is asleep between two taps -- and this timer is already
         // running whenever there are pages at all, so the alternative was a
         // second timer to do something that costs microseconds.
-        observeMemory(appResidentBytes());
+        //
+        // budgetWeighedBytes() RATHER THAN appResidentBytes() (#244): on
+        // Android the pages are in a renderer process this one cannot see, and
+        // weighing this process was measured moving the WRONG WAY across an
+        // eviction. See AppMemory.h.
+        observeMemory(budgetWeighedBytes());
     });
     m_pollTimer->start();
 }
@@ -154,18 +168,24 @@ void MobileWebContainerBackend::install(const QString& runtimeDir,
         qInfo() << "Web container: bundled QML runtime at" << runtimeDir;
     }
     // THE WHOLE POLICY IN ONE LINE, because a device run is read against it:
-    // how many pages this device affords, what one costs, and the figure the
-    // app's own weight is shed against. Before #153 the first number was 1
-    // everywhere and the last did not exist.
+    // how many pages this device affords, what they cost, and the figure they
+    // are shed above. Before #153 the first number was 1 everywhere and the
+    // last did not exist; before #244 the last could not be reached on Android.
+    //
+    // ONE RENDERER AND A DOCUMENT EACH AFTER IT, not a renderer each -- see
+    // LiveRuntimeBudget::kAdditionalRuntimeBytes.
     qInfo().noquote()
-        << QStringLiteral("Web container: live-runtime budget %1 (%2 runtime%3 x %4); %5")
+        << QStringLiteral("Web container: live-runtime budget %1 (%2 runtime%3: one %4 "
+                          "renderer + %5 each after it); %6")
                .arg(megabytes(m_budget.budgetBytes()),
                     QString::number(m_budget.maxLiveRuntimes()),
                     m_budget.maxLiveRuntimes() == 1 ? QString() : QStringLiteral("s"),
                     megabytes(m_budget.runtimeFootprintBytes()),
+                    megabytes(LiveRuntimeBudget::kAdditionalRuntimeBytes),
                     m_budget.appCeilingBytes() > 0
-                        ? QStringLiteral("a page is shed above %1 of app memory")
-                              .arg(megabytes(m_budget.appCeilingBytes()))
+                        ? QStringLiteral("a page is shed above %1 of %2")
+                              .arg(megabytes(m_budget.appCeilingBytes()),
+                                   weighedFigureName())
                         : QStringLiteral("no ceiling was stated, so nothing is shed on "
                                          "weight alone"));
 
@@ -313,13 +333,21 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
                              .arg(moduleName, budgetLine());
     qInfo().noquote() << appMemoryLine(QStringLiteral("with %1 visible").arg(moduleName));
 
-    applyEvictions(evicted, QStringLiteral("over budget"));
+    // WHY, NOT JUST THAT (#244). show() trims to the ALLOWANCE, which is the
+    // device's count until a measurement or an OS warning tightens it -- so an
+    // eviction here can have been caused by something that happened minutes
+    // ago and several log lines up. A run that has just put the ceiling where
+    // this device crosses it has to be able to read that off the line.
+    applyEvictions(evicted,
+                   m_budget.liveAllowance() < m_budget.maxLiveRuntimes()
+                       ? QStringLiteral("over the allowance a measurement or a warning left")
+                       : QStringLiteral("over budget"));
 
     // ...AND WHAT THE APP WEIGHS, which is the half #153 is about: the count
     // says how many pages MAY live and the measurement says whether this device
     // is still standing up under the ones that do. A page shown is the moment
     // the app is at its biggest, so it is the honest moment to read.
-    const QStringList tooHeavy = observeMemory(appResidentBytes());
+    const QStringList tooHeavy = observeMemory(budgetWeighedBytes());
 
     // ...AND THE MODULE THE USER CHOSE GETS ITS UI BACK. Last, so that the page
     // coming up is the only live runtime at the moment it starts: a restore
@@ -362,15 +390,33 @@ void MobileWebContainerBackend::applyEvictions(const QStringList& evicted,
     }
 }
 
-QStringList MobileWebContainerBackend::observeMemory(qint64 bytes)
+QStringList MobileWebContainerBackend::observeMemory(qint64 weighedBytes)
 {
-    const QStringList evicted = m_budget.observe(bytes);
-    if (evicted.isEmpty()) return {};
+    const int allowanceBefore = m_budget.liveAllowance();
+    const QStringList evicted = m_budget.observe(weighedBytes);
+    const int allowanceNow = m_budget.liveAllowance();
+
+    // THE CROSSING IS ANNOUNCED EVEN WHEN NOTHING WAS EVICTED (#244). An
+    // observation over the ceiling with ONE page live tightens the allowance
+    // and takes nothing away -- one page is the floor -- and the eviction it
+    // causes then happens at the next show(), several lines later. Logged only
+    // here, the moment the ceiling was crossed was invisible, which is exactly
+    // the failure this issue is about: a ceiling nobody ever saw trip reads the
+    // same as one that never needed to.
+    if (allowanceNow == allowanceBefore && evicted.isEmpty()) return {};
+
+    // THE FIGURE, NOT "THE APP". What is weighed here is this process on iOS
+    // and how much of the DEVICE is in use on Android, and a log line that
+    // called the second one "the app" would be claiming the app had grown by
+    // whatever some other process just allocated.
     qInfo().noquote()
-        << QStringLiteral("Web container: the app weighs %1, over its %2 ceiling -- "
-                          "%3 page(s) to give up")
-               .arg(megabytes(bytes), megabytes(m_budget.appCeilingBytes()))
-               .arg(evicted.size());
+        << QStringLiteral("Web container: the figure this platform weighs is %1 against a "
+                          "%2 ceiling -- the allowance goes %3 -> %4 page(s), %5 to give "
+                          "up now")
+               .arg(megabytes(weighedBytes), megabytes(m_budget.appCeilingBytes()),
+                    QString::number(allowanceBefore), QString::number(allowanceNow),
+                    QString::number(evicted.size()));
+    if (evicted.isEmpty()) return {};
     applyEvictions(evicted, QStringLiteral("over the app's memory ceiling"));
     return evicted;
 }

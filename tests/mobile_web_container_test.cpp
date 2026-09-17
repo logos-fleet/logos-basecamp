@@ -813,6 +813,35 @@ private slots:
         QVERIFY(backend->hasUiPage("notes_ui"));
     }
 
+    // THE CROSSING IS ANNOUNCED EVEN WHEN NOTHING IS SHED (logos-workspace#244).
+    //
+    // With ONE page live an observation over the ceiling takes nothing away --
+    // one page is the floor -- it only tightens the allowance, and the eviction
+    // that causes happens at the NEXT show(), several lines later. Logged only
+    // on an eviction, the moment the ceiling was crossed left no trace at all,
+    // which is the same failure as the ceiling that could never trip: a device
+    // run cannot tell a policy that acted from one that was never reached.
+    // Measured on a Xiaomi 25028RN03Y with `--web-ceiling 1440` on 2026-09-17:
+    // the figure crossed at the first page and the log said nothing until the
+    // second one was opened.
+    void crossingTheCeilingIsAnnouncedEvenWithNothingToShed()
+    {
+        auto* backend = MobileWebContainerBackend::instance();
+        backend->install(m_runtimeDir, fakePlatform(),
+                         LiveRuntimeBudget(3, LiveRuntimeBudget::kDeviceRuntimeBytes, 1));
+        auto only = load("counter_ui");
+        QSignalSpy backgrounded(backend, &MobileWebContainerBackend::uiEvicted);
+
+        ConsoleLines console;
+        backend->show("counter_ui");
+
+        QCOMPARE(backgrounded.count(), 0);
+        QVERIFY(backend->hasUiPage("counter_ui"));
+        QCOMPARE(backend->budget().liveAllowance(), 1);
+        QVERIFY2(!console.matching(QStringLiteral("the allowance goes")).isEmpty(),
+                 qPrintable(console.joined()));
+    }
+
     // ...and the same container with no ceiling keeps both, which is what says
     // the line above was the ceiling and not something else.
     void insideTheCeilingBothPagesStay()

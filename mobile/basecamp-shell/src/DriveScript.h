@@ -18,10 +18,10 @@ namespace basecamp::shell {
 //   Apps      then the app, opened from the sidebar -- before the Modules tab,
 //             which unloads and reloads a core module underneath it
 //   Packages  the Shell's own chrome, while the Shell still has the window
-//   Catalog   ...and the other page of it: the catalog, read off the screen.
-//             Beside Packages because it is the same kind of claim about the
-//             same kind of page, and ahead of everything that hands the window
-//             away
+//   Catalog   ...and the other page of it: the catalog, read off the screen --
+//             and, with `catalog:install`, PRESSED. Beside Packages because it
+//             is the same kind of claim about the same kind of page, and ahead
+//             of everything that hands the window away
 //   Popups    whether a QtQuick Popup reaches the screen at all, in every scene
 //             the Shell has -- ahead of Keyboard because Keyboard's whole path
 //             runs through two of them, so "the menu is not drawn" is a fact
@@ -86,13 +86,16 @@ enum class DrivePass {
 //     --drive web-input:private-sync            which flow the page pass walks
 //     --drive web-input:seed-import,web-input:private-sync      both, in order
 //     --drive web-input                         the app's first flow, as before
+//     --drive catalog:install                   ...and press the catalog page's
+//                                               own Install control
+//     --drive catalog:install=wallet_ui         that row, of several installable
 //
-// Only `web-input` takes one today, and what its options MEAN is the driver's
-// (WebDriveFlows) rather than this parser's: a flow name that no app carries is
-// refused by the pass that looked for it, beside the names it does have. What
-// belongs here is that an option on a pass that cannot use one is refused
-// rather than silently dropped, for the same reason every other refusal is
-// kept.
+// `web-input` and `catalog` take one today, and what their options MEAN is the
+// driver's (WebDriveFlows, ShellCatalogPageDriver) rather than this parser's: a
+// flow name that no app carries, or a package no catalog offers, is refused by
+// the pass that looked for it, beside the names it does have. What belongs here
+// is that an option on a pass that cannot use one is refused rather than
+// silently dropped, for the same reason every other refusal is kept.
 //
 // THE PASSES THEMSELVES ARE UNCHANGED and print exactly what they printed
 // before: roughly ten issues quote their assertions as on-device evidence

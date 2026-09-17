@@ -19017,6 +19017,32 @@
         "type": "github"
       }
     },
+    "logos-evm-signer-cli": {
+      "inputs": {
+        "keystore_module": [
+          "logos-evm-keystore-module"
+        ],
+        "logos-module-builder": [
+          "logos-module-builder"
+        ],
+        "token_list_module": [
+          "logos-evm-token-list-module"
+        ]
+      },
+      "locked": {
+        "lastModified": 1789643010,
+        "narHash": "sha256-Q6VAJ0zCtTHGm5TtZtICdcbt31sDBvBfKBMXzNflw70=",
+        "owner": "logos-fleet",
+        "repo": "logos-evm-signer-cli",
+        "rev": "042ae0abca9cdfbe5f90f00a538b3ded26c4de94",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-evm-signer-cli",
+        "type": "github"
+      }
+    },
     "logos-evm-token-list-module": {
       "inputs": {
         "logos-module-builder": [
@@ -231914,6 +231940,7 @@
         "logos-evm-fee-module": "logos-evm-fee-module",
         "logos-evm-keystore-module": "logos-evm-keystore-module",
         "logos-evm-railgun-module": "logos-evm-railgun-module",
+        "logos-evm-signer-cli": "logos-evm-signer-cli",
         "logos-evm-token-list-module": "logos-evm-token-list-module",
         "logos-evm-uniswap-module": "logos-evm-uniswap-module",
         "logos-evm-wallet-backend-module": "logos-evm-wallet-backend-module",

@@ -17,6 +17,7 @@
 #include <QJniEnvironment>
 #include <QJniObject>
 #include <QStandardPaths>
+#include <QStringList>
 
 #include <condition_variable>
 #include <memory>
@@ -201,6 +202,103 @@ jlong nextHandle()
 }
 
 } // namespace
+
+// ── #244: THE DEVICE'S OWN LOW-MEMORY LINE, AND WHAT THIS APP CAN SEE ──────
+
+namespace {
+
+// `ActivityManager`, or an invalid object where there is no context yet.
+QJniObject activityManager()
+{
+    QJniObject context = QNativeInterface::QAndroidApplication::context();
+    if (!context.isValid()) return {};
+    QJniObject service = context.callObjectMethod(
+        "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;",
+        QJniObject::fromString(QStringLiteral("activity")).object<jstring>());
+    QJniEnvironment env;
+    if (env.checkAndClearExceptions()) return {};
+    return service;
+}
+
+} // namespace
+
+qint64 deviceLowMemoryBytes()
+{
+    // ANDROID'S OWN ANSWER RATHER THAN A FRACTION. `MemoryInfo.threshold` is
+    // the level of free memory at which the system starts killing background
+    // processes, and it is computed per device -- which is the only way one
+    // policy can be right on both a 2.7 GB phone and a 14.9 GB tablet. Reached
+    // by reflection because it costs no Java source: the class is platform
+    // API, not ours.
+    QJniObject am = activityManager();
+    if (!am.isValid()) return -1;
+    QJniObject info("android/app/ActivityManager$MemoryInfo");
+    if (!info.isValid()) return -1;
+    am.callMethod<void>("getMemoryInfo", "(Landroid/app/ActivityManager$MemoryInfo;)V",
+                        info.object());
+    QJniEnvironment env;
+    if (env.checkAndClearExceptions()) return -1;
+    const jlong threshold = info.getField<jlong>("threshold");
+    return threshold > 0 ? qint64(threshold) : -1;
+}
+
+QString processVisibilityReport()
+{
+    // EVIDENCE, NOT A DECISION (logos-workspace#244). The issue asked whether an
+    // app can weigh its own WebView renderer in-process, because if it can then
+    // reading the DEVICE's book is the wrong design and the renderer's own
+    // figure is the right one. Two documented routes are tried and what each
+    // one answered is printed; the renderer's pid is read from the host side
+    // with `adb shell ps -A -o PID,RSS,NAME` and compared against this line.
+    QStringList said;
+
+    QJniObject am = activityManager();
+    if (am.isValid()) {
+        QJniObject running =
+            am.callObjectMethod("getRunningAppProcesses", "()Ljava/util/List;");
+        QJniEnvironment env;
+        if (env.checkAndClearExceptions() || !running.isValid()) {
+            said << QStringLiteral("getRunningAppProcesses() threw or answered nothing");
+        } else {
+            const jint count = running.callMethod<jint>("size");
+            QStringList names;
+            for (jint i = 0; i < count; ++i) {
+                QJniObject entry =
+                    running.callObjectMethod("get", "(I)Ljava/lang/Object;", i);
+                if (!entry.isValid()) continue;
+                const QString name =
+                    entry.getObjectField<jstring>("processName").toString();
+                names << QStringLiteral("%1(pid %2)")
+                             .arg(name)
+                             .arg(entry.getField<jint>("pid"));
+            }
+            said << QStringLiteral("getRunningAppProcesses() -> %1: %2")
+                        .arg(count)
+                        .arg(names.isEmpty() ? QStringLiteral("(none)")
+                                             : names.join(QStringLiteral(", ")));
+        }
+    } else {
+        said << QStringLiteral("no ActivityManager");
+    }
+
+    // ...AND HOW MUCH OF /proc THIS UID CAN SEE. Android mounts /proc with
+    // hidepid, so an app normally sees only its own pids -- this prints how
+    // many numeric entries are there and which they are, and a renderer that is
+    // absent from BOTH lines is a renderer this process cannot weigh.
+    QStringList pids;
+    for (const QString& entry :
+         QDir(QStringLiteral("/proc")).entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool numeric = false;
+        entry.toInt(&numeric);
+        if (numeric) pids << entry;
+    }
+    said << QStringLiteral("/proc shows %1 pid(s) to this uid: %2")
+                .arg(pids.size())
+                .arg(pids.isEmpty() ? QStringLiteral("(none)")
+                                    : pids.join(QStringLiteral(" ")));
+    said << QStringLiteral("this process is pid %1").arg(QCoreApplication::applicationPid());
+    return said.join(QStringLiteral("; "));
+}
 
 bool watchAppMemoryPressure(std::function<void()> onWarning)
 {

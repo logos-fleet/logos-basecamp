@@ -100,6 +100,38 @@ qint64 deviceAvailableBytes()
 #endif
 }
 
+#if !defined(Q_OS_ANDROID)
+// NO ActivityManager HERE. Android publishes its own low-memory line and every
+// other platform in this file does not -- including plain Linux, where
+// /proc/meminfo answers the two readings above but nothing states the level the
+// system acts at. -1 is "there is no such reading", which
+// LiveRuntimeBudget::ceilingForDeviceInUse answers with a share of the device.
+qint64 deviceLowMemoryBytes()
+{
+    return -1;
+}
+
+QString processVisibilityReport()
+{
+    // The question is Android's: everywhere else either the pages are in this
+    // process (iOS, and appResidentBytes() sees them) or there are no pages.
+    return QStringLiteral("this platform charges a page to the process that opened it");
+}
+#endif
+
+qint64 budgetWeighedBytes()
+{
+    if (!kBudgetWeighsTheDevice) return appResidentBytes();
+
+    // THE DEVICE'S BOOK, because the page is not in this process's. See the
+    // header: a `web` page lives in a Chromium renderer of its own and the only
+    // figure it appears in is how much of the device is in use.
+    const qint64 total = deviceMemoryBytes();
+    const qint64 available = deviceAvailableBytes();
+    if (total <= 0 || available < 0) return -1;
+    return total - available;
+}
+
 #if !defined(Q_OS_IOS) && !defined(Q_OS_ANDROID)
 // EVERY OTHER PLATFORM SAYS SO. A desktop has no memory-warning signal a Qt app
 // can subscribe to, and a container that pretended otherwise would report a
