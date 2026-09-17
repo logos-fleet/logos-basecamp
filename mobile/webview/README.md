@@ -164,13 +164,49 @@ has to be a second instruction. Z-order rather than visibility, for the same
 reason: a background module that is still answering calls needs its timers.
 
 **What the log can and cannot weigh.** `AppMemory` reports this process's
-footprint, and `show()` prints it. The page's own 185–240 MB is NOT in that
-number: both phones run a webview's content in a separate process — WebKit's
-WebContent, Chromium's sandboxed renderer — that an embedder cannot ask about
-(iOS offers no API for another task's footprint, and Android's renderer runs
-under an isolated uid, so its `/proc` is not ours). What a shell controls, and
-what the budget states, is how many pages are alive — so the ceiling above is
-honestly "the app is getting close", never "that page is the problem".
+footprint, and `show()` prints it. The page's own cost — 290–345 MB for the
+first one, measured below — is NOT in that number: both phones run a webview's
+content in a separate process (WebKit's WebContent, Chromium's sandboxed
+renderer) that an embedder cannot ask about — iOS offers no API for another
+task's footprint, and Android's renderer runs under an isolated uid, so its
+`/proc` is not ours. What a shell controls, and what the budget states, is how
+many pages are alive — so the ceiling above is honestly "the app is getting
+close", never "that page is the problem".
+
+**And on Android the app's own figure does not move with the pages at all**
+(logos-workspace#230). Measured on 2026-09-17 with `--drive web-budget
+--web-budget 3`, reading the renderer from the host side with `adb shell ps`:
+
+| device | 0 / 1 / 2 / 3 live runtimes — `appResidentBytes()` | …and the app's Chromium renderer |
+|---|---|---|
+| Xiaomi 25028RN03Y, 2.7 GB | 303 / 435 / 434 / 435 MB | 0 / 290 / 298 / 300 MB |
+| Samsung SM-G990B, 5.2 GB | 254 / 293 / 268 / 271 MB | 0 / 345 / 345 / 348 MB |
+
+Two things follow, and both are about the budget rather than the log:
+
+* **All of a build's pages share ONE renderer process.** The first `web`
+  runtime costs about 290 MB there; the second and third cost about 5 MB each.
+  `budgetBytes()` — `kDeviceRuntimeBytes` times the count — therefore states
+  870 MB for three pages that in fact cost ~300 MB. The constant is right for
+  the first page and wrong as a multiplier.
+* **`appResidentBytes()` carries no per-page signal past the first page**, and
+  on the eviction it carries the wrong sign: a memory warning that shed two
+  pages took the renderer from 348 MB to 283 MB on the Samsung and from 300 MB
+  to 222 MB on the Xiaomi, while the app's own figure went *up* 3 MB and 2 MB.
+  `observe()` is therefore blind on this platform — it is weighing a number the
+  thing it governs does not appear in.
+
+`deviceAvailableBytes()` is the one reading a page does appear in on Android,
+and the pass now prints it as `device free`. It is the DEVICE's book, not the
+app's — every other process is in it too — so it is reported beside the app's
+figure and never instead of it; see `AppMemory.h`.
+
+**A page can be taken away without the budget doing it.** On the Xiaomi, two
+runs holding two live pages through a 60-second idle wait had the shared
+renderer reaped (`onServiceDisconnected (crash or killed by oom)`, both pages
+lost at once) with `MemAvailable` still at 1.24 GB and the app 500 MB under its
+ceiling. `forget()` is what keeps the books straight when that happens; nothing
+in the budget saw it coming.
 
 **Known limit, and it is the artifact's.** A `ui_qml` module's `web` variant
 today is ONE page carrying both the QML runtime and the module's own Qt-wasm

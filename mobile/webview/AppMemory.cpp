@@ -12,6 +12,36 @@
 
 namespace basecamp::web {
 
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+namespace {
+
+// ONE FIELD OUT OF /proc/meminfo, in bytes, or -1 when it is not there.
+//
+// READ UNTIL readLine() RETURNS NOTHING, never `atEnd()`. A file in /proc
+// reports a SIZE OF ZERO, so QFile::atEnd() is true before a single byte has
+// been read and a loop written the obvious way reads nothing at all --
+// measured on the Samsung SM-G990B on 2026-09-16, where deviceMemoryBytes()
+// answered -1 and the Shell ran the whole session with no ceiling and the
+// fallback count of one.
+qint64 meminfoBytes(const char* field)
+{
+    QFile meminfo(QStringLiteral("/proc/meminfo"));
+    if (!meminfo.open(QIODevice::ReadOnly)) return -1;
+    const QByteArray wanted = QByteArray(field) + ':';
+    for (QByteArray line = meminfo.readLine(); !line.isEmpty(); line = meminfo.readLine()) {
+        if (!line.startsWith(wanted)) continue;
+        const QList<QByteArray> fields = line.simplified().split(' ');
+        if (fields.size() < 2) return -1;
+        bool ok = false;
+        const qlonglong kb = fields.at(1).toLongLong(&ok);
+        return ok ? qint64(kb) * 1024 : -1;
+    }
+    return -1;
+}
+
+} // namespace
+#endif
+
 qint64 appResidentBytes()
 {
 #if defined(Q_OS_DARWIN)
@@ -48,26 +78,24 @@ qint64 deviceMemoryBytes()
     // MemTotal rather than `_SC_PHYS_PAGES`: on Android the two differ (the
     // kernel's own reservations are already out of MemTotal), and MemTotal is
     // the figure every other tool on the device reports.
-    //
-    // READ UNTIL readLine() RETURNS NOTHING, never `atEnd()`. A file in /proc
-    // reports a SIZE OF ZERO, so QFile::atEnd() is true before a single byte
-    // has been read and a loop written the obvious way reads nothing at all --
-    // measured on the Samsung SM-G990B on 2026-09-16, where this answered -1
-    // and the Shell ran the whole session with no ceiling and the fallback
-    // count of one. The statm read above is not affected because it never
-    // asks.
-    QFile meminfo(QStringLiteral("/proc/meminfo"));
-    if (!meminfo.open(QIODevice::ReadOnly)) return -1;
-    for (QByteArray line = meminfo.readLine(); !line.isEmpty(); line = meminfo.readLine()) {
-        if (!line.startsWith("MemTotal:")) continue;
-        const QList<QByteArray> fields = line.simplified().split(' ');
-        if (fields.size() < 2) return -1;
-        bool ok = false;
-        const qlonglong kb = fields.at(1).toLongLong(&ok);
-        return ok ? qint64(kb) * 1024 : -1;
-    }
-    return -1;
+    return meminfoBytes("MemTotal");
 #else
+    return -1;
+#endif
+}
+
+qint64 deviceAvailableBytes()
+{
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+    // MemAvailable rather than MemFree: free memory on a phone is a handful of
+    // MB by design, because the kernel spends the rest on page cache it will
+    // hand back on demand. MemAvailable is the kernel's own estimate of what a
+    // new allocation could actually get, which is the question being asked.
+    return meminfoBytes("MemAvailable");
+#else
+    // See the header: iOS publishes no device-wide free figure to an app, and
+    // inventing one out of hw.memsize would be a guess wearing a measurement's
+    // clothes.
     return -1;
 #endif
 }

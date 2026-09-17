@@ -55,9 +55,13 @@ public:
     void run();
 
 private:
-    // The `web` modules the sidebar carries a tile for -- the ones a user could
-    // open, which is the set this measures.
+    // The `web` modules the sidebar carries a tile for.
     QStringList tiledWebApps() const;
+    // ...and the ones of those the container actually has a page for, which is
+    // the set this measures. A tile whose module refused to load is named and
+    // left out rather than pressed: see the definition for what pressing it
+    // cost (#230).
+    QStringList openableWebApps();
     // The shipped modules outside the Bundled set that have no page yet -- what
     // loadShippedWebModules() is about to ask for, and the answer to whether
     // there is anything to wait on.
