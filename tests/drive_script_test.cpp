@@ -266,6 +266,41 @@ private slots:
         QCOMPARE(s.optionsFor(DrivePass::WebInput), QStringList{ "kitchen-sink" });
     }
 
+    // THE CATALOG PAGE TAKES ONE TOO (logos-workspace#249). `--drive catalog`
+    // READS the page; `--drive catalog:install` PRESSES it. The two were one
+    // pass with one behaviour, and the behaviour was the harmless half: every
+    // automated proof that installing works drove `--install`, which is
+    // ShellCatalogDriver and a different route through the App Manager, so the
+    // user-facing control was the one thing nothing ever pressed -- and it had
+    // been inert for days before an operator found it by hand.
+    void theCatalogPassTakesAnInstallOption()
+    {
+        const DriveScript s = parse({ "--drive", "catalog:install" });
+        QVERIFY(s.refusals().isEmpty());
+        QVERIFY(s.wants(DrivePass::Catalog));
+        QCOMPARE(s.optionsFor(DrivePass::Catalog), QStringList{ "install" });
+        QCOMPARE(s.passes(), QStringList{ "catalog:install" });
+
+        // ...and it may name the row, for a catalog with several installable
+        // ones. The option half is not this parser's vocabulary, same as a flow
+        // name: the driver refuses a package the catalog does not offer, beside
+        // the ones it does.
+        const DriveScript named = parse({ "--drive", "catalog:install=wallet_ui" });
+        QVERIFY(named.refusals().isEmpty());
+        QCOMPARE(named.optionsFor(DrivePass::Catalog),
+                 QStringList{ "install=wallet_ui" });
+    }
+
+    // THE COMPATIBILITY CONTRACT, for the pass that just grew an option: a bare
+    // `--drive catalog` still reads the page and presses nothing, which is what
+    // roughly a dozen issues quote as `CATALOG PAGE OK: … offered for install`.
+    void aBareCatalogPassAsksForNoInstall()
+    {
+        QVERIFY(parse({ "--drive", "catalog" }).optionsFor(DrivePass::Catalog).isEmpty());
+        QVERIFY(parse({ "--drive", "all" }).optionsFor(DrivePass::Catalog).isEmpty());
+        QCOMPARE(parse({ "--drive", "catalog" }).passes(), QStringList{ "catalog" });
+    }
+
     // A name written the way a person writes it. The vocabulary is closed, so
     // there is nothing a case or a space could otherwise have meant.
     void aNameIsTrimmedAndCaseInsensitive()

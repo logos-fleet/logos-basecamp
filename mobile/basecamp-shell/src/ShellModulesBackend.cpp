@@ -691,13 +691,34 @@ void ShellModulesBackend::addRepository(const QString& url)
     // Manager at all -- and on a phone the only way to do it is from outside
     // (CatalogSource), so a stub here would be a stub in the one path that
     // matters.
+    //
+    // AND IT ANSWERS. `repositoryOperationCompleted` is what the shared shell's
+    // repository pane waits for (ContentViews.qml -> reportRepositoryResult),
+    // and until logos-workspace#249 this class did not declare it -- so every
+    // repository the Shell was asked to add succeeded or failed into a console
+    // line and the pane that asked heard nothing either way.
     QString error;
     if (!m_storeBackend->addRepository(url, &error)) {
         emit log(QStringLiteral("app manager: cannot add repository %1: %2").arg(url, error));
+        emit repositoryOperationCompleted(QStringLiteral("add"), url, false, error);
         return;
     }
     emit log(QStringLiteral("app manager: repository %1 added").arg(url));
+    emit repositoryOperationCompleted(QStringLiteral("add"), url, true, QString());
     emit repositoriesChanged();
 }
-void ShellModulesBackend::removeRepository(const QString&)     { emit log(notHere("repositories")); }
-void ShellModulesBackend::setRepositoryEnabled(const QString&, bool) { emit log(notHere("repositories")); }
+// REFUSED, AND SAID SO TO THE PANE. A refusal that only reaches the console
+// leaves a control that spins for ever; the sentence is the same one the log
+// carries, because there is only one reason and it is not per-caller.
+void ShellModulesBackend::removeRepository(const QString& url)
+{
+    const QString why = notHere("repositories");
+    emit log(why);
+    emit repositoryOperationCompleted(QStringLiteral("remove"), url, false, why);
+}
+void ShellModulesBackend::setRepositoryEnabled(const QString& url, bool)
+{
+    const QString why = notHere("repositories");
+    emit log(why);
+    emit repositoryOperationCompleted(QStringLiteral("setEnabled"), url, false, why);
+}

@@ -455,8 +455,14 @@ int main(int argc, char* argv[])
         // Shell still has the window. It leaves the user on the Applications
         // section, which the pass after it does not care about and
         // finishOnTheApp() puts right.
+        // WITH ITS OPTIONS, if the run named any: `catalog` reads the page,
+        // `catalog:install` also presses its Install control and walks the
+        // signer gate behind it (logos-workspace#249). The press is the one
+        // route through this flow nothing drove -- `--install` goes through
+        // ShellCatalogDriver, which approves the signer in C++ and never
+        // touches the page.
         if (drive.wants(DrivePass::Catalog))
-            catalogPage->run();
+            catalogPage->run(drive.optionsFor(DrivePass::Catalog));
         // AND THE KEYBOARD, last of the passes that press the Shell's own
         // scene and still ahead of the web app. Both ends of that are about
         // what a pass leaves behind. It goes AFTER the package-manager section
