@@ -341,7 +341,15 @@ QStringList MobileWebContainerBackend::show(const QString& moduleName)
                              .arg(moduleName, budgetLine());
     qInfo().noquote() << appMemoryLine(QStringLiteral("with %1 visible").arg(moduleName));
 
-    applyEvictions(evicted, QStringLiteral("over budget"));
+    // WHY, NOT JUST THAT (#244). show() trims to the ALLOWANCE, which is the
+    // device's count until a measurement or an OS warning tightens it -- so an
+    // eviction here can have been caused by something that happened minutes
+    // ago and several log lines up. A run that has just put the ceiling where
+    // this device crosses it has to be able to read that off the line.
+    applyEvictions(evicted,
+                   m_budget.liveAllowance() < m_budget.maxLiveRuntimes()
+                       ? QStringLiteral("over the allowance a measurement or a warning left")
+                       : QStringLiteral("over budget"));
 
     // ...AND WHAT THE APP WEIGHS, which is the half #153 is about: the count
     // says how many pages MAY live and the measurement says whether this device
