@@ -45,6 +45,23 @@ int statedRuntimeCount(const QStringList& args)
     return stated && asked > 0 ? asked : 0;
 }
 
+// THE CEILING THIS RUN ASKED FOR, in bytes, or 0 when it asked for nothing and
+// the policy should answer instead. Stated in MEGABYTES, because that is the
+// unit every memory line in this container is printed in and a device run
+// types it off the pass's own output.
+qint64 statedCeilingBytes(const QStringList& args)
+{
+    const int flag = args.indexOf(QStringLiteral("--web-ceiling"));
+    if (flag >= 0 && flag + 1 < args.size()) {
+        bool isNumber = false;
+        const qint64 asked = args.at(flag + 1).toLongLong(&isNumber);
+        if (isNumber) return asked > 0 ? asked * 1024 * 1024 : 0;
+    }
+    bool stated = false;
+    const int asked = qEnvironmentVariableIntValue("LOGOS_WEB_APP_CEILING_MB", &stated);
+    return stated && asked > 0 ? qint64(asked) * 1024 * 1024 : 0;
+}
+
 } // namespace
 
 int LiveRuntimeBudget::runtimesForDeviceMemory(qint64 deviceMemoryBytes,
@@ -97,12 +114,23 @@ LiveRuntimeBudget LiveRuntimeBudget::forThisDevice(const QStringList& args)
     // it was handed, so the only place the two halves can be kept together is
     // here, where both are chosen at once.
 #if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
-    const qint64 ceiling =
+    const qint64 fromDevice =
         ceilingForDeviceInUse(device, deviceLowMemoryBytes(), kDeviceRuntimeBytes);
 #else
-    const qint64 ceiling = ceilingForDeviceMemory(device);
+    const qint64 fromDevice = ceilingForDeviceMemory(device);
 #endif
-    return LiveRuntimeBudget(runtimes, kDeviceRuntimeBytes, ceiling);
+
+    // ...AND A RUN CAN STATE THE CEILING TOO, for the same reason it can state
+    // the count (#244). A ceiling that cannot be reached is indistinguishable
+    // from one that never needed to be, and that is how #153's unreachable
+    // branch survived a full landing -- so a device run has to be able to put
+    // the ceiling where the device will cross it and watch the eviction
+    // happen. It is stated in MB against whatever frame this platform weighs:
+    // `--web-ceiling 1400` on a phone that idles with 1318 MB in use is one
+    // page's worth above the resting figure.
+    const qint64 stated_ceiling = statedCeilingBytes(args);
+    return LiveRuntimeBudget(runtimes, kDeviceRuntimeBytes,
+                             stated_ceiling > 0 ? stated_ceiling : fromDevice);
 }
 
 LiveRuntimeBudget::LiveRuntimeBudget(int maxLiveRuntimes, qint64 runtimeFootprintBytes,

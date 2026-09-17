@@ -121,7 +121,12 @@ simulator makes the same point loudly — it reports the Mac's 64 GB.
 
 A run states its own count with `--web-budget <n>` (or
 `LOGOS_WEB_RUNTIME_BUDGET`), which is what the `--drive web-budget` pass uses to
-measure what two and three live runtimes cost on a device whose policy says one.
+measure what two and three live runtimes cost on a device whose policy says one,
+and its own ceiling with `--web-ceiling <MB>` (or `LOGOS_WEB_APP_CEILING_MB`),
+which is how a device run makes the ceiling TRIP — put it a page's worth above
+what the pass prints at rest and the next page is shed on weight alone. A
+ceiling nobody has ever seen trip is indistinguishable from one that never
+needed to, which is how logos-workspace#244 survived a landing.
 
 **And the measurement is read.** Two entry points, both ending in the same
 eviction the count makes:

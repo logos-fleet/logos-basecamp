@@ -285,6 +285,23 @@ private slots:
                  LiveRuntimeBudget::runtimesForDeviceMemory(basecamp::web::deviceMemoryBytes()));
     }
 
+    void aRunCanStateTheCeilingOnTheCommandLine()
+    {
+        // #244: A CEILING THAT CANNOT BE REACHED IS INDISTINGUISHABLE FROM ONE
+        // THAT NEVER NEEDED TO BE, and that is how #153's unreachable branch
+        // survived a landing. A device run puts the ceiling where the device
+        // will cross it, exactly as it states the count.
+        const LiveRuntimeBudget budget = LiveRuntimeBudget::forThisDevice(
+            QStringList{ "basecamp-shell", "--web-budget", "3", "--web-ceiling", "1400" });
+        QCOMPARE(budget.appCeilingBytes(), 1400LL * 1024 * 1024);
+
+        // Nothing usable after the flag is not a ceiling of zero: the platform
+        // answers, exactly as it does when nobody said anything.
+        const LiveRuntimeBudget ignored =
+            LiveRuntimeBudget::forThisDevice(QStringList{ "basecamp-shell", "--web-ceiling" });
+        QCOMPARE(ignored.appCeilingBytes(), LiveRuntimeBudget::forThisDevice().appCeilingBytes());
+    }
+
     void aHostCanStateTheBudgetItself()
     {
         // The measurement is the default, not a law: a host that knows better

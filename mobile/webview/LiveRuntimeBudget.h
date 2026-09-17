@@ -169,6 +169,13 @@ public:
     // flag because there is no environment to speak of on a phone: an APK's
     // process inherits nothing a developer typed, while the launcher forwards
     // arguments on both platforms.
+    //
+    // ...AND SO CAN THE CEILING, `--web-ceiling <MB>` or
+    // `LOGOS_WEB_APP_CEILING_MB` (#244). A ceiling that cannot be reached is
+    // indistinguishable from one that never needed to be, which is exactly how
+    // #153's unreachable branch survived a landing: a run has to be able to put
+    // the ceiling where this device will cross it and watch the eviction it
+    // causes. Stated in MB, against whatever frame this platform weighs.
     static LiveRuntimeBudget forThisDevice(const QStringList& args = {});
 
     // One runtime is the DEFAULT still, and deliberately: a host that states no
