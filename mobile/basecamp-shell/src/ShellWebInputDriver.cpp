@@ -200,7 +200,8 @@ bool ShellWebInputDriver::walk(const WebDriveFlow& flow)
 
     // WHERE THE NEXT STEP STARTS READING. One cursor for the whole flow: a step
     // reads the lines the step before it left, and nothing is read twice.
-    int cursor = m_pageLines.size();
+    const int flowStart = m_pageLines.size();
+    int cursor = flowStart;
 
     // WHAT THE PAGE OFFERS, BEFORE ANYTHING IS PRESSED. It is the line that
     // separates the two failures below from each other: a step that finds no
@@ -226,7 +227,7 @@ bool ShellWebInputDriver::walk(const WebDriveFlow& flow)
 
         if (step.act == WebDriveStep::Act::Await) {
             WebPageWatcher watcher(step.watch);
-            int watchFrom = before;
+            int watchFrom = step.watch.overTheWholeFlow ? flowStart : before;
             if (!watch(watcher, step.watch.budgetMs, watchFrom)) {
                 emit log(watcher.linesSeen() == 0
                              ? QStringLiteral("WRONG: %1 never published a '%2' line, so there "
@@ -240,7 +241,11 @@ bool ShellWebInputDriver::walk(const WebDriveFlow& flow)
                                         watcher.baseline()));
                 return false;
             }
-            cursor = watchFrom;
+            // A whole-flow watch is a SCAN of what already happened, so it
+            // must not drag the cursor back over lines the steps after it will
+            // read.
+            if (!step.watch.overTheWholeFlow)
+                cursor = watchFrom;
             emit log(QStringLiteral("web input: %1 published %2 -- %3 = %4")
                          .arg(flow.app, step.watch.what, step.watch.field, watcher.reading()));
             continue;

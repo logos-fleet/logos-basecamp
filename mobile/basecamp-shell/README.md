@@ -650,15 +650,15 @@ on one is the reading, and what the reading has to do.
 presses `Private`, `Check`, `Sync now` and `Cancel`, and asserts:
 
 ```
-[shell] wallet_ui page [log]: [wallet_ui web] private sync idle:
-        {"targetBlock":11721332,"percent":0,…}
 [shell] web input: wallet_ui published the distance to the chain head --
-        targetBlock = 11721332
+        targetBlock = 11721544
 [shell] web input: pressed wallet_ui's 'Sync now'
-[shell] web input: wallet_ui published a percentage that moved -- percent = 43
+[shell] web input: wallet_ui published a walk that started -- state = running
 [shell] web input: pressed wallet_ui's 'Cancel'
 [shell] web input: wallet_ui published the block the cancelled walk kept --
-        keptToBlock = 11720700
+        keptToBlock = 11721544
+[shell] web input: wallet_ui published a percentage that moved while the walk
+        ran -- percent = 100
 [shell] THE WALLET'S PRIVATE SYNC RUNS AND CAN BE LEFT, from inside the app:
         wallet_ui's 'private-sync' flow, every step from inside the app
 ```
@@ -668,6 +668,20 @@ presses `Private`, `Check`, `Sync now` and `Cancel`, and asserts:
 proves the button was pressed and nothing about the walk. So the percentage
 step takes the first reading as a baseline and waits for one that differs from
 it.
+
+**Why the Cancel comes before the movement.** A device measured it: on an iPad
+Air 13-inch (M2) simulator against public Sepolia, the whole 11.7 M-block cold
+sync is **3.7 s and two windows** — the subsquid frontier in one and a
+1 300-block tail in the other — so the page publishes `running` at 0 % and
+`done` at 100 % with nothing in between. Waiting for a moved percentage first
+waits for a walk that has already finished, and then presses a Cancel the view
+has disabled. Pressing it while the window is in flight works on a device where
+the walk is seconds and on one where it is minutes: `railgun_module` is
+`concurrency: single`, so the cancel queues behind the window and the wallet
+checks the cancel flag before the `done` flag when the window lands. The
+movement is then read over the WHOLE flow (`overTheWholeFlow`), because on the
+fast device every line that carried it — the `cancelled:` line's own `percent`
+included — was published inside those 3.7 s.
 
 The `keptToBlock` assertion is the one a human looking at the screen would not
 make: a cancel that publishes `state: "cancelled"` and keeps no block has

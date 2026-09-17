@@ -16,16 +16,19 @@ namespace {
 // pointed at, over a phone's radio, and the wallet retries a refusal by the
 // core's admission race six times at 500 ms (#235). 30 s covers both.
 constexpr int kStatusBudgetMs = 30000;
-// A window of the accumulator walk. The wallet asks for 25 000 blocks or 5 s,
-// whichever comes first, and the FIRST window of a cold sync takes everything
-// up to the subsquid frontier in one go -- 8 s against public Sepolia on an
-// M2 simulator, and longer on a handset's radio. Three minutes is several
-// windows' worth on the slowest of those, and a percentage that has not moved
-// by then has not moved.
-constexpr int kSyncMoveBudgetMs = 180000;
-// A cancel lands after the window already in flight, which is bounded by the
-// 5 s budget the wallet asked for plus one round trip.
-constexpr int kCancelBudgetMs = 60000;
+// The wallet publishing `running` is synchronous with the press -- it is the
+// line `startPrivateSync` writes before it asks for the first window -- so this
+// is a page round trip and not a chain walk.
+constexpr int kAcceptedBudgetMs = 30000;
+// A CANCEL LANDS AFTER THE WINDOW ALREADY IN FLIGHT, and that window is the
+// expensive one: `sync_step` takes everything up to the subsquid frontier in a
+// single window however far away it is. Measured 3.7 s for the whole 11.7 M
+// block Sepolia history on an M2 simulator, and minutes on a handset's radio
+// against a chain with more in it. Three minutes covers both.
+constexpr int kCancelBudgetMs = 180000;
+// ...and by then every line is already in hand, because this watch reads the
+// whole flow. It is a scan of what happened, not a wait.
+constexpr int kSyncMoveBudgetMs = 30000;
 
 // wallet_ui's Advanced-tab seed import: the flow logos-workspace#147 could not
 // verify on a device and the reason #174 was split out of it.
@@ -76,16 +79,34 @@ WebDriveFlow seedImport()
 // container forwards to the app's log. So the walk is asserted from what the
 // WALLET said about it.
 //
-// THE THREE THINGS IT PROVES, in the order they can be proved:
+// THE FOUR THINGS IT PROVES:
 //   * the tab answers at all -- `Check` is one `eth_blockNumber` and the page
 //     publishes a real distance to the chain head for it;
-//   * the walk RUNS -- a `running:` line whose percentage has moved off the one
-//     `startPrivateSync` published before it asked for a window;
+//   * the walk was ACCEPTED -- `startPrivateSync` published `running`, which is
+//     also what enables the Cancel button;
 //   * the cancel LEAVES SOMETHING -- `state: "cancelled"` carrying
-//     `keptToBlock`. That last one is the resume contract and the one thing a
-//     human looking at the screen would not notice: a cancel that keeps no
-//     block has thrown away the walk it just paid minutes for, and the page
-//     looks exactly the same either way.
+//     `keptToBlock`. That is the resume contract and the one thing a human
+//     looking at the screen would not notice: a cancel that keeps no block has
+//     thrown away the walk it just paid minutes for, and the page looks exactly
+//     the same either way;
+//   * and the percentage MOVED while it ran.
+//
+// THE CANCEL IS PRESSED THE MOMENT THE WALK IS ACCEPTED, and the movement is
+// asserted after it rather than before. That order is not a preference, it is
+// what a device measured: on an iPad Air 13-inch (M2) simulator against public
+// Sepolia the whole 11.7 M-block cold sync is 3.7 s and TWO windows -- the
+// subsquid frontier in one and a 1 300-block tail in the other -- so the page
+// publishes `running` at 0 % and `done` at 100 % with nothing in between.
+// Waiting for a moved percentage BEFORE pressing Cancel therefore waits for a
+// walk that has already finished, and then presses a Cancel the view has
+// disabled. Pressing it while the window is in flight works on both a device
+// where the walk is seconds and one where it is minutes: `railgun_module` is
+// `concurrency: single`, so the cancel queues behind the window and the wallet
+// checks the cancel flag BEFORE the `done` flag when the window lands.
+//
+// The movement is then read over the WHOLE flow (`overTheWholeFlow`), because
+// on the fast device every line that carried it -- including the `cancelled:`
+// line's own `percent` -- is published inside those 3.7 s.
 WebDriveFlow privateSync()
 {
     WebDriveFlow flow;
@@ -104,12 +125,12 @@ WebDriveFlow privateSync()
     distance.budgetMs = kStatusBudgetMs;
     distance.what = QStringLiteral("the distance to the chain head");
 
-    WebPageWatch moved;
-    moved.marker = QStringLiteral("private sync running:");
-    moved.field = QStringLiteral("percent");
-    moved.want = WebPageWatch::Want::Moved;
-    moved.budgetMs = kSyncMoveBudgetMs;
-    moved.what = QStringLiteral("a percentage that moved");
+    WebPageWatch accepted;
+    accepted.marker = QStringLiteral("private sync running:");
+    accepted.field = QStringLiteral("state");
+    accepted.want = WebPageWatch::Want::Present;
+    accepted.budgetMs = kAcceptedBudgetMs;
+    accepted.what = QStringLiteral("a walk that started");
 
     WebPageWatch kept;
     kept.marker = QStringLiteral("private sync cancelled:");
@@ -117,6 +138,17 @@ WebDriveFlow privateSync()
     kept.want = WebPageWatch::Want::Present;
     kept.budgetMs = kCancelBudgetMs;
     kept.what = QStringLiteral("the block the cancelled walk kept");
+
+    WebPageWatch moved;
+    // EVERY STATE'S LINE, because the number this is about is one PROP and the
+    // state beside it is not what moved it. On the fast device the reading that
+    // settles this is the `cancelled:` line's own `percent`.
+    moved.marker = QStringLiteral("private sync ");
+    moved.field = QStringLiteral("percent");
+    moved.want = WebPageWatch::Want::Moved;
+    moved.overTheWholeFlow = true;
+    moved.budgetMs = kSyncMoveBudgetMs;
+    moved.what = QStringLiteral("a percentage that moved while the walk ran");
 
     flow.steps = {
         WebDriveStep::press(QStringLiteral("Private")),
@@ -128,9 +160,10 @@ WebDriveFlow privateSync()
         WebDriveStep::press(QStringLiteral("Check")),
         WebDriveStep::await(distance),
         WebDriveStep::press(QStringLiteral("Sync now")),
-        WebDriveStep::await(moved),
+        WebDriveStep::await(accepted),
         WebDriveStep::press(QStringLiteral("Cancel")),
         WebDriveStep::await(kept),
+        WebDriveStep::await(moved),
     };
     return flow;
 }

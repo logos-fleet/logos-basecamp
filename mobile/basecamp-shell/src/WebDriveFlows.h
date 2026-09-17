@@ -59,6 +59,16 @@ struct WebPageWatch {
         Moved,    // ...and a later reading differs from the first one seen
     };
     Want want = Want::Present;
+    // READ THE WHOLE FLOW'S LINES, not just the ones since the step before.
+    //
+    // For a `Moved` watch this is usually what is meant and is sometimes the
+    // ONLY thing that can be meant: the wallet's private sync is over in four
+    // seconds on a simulator against public Sepolia, so by the time the cancel
+    // this flow presses has landed, every line that carried the movement is
+    // already behind the cursor. A watch that asks "did this number move while
+    // the walk ran" has to be allowed to look at the walk, not at what came
+    // after it.
+    bool overTheWholeFlow = false;
     // How long this step gets. An `Await` waits on a MODULE doing work rather
     // than on a page answering a script, so the budgets here are the module's
     // and are written at each flow.

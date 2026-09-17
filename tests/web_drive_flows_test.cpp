@@ -85,10 +85,10 @@ private slots:
                                       QStringLiteral("kitchen-sink")).isEmpty());
     }
 
-    // The Private flow is the issue's assertion list, in order: press Private,
-    // ask for the distance, start the walk, wait for a percentage that MOVED,
-    // cancel, and require the block the cancel kept.
-    void thePrivateFlowPressesStartsWaitsAndCancels()
+    // The Private flow is the issue's assertion list: press Private, ask for
+    // the distance, start the walk, cancel it, require the block the cancel
+    // kept and a percentage that MOVED.
+    void thePrivateFlowPressesStartsCancelsAndAsserts()
     {
         const WebDriveFlow flow =
             WebDriveFlows::select(QStringLiteral("wallet_ui"), QStringLiteral("private-sync"));
@@ -100,11 +100,11 @@ private slots:
                 awaited << step.watch.marker + step.watch.field;
         }
         QCOMPARE(pressed, (QStringList{ "Private", "Check", "Sync now", "Cancel" }));
-        QCOMPARE(awaited.size(), 3);
+        QCOMPARE(awaited.size(), 4);
         QVERIFY(awaited.at(1).contains(QLatin1String("private sync running:")));
-        QVERIFY(awaited.at(1).contains(QLatin1String("percent")));
         QVERIFY(awaited.at(2).contains(QLatin1String("private sync cancelled:")));
         QVERIFY(awaited.at(2).contains(QLatin1String("keptToBlock")));
+        QVERIFY(awaited.at(3).contains(QLatin1String("percent")));
 
         // ...and the percentage step is the MOVED one. A `Present` there would
         // pass on the line the wallet publishes before the first window.
@@ -113,6 +113,32 @@ private slots:
             if (step.watch.field == QLatin1String("percent"))
                 QCOMPARE(step.watch.want, WebPageWatch::Want::Moved);
         }
+    }
+
+    // THE CANCEL IS PRESSED BEFORE THE MOVEMENT IS ASSERTED, and that order is
+    // what a device measured: the whole cold Sepolia sync is 3.7 s on an M2
+    // simulator, so waiting for a moved percentage first waits for a walk that
+    // has already finished and then presses a Cancel the view has disabled.
+    void theCancelIsPressedBeforeTheMovementIsAsserted()
+    {
+        const WebDriveFlow flow =
+            WebDriveFlows::select(QStringLiteral("wallet_ui"), QStringLiteral("private-sync"));
+        int cancelAt = -1;
+        int movedAt = -1;
+        for (int i = 0; i < flow.steps.size(); ++i) {
+            const WebDriveStep& step = flow.steps.at(i);
+            if (step.act == WebDriveStep::Act::Press
+                && step.control == QLatin1String("Cancel"))
+                cancelAt = i;
+            if (step.act == WebDriveStep::Act::Await
+                && step.watch.want == WebPageWatch::Want::Moved)
+                movedAt = i;
+        }
+        QVERIFY(cancelAt >= 0);
+        QVERIFY(movedAt > cancelAt);
+        // ...so the movement has to be read over the whole flow: by then every
+        // line that carried it is behind the cursor.
+        QVERIFY(flow.steps.at(movedAt).watch.overTheWholeFlow);
     }
 
     // Every Await has a budget, because a step with none waits forever on a
@@ -228,6 +254,32 @@ private slots:
             QStringLiteral("cancelled"),
             QStringLiteral(R"({"cancelled":true,"keptToBlock":11720700,"state":"cancelled"})"))));
         QCOMPARE(watcher.reading(), QStringLiteral("11720700"));
+    }
+
+    // WHAT THE FAST DEVICE ACTUALLY PUBLISHES. `running` at 0 %, and then --
+    // because the cancel landed before the window did -- `cancelled` at 100 %
+    // with the block it kept. The movement watch reads every state's line, so
+    // that `cancelled:` line is what settles it.
+    void theCancelledLineCanBeTheMovement()
+    {
+        WebPageWatch watch;
+        watch.marker = QStringLiteral("private sync ");
+        watch.field = QStringLiteral("percent");
+        watch.want = WebPageWatch::Want::Moved;
+        WebPageWatcher watcher(watch);
+
+        // The wallet's first publication carries no plan at all.
+        QVERIFY(!watcher.offer(publication(
+            QStringLiteral("idle"),
+            QStringLiteral(R"({"leg":"sync","note":"Not checked yet.","state":"idle"})"))));
+        QVERIFY(!watcher.offer(publication(QStringLiteral("idle"),
+                                           QStringLiteral(R"({"percent":0})"))));
+        QVERIFY(!watcher.offer(publication(QStringLiteral("running"),
+                                           QStringLiteral(R"({"percent":0})"))));
+        QVERIFY(watcher.offer(publication(
+            QStringLiteral("cancelled"),
+            QStringLiteral(R"({"percent":100,"keptToBlock":11721544})"))));
+        QCOMPARE(watcher.reading(), QStringLiteral("100"));
     }
 
     // A settled watch stays settled, so a driver may keep offering lines
