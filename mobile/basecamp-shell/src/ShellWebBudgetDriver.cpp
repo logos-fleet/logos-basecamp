@@ -156,8 +156,10 @@ void ShellWebBudgetDriver::weigh(const QString& occasion)
 
 // HOW MUCH THE FIGURE IS ALLOWED TO WANDER BETWEEN TWO READINGS before a
 // direction is claimed from it. On Android the figure is the whole device's, so
-// another process starting is in it; 32 MB is under a tenth of what one
-// renderer costs and well over the drift seen across a settled pass.
+// every other process's allocations are in it; 32 MB is a tenth of what one
+// renderer costs, and the drift measured across a settled pass on the venue's
+// two Android devices was up to 62 MB on the 14.9 GB tablet -- which is why the
+// only step this allowance guards is the one whose signal is 250 MB or more.
 static constexpr qint64 kFigureNoiseBytes = 32LL * 1024 * 1024;
 
 void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, int pagesShed)
@@ -191,18 +193,44 @@ void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, in
                           megabytes(LiveRuntimeBudget::kDeviceRuntimeBytes)));
     }
 
-    // TWO: IT MUST NOT GO BACKWARDS AS PAGES ARE ADDED. Past the first page the
-    // steps are small -- the pages share one renderer -- so this is a
-    // no-worse-than check with the noise allowance, not a strict ordering.
+    // TWO: THE STEPS, REPORTED RATHER THAN ASSERTED PAST THE FIRST ONE.
+    //
+    // #244 asks for the figure to move monotonically with the page count, and
+    // the FIRST step is the one that can carry that: a renderer starting is
+    // ~290 MB and dwarfs anything else on the device. Past it there is nothing
+    // to be monotonic about -- #230 weighed every page of a build into ONE
+    // renderer, so pages two and three cost ~5 MB each, which is under the
+    // noise floor of a figure the whole device is in. Measured on the venue's
+    // Lenovo TB520FU (14.9 GB) on 2026-09-17: going from one live runtime to
+    // two took the figure DOWN 62 MB while nothing had shed anything, because
+    // some other process gave memory back in the same four seconds. Asserting
+    // there would be asserting a physical claim this container's own
+    // measurements contradict, so the steps are printed and the verdict is
+    // carried by the two checks that are not noise-bound.
+    QStringList steps;
     for (int i = 1; i < m_weighed.size(); ++i) {
         if (m_weighed.at(i).first <= m_weighed.at(i - 1).first) continue;
         const qint64 step = m_weighed.at(i).second - m_weighed.at(i - 1).second;
-        if (step >= -kFigureNoiseBytes) continue;
-        emit log(QStringLiteral("WRONG: going from %1 to %2 live runtime(s) took the weighed "
-                                "figure DOWN by %3")
-                     .arg(QString::number(m_weighed.at(i - 1).first),
-                          QString::number(m_weighed.at(i).first), megabytes(-step)));
+        const QString entry = QStringLiteral("%1->%2 runtime(s) %3%4")
+                                  .arg(QString::number(m_weighed.at(i - 1).first),
+                                       QString::number(m_weighed.at(i).first),
+                                       step < 0 ? QString() : QStringLiteral("+"),
+                                       megabytes(step));
+        steps << entry;
+        if (i != 1) continue;
+        // THE FIRST STEP IS ASSERTED. It is a whole renderer; a figure that a
+        // renderer starting does not move up is blind whatever else it does.
+        if (step < floor)
+            emit log(QStringLiteral("WRONG: the first live runtime moved the weighed figure "
+                                    "by only %1 -- a renderer costs about %2")
+                         .arg(megabytes(step),
+                              megabytes(LiveRuntimeBudget::kDeviceRuntimeBytes)));
     }
+    emit log(QStringLiteral("web budget: the weighed figure, page by page: %1 (the pages "
+                            "share one renderer, so only the first step is a page's real "
+                            "cost -- see #244)")
+                 .arg(steps.isEmpty() ? QStringLiteral("(no step to report)")
+                                      : steps.join(QStringLiteral(", "))));
 
     // THREE: AND SHEDDING HAS TO TAKE IT BACK DOWN. This is the discriminating
     // one. #153's reading passed both of the above on a Xiaomi 25028RN03Y and

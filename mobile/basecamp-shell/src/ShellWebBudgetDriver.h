@@ -27,12 +27,21 @@
 // pages: measured 2026-09-17, the app's figure read 435/434/435 MB for one, two
 // and three live runtimes, and on the warning that shed two pages it went UP
 // 3 MB while the renderer holding them fell 65 MB. A ceiling read off that can
-// never trip, and would drive the opposite decision if it did. So the pass now
+// never trip, and would drive the opposite decision if it did. So the pass
 // records the weighed figure at 0, 1, ... N live runtimes and again after the
-// shed, and says WRONG when shedding pages did not move it down -- the wrong
-// sign is the discriminating case, because opening the FIRST page moves even
-// the blind figure (the app does allocate to start a renderer; it just cannot
-// see what the renderer then holds).
+// shed, and checks three things:
+//
+//   * all the pages together moved it up by at least a third of a renderer;
+//   * the FIRST page did, on its own -- a renderer starting is ~290 MB;
+//   * and SHEDDING TOOK IT BACK DOWN, which is the discriminating one. The
+//     blind reading passes the first two (the app does allocate to start a
+//     renderer; it just cannot see what the renderer then holds) and fails only
+//     on the sign.
+//
+// The steps past the first are PRINTED AND NOT ASSERTED, because #230 weighed
+// every page of a build into one renderer: pages two and three cost ~5 MB each,
+// under the noise of a figure the whole device is in. On the venue's 14.9 GB
+// Lenovo the second page's step read -62 MB with nothing shed.
 //
 // Step 3 is the synthetic half and says so: it drives the container's own
 // handler, which is the same code path the OS's notification lands on
