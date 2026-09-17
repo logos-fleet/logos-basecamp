@@ -164,13 +164,14 @@ has to be a second instruction. Z-order rather than visibility, for the same
 reason: a background module that is still answering calls needs its timers.
 
 **What the log can and cannot weigh.** `AppMemory` reports this process's
-footprint, and `show()` prints it. The page's own 185–240 MB is NOT in that
-number: both phones run a webview's content in a separate process — WebKit's
-WebContent, Chromium's sandboxed renderer — that an embedder cannot ask about
-(iOS offers no API for another task's footprint, and Android's renderer runs
-under an isolated uid, so its `/proc` is not ours). What a shell controls, and
-what the budget states, is how many pages are alive — so the ceiling above is
-honestly "the app is getting close", never "that page is the problem".
+footprint, and `show()` prints it. The page's own cost — 290–345 MB for the
+first one, measured below — is NOT in that number: both phones run a webview's
+content in a separate process (WebKit's WebContent, Chromium's sandboxed
+renderer) that an embedder cannot ask about — iOS offers no API for another
+task's footprint, and Android's renderer runs under an isolated uid, so its
+`/proc` is not ours. What a shell controls, and what the budget states, is how
+many pages are alive — so the ceiling above is honestly "the app is getting
+close", never "that page is the problem".
 
 **And on Android the app's own figure does not move with the pages at all**
 (logos-workspace#230). Measured on 2026-09-17 with `--drive web-budget

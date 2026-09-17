@@ -23,9 +23,9 @@ constexpr int kPageBudgetMs = 60000;
 constexpr int kSettleMs = 4000;
 
 // A MEASURED FIGURE, or what to say where the platform will not report one.
-// appResidentBytes() and deviceMemoryBytes() both answer -1 there, and every
-// line this pass prints has to stay readable on such a device rather than
-// claiming it weighed -0 MB.
+// Every reading in AppMemory.h answers -1 somewhere -- deviceAvailableBytes() on
+// iOS, all of them off the two phones -- and every line this pass prints has to
+// stay readable there rather than claiming it weighed -0 MB.
 QString reportedAs(qint64 bytes, const QString& whenUnknown)
 {
     return bytes < 0 ? whenUnknown : basecamp::web::megabytes(bytes);
@@ -54,6 +54,34 @@ QStringList ShellWebBudgetDriver::tiledWebApps() const
     return apps;
 }
 
+// A TILE IS NOT A PAGE (logos-workspace#230). `wallet_ui` ships its `web` assets
+// and declares dependencies -- eth_rpc_module, keystore_module, uniswap_module,
+// token_list_module -- that an image whose Bundled set does not carry them
+// cannot satisfy, so the core refuses the load and the app keeps a launcher tile
+// with nothing behind it.
+//
+// PRESSING IT ENDED THE PASS, and that is why this filter exists rather than a
+// kinder failure inside openAndWeigh(): the press spent the whole 60 s page
+// budget waiting for a page that was never coming and then returned false, so
+// the memory-warning measurement at the end of run() -- the half #153 added and
+// #230 needs -- was never reached on ANY Android run (Xiaomi 25028RN03Y and
+// Samsung SM-G990B, 2026-09-17). Named and skipped, so the numbers that CAN be
+// taken are taken.
+QStringList ShellWebBudgetDriver::openableWebApps()
+{
+    auto* web = MobileWebContainerBackend::instance();
+    QStringList openable;
+    for (const QString& app : tiledWebApps()) {
+        if (!web->hasView(app)) {
+            emit log(QStringLiteral("web budget: skipping %1 -- it has a tile on this "
+                                    "device but no `web` page behind it").arg(app));
+            continue;
+        }
+        openable.append(app);
+    }
+    return openable;
+}
+
 QStringList ShellWebBudgetDriver::shippedWebModulesToLoad() const
 {
     ShellModulesBackend* backend = m_host->backend();
@@ -65,35 +93,6 @@ QStringList ShellWebBudgetDriver::shippedWebModulesToLoad() const
         tree.append(name);
     }
     return tree;
-}
-
-QStringList ShellWebBudgetDriver::openableWebApps()
-{
-    auto* web = MobileWebContainerBackend::instance();
-    QStringList openable;
-    for (const QString& app : tiledWebApps()) {
-        // A TILE IS NOT A PAGE (logos-workspace#230). `wallet_ui` ships its
-        // `web` assets and declares dependencies -- eth_rpc_module,
-        // keystore_module, uniswap_module, token_list_module -- that an image
-        // whose Bundled set does not carry them cannot satisfy, so the core
-        // refuses the load and the app keeps a launcher tile with nothing
-        // behind it.
-        //
-        // PRESSING IT ENDED THE PASS, and that is why this filter exists rather
-        // than a kinder failure inside openAndWeigh(): the press spent the whole
-        // 60 s page budget waiting for a page that was never coming and then
-        // returned false, so the memory-warning measurement below -- the half
-        // #153 added and #230 needs -- was never reached on ANY Android run
-        // (Xiaomi 25028RN03Y and Samsung SM-G990B, 2026-09-17). Named and
-        // skipped, so the numbers that CAN be taken are taken.
-        if (!web->hasView(app)) {
-            emit log(QStringLiteral("web budget: skipping %1 -- it has a tile on this "
-                                    "device but no `web` page behind it").arg(app));
-            continue;
-        }
-        openable.append(app);
-    }
-    return openable;
 }
 
 void ShellWebBudgetDriver::loadShippedWebModules()
@@ -127,21 +126,20 @@ void ShellWebBudgetDriver::weigh(const QString& occasion)
 {
     const LiveRuntimeBudget& budget = MobileWebContainerBackend::instance()->budget();
     const qint64 ceiling = budget.appCeilingBytes();
+    const QString unreported = QStringLiteral("not reported by this platform");
+    const QString appResident = reportedAs(basecamp::web::appResidentBytes(), unreported);
+    // THE PAGE'S OWN COST IS ONLY IN THIS ONE, on Android (logos-workspace#230):
+    // the app's figure is this process and the page lives in a Chromium renderer
+    // that is not. A row of this pass that carried only the app's number
+    // under-reported what a `web` runtime costs here by about 2.5x. See
+    // AppMemory.h for why it is not the app's number and must not be read as one.
+    const QString deviceFree = reportedAs(basecamp::web::deviceAvailableBytes(), unreported);
     emit log(QStringLiteral("WEB BUDGET: %1 -- %2 live runtime(s), app %3, device free %4, "
                             "budget %5 (%6 x %7), ceiling %8")
                  .arg(occasion,
                       QString::number(budget.live().size()),
-                      reportedAs(basecamp::web::appResidentBytes(),
-                                 QStringLiteral("not reported by this platform")),
-                      // THE PAGE'S OWN COST IS ONLY IN THIS ONE, on Android
-                      // (logos-workspace#230): the app's figure is this
-                      // process and the page lives in a Chromium renderer that
-                      // is not. A row of this pass that carried only the app's
-                      // number under-reported what a `web` runtime costs here
-                      // by about 2.5x. See AppMemory.h for why it is not the
-                      // app's number and must not be read as one.
-                      reportedAs(basecamp::web::deviceAvailableBytes(),
-                                 QStringLiteral("not reported by this platform")),
+                      appResident,
+                      deviceFree,
                       megabytes(budget.budgetBytes()),
                       QString::number(budget.maxLiveRuntimes()),
                       megabytes(budget.runtimeFootprintBytes()),
