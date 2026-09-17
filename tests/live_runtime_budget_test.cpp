@@ -99,15 +99,21 @@ private slots:
 
     void theBudgetIsStatedInBytes()
     {
+        // The stated cost of N pages is ONE renderer and a document each after
+        // it -- see theStatedCostIsOneRendererAndThenAlmostNothing(). What this
+        // pins is that the held figure tracks the live set and stops at the
+        // budget: a third module shown against a budget of two evicts one, so
+        // what is held does not grow.
+        const qint64 extra = LiveRuntimeBudget::kAdditionalRuntimeBytes;
         LiveRuntimeBudget budget(2, 200ll * 1024 * 1024);
-        QCOMPARE(budget.budgetBytes(), 400ll * 1024 * 1024);
+        QCOMPARE(budget.budgetBytes(), 200ll * 1024 * 1024 + extra);
         QCOMPARE(budget.projectedBytes(), 0ll);
         budget.show("a");
         QCOMPARE(budget.projectedBytes(), 200ll * 1024 * 1024);
         budget.show("b");
-        QCOMPARE(budget.projectedBytes(), 400ll * 1024 * 1024);
+        QCOMPARE(budget.projectedBytes(), 200ll * 1024 * 1024 + extra);
         budget.show("c");
-        QCOMPARE(budget.projectedBytes(), 400ll * 1024 * 1024);
+        QCOMPARE(budget.projectedBytes(), 200ll * 1024 * 1024 + extra);
     }
 
     void aBudgetOfZeroStillKeepsTheVisibleModule()
@@ -226,28 +232,6 @@ private slots:
         QCOMPARE(budget.live().size(), 2);
     }
 
-    void theBudgetComesBackWhenTheAppIsSmallAgain()
-    {
-        // HYSTERESIS, and it is the reason for the two thresholds. A budget that
-        // relaxed the moment it dipped under the ceiling would tear the page
-        // down and build it again around a number that oscillates by a few MB;
-        // it takes a clear margin below the ceiling to be allowed to grow.
-        LiveRuntimeBudget budget(3, 100LL * 1024 * 1024, 1000LL * 1024 * 1024);
-        budget.show("a");
-        budget.show("b");
-        budget.show("c");
-        budget.observe(1200LL * 1024 * 1024);
-        QCOMPARE(budget.liveAllowance(), 2);
-
-        // Just under the ceiling is not "small again".
-        budget.observe(950LL * 1024 * 1024);
-        QCOMPARE(budget.liveAllowance(), 2);
-
-        // Well under it is.
-        budget.observe(600LL * 1024 * 1024);
-        QCOMPARE(budget.liveAllowance(), 3);
-    }
-
     void aMemoryWarningKeepsOnlyWhatTheUserIsLookingAt()
     {
         // The OS asked, which is the one signal that is not a guess -- iOS will
@@ -348,6 +332,152 @@ private slots:
         // free figure to an app.
         QCOMPARE(available, Q_INT64_C(-1));
 #endif
+    }
+
+    // ── #244: THE FIGURE THE BUDGET READS HAS TO MOVE WITH THE PAGES ───────
+    //
+    // #153 gave the budget a ceiling and observe() weighed appResidentBytes()
+    // against it. On Android that reading is BLIND to the thing the budget
+    // governs -- every `web` page of a build lives in one Chromium renderer
+    // which is a separate process -- so the branch was unreachable and the
+    // policy silently degenerated to the fixed count it replaced. Measured on
+    // 2026-09-17 (logos-workspace#244):
+    //
+    //   Xiaomi 25028RN03Y  app 303/435/434/435 MB at 0/1/2/3 live runtimes
+    //   Samsung SM-G990B   app 254/293/268/271 MB at 0/1/2/3 live runtimes
+    //
+    // ...and on the eviction at the end of the pass the app's figure went UP
+    // 3 MB while the renderer holding the pages fell 65 MB. Wrong sign, not
+    // merely insensitive. So what observe() weighs is now a PER-PLATFORM
+    // choice, and so is the frame its ceiling is stated in.
+
+    void theWeighedFigureIsThePlatformsOwn()
+    {
+        // ONE CALL, TWO FRAMES. On Darwin the pages are charged to this
+        // process, so the weighed figure IS the process's footprint. On
+        // Android/Linux they are not, and the only book they appear in is the
+        // DEVICE's -- so what is weighed there is how much of the device is in
+        // use, which moves when the renderer grows and falls when it is shed.
+        const qint64 weighed = basecamp::web::budgetWeighedBytes();
+        QVERIFY2(weighed > 0, qPrintable(QStringLiteral("budgetWeighedBytes() = %1").arg(weighed)));
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+        const qint64 inUse =
+            basecamp::web::deviceMemoryBytes() - basecamp::web::deviceAvailableBytes();
+        // Two samples a few microseconds apart on a live machine, so near
+        // rather than equal -- the claim is which figure it is, not that a
+        // phone stood still between two reads.
+        QVERIFY2(qAbs(weighed - inUse) < 64LL * 1024 * 1024,
+                 qPrintable(QStringLiteral("weighed %1 vs device in use %2")
+                                .arg(weighed).arg(inUse)));
+        QVERIFY(weighed < basecamp::web::deviceMemoryBytes());
+#else
+        QVERIFY2(qAbs(weighed - basecamp::web::appResidentBytes()) < 64LL * 1024 * 1024,
+                 qPrintable(QStringLiteral("weighed %1 vs app resident %2")
+                                .arg(weighed).arg(basecamp::web::appResidentBytes())));
+#endif
+    }
+
+    void theCeilingIsStatedInTheSameFrameAsTheFigure()
+    {
+        // THE DEVICE'S FRAME NEEDS THE DEVICE'S OWN LINE. A third of the device
+        // is a sane ceiling for a figure that counts only this app; read against
+        // a figure that counts every process it would trip the moment the phone
+        // booted -- the Xiaomi idles at 1.15 GB of 2.72 GB in use and its
+        // "app ceiling" was 930 MB.
+        //
+        // So the ceiling here is everything the device has EXCEPT the room the
+        // OS wants kept free (ActivityManager.MemoryInfo.threshold, which is
+        // per-device) and one page's worth of margin on top of it.
+        const qint64 total = 2855644LL * 1024;         // the Xiaomi's MemTotal
+        const qint64 lowLine = 300LL * 1024 * 1024;    // what the OS wants spare
+        const qint64 page = 290LL * 1024 * 1024;
+        QCOMPARE(LiveRuntimeBudget::ceilingForDeviceInUse(total, lowLine, page),
+                 total - lowLine - page);
+        // The idle device is well inside it, and three pages do not reach it.
+        QVERIFY(LiveRuntimeBudget::ceilingForDeviceInUse(total, lowLine, page)
+                > 1150LL * 1024 * 1024 + 310LL * 1024 * 1024);
+    }
+
+    void aDeviceThatWillNotSayItsLowLineGetsAShareInstead()
+    {
+        // The JNI read can fail and plain Linux has no ActivityManager at all.
+        // A fraction of the device is the fallback, not "no ceiling": a ceiling
+        // of zero is exactly the unreachable branch this issue is about.
+        const qint64 total = 4LL * 1024 * 1024 * 1024;
+        const qint64 page = 290LL * 1024 * 1024;
+        QCOMPARE(LiveRuntimeBudget::ceilingForDeviceInUse(total, -1, page),
+                 total - total / 8 - page);
+        // ...and a device that will not say how much memory it has has nothing
+        // to weigh against, which is the one honest zero.
+        QCOMPARE(LiveRuntimeBudget::ceilingForDeviceInUse(-1, -1, page), Q_INT64_C(0));
+        // A page that would not fit under the low line at all gives no ceiling
+        // rather than a negative one.
+        QCOMPARE(LiveRuntimeBudget::ceilingForDeviceInUse(256LL * 1024 * 1024, -1, page),
+                 Q_INT64_C(0));
+    }
+
+    void aTightenedBudgetGrowsBackAPagesWorthUnderTheCeiling()
+    {
+        // HYSTERESIS IN BOTH FRAMES. It used to be three quarters of the
+        // ceiling, which is a fraction that means nothing once the ceiling is
+        // the DEVICE's in-use figure: on a phone that idles at 60% of its
+        // ceiling, three quarters is a margin the budget can never earn back.
+        // A page's worth below the ceiling is the same sentence in either
+        // frame -- "there is room for another one again".
+        LiveRuntimeBudget budget(3, 100LL * 1024 * 1024, 1000LL * 1024 * 1024);
+        budget.show("a");
+        budget.show("b");
+        budget.show("c");
+        budget.observe(1200LL * 1024 * 1024);
+        QCOMPARE(budget.liveAllowance(), 2);
+        // 50 MB under the ceiling is not a page's worth of room.
+        budget.observe(950LL * 1024 * 1024);
+        QCOMPARE(budget.liveAllowance(), 2);
+        // 150 MB under it is.
+        budget.observe(850LL * 1024 * 1024);
+        QCOMPARE(budget.liveAllowance(), 3);
+    }
+
+    void theDeviceBudgetPairsTheFigureWithItsOwnCeiling()
+    {
+        // THE TWO HALVES HAVE TO COME FROM THE SAME PLACE. observe() is handed
+        // budgetWeighedBytes() and compares it with the ceiling the constructor
+        // was given; it cannot tell which frame either is in, so forThisDevice()
+        // is the only place they can be kept together -- and a mismatch is
+        // silent in exactly the way #244 was. A device-frame figure read against
+        // a third-of-the-app ceiling would shed a page on the first poll of
+        // every run; an app-frame figure read against a device-frame ceiling is
+        // the unreachable branch this issue is about.
+        const LiveRuntimeBudget budget = LiveRuntimeBudget::forThisDevice();
+        const qint64 device = basecamp::web::deviceMemoryBytes();
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+        QCOMPARE(budget.appCeilingBytes(),
+                 LiveRuntimeBudget::ceilingForDeviceInUse(
+                     device, basecamp::web::deviceLowMemoryBytes()));
+#else
+        QCOMPARE(budget.appCeilingBytes(), LiveRuntimeBudget::ceilingForDeviceMemory(device));
+#endif
+        // ...and a machine that says how much memory it has gets a ceiling,
+        // which is what stops this from passing by both halves being zero.
+        QVERIFY(budget.appCeilingBytes() > 0);
+    }
+
+    void theStatedCostIsOneRendererAndThenAlmostNothing()
+    {
+        // #230 WEIGHED IT: every page of a build shares ONE Chromium renderer.
+        // 290 MB with one page live, 298 with two, 300 with three on a Xiaomi
+        // 25028RN03Y; 345/345/348 on a Samsung SM-G990B. So the stated cost is
+        // a renderer plus a document each, not a renderer each, and a log that
+        // multiplied said 870 MB for three pages that cost about 300.
+        LiveRuntimeBudget budget(3, 300LL * 1024 * 1024, 0);
+        QCOMPARE(budget.budgetBytes(),
+                 300LL * 1024 * 1024 + 2 * LiveRuntimeBudget::kAdditionalRuntimeBytes);
+        QCOMPARE(budget.projectedBytes(), Q_INT64_C(0));
+        budget.show("a");
+        QCOMPARE(budget.projectedBytes(), 300LL * 1024 * 1024);
+        budget.show("b");
+        QCOMPARE(budget.projectedBytes(),
+                 300LL * 1024 * 1024 + LiveRuntimeBudget::kAdditionalRuntimeBytes);
     }
 };
 

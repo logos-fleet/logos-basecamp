@@ -18,7 +18,21 @@
 //      after each one says what the app weighs and how many UI runtimes are
 //      live -- so the line for 1, 2 and 3 live runtimes is the same line three
 //      times and the difference between them is the cost of a page;
-//   3. asks the container to answer a memory warning, and says what that shed.
+//   3. asks the container to answer a memory warning, and says what that shed;
+//   4. ASSERTS that the figure the budget reads actually moved with the pages
+//      (logos-workspace#244).
+//
+// STEP 4 IS THE ONE THAT FAILS ON A BLIND METRIC. #153's ceiling was weighed
+// against this process's own resident size, which on Android is blind to the
+// pages: measured 2026-09-17, the app's figure read 435/434/435 MB for one, two
+// and three live runtimes, and on the warning that shed two pages it went UP
+// 3 MB while the renderer holding them fell 65 MB. A ceiling read off that can
+// never trip, and would drive the opposite decision if it did. So the pass now
+// records the weighed figure at 0, 1, ... N live runtimes and again after the
+// shed, and says WRONG when shedding pages did not move it down -- the wrong
+// sign is the discriminating case, because opening the FIRST page moves even
+// the blind figure (the app does allocate to start a renderer; it just cannot
+// see what the renderer then holds).
 //
 // Step 3 is the synthetic half and says so: it drives the container's own
 // handler, which is the same code path the OS's notification lands on
@@ -36,6 +50,8 @@
 
 #include "ShellSceneDriver.h"
 
+#include <QList>
+#include <QPair>
 #include <QStringList>
 
 class BundledSetShellHost;
@@ -75,9 +91,17 @@ private:
     // -- and then the pass stops, because every line after it would be about a
     // different number of runtimes than it claims.
     bool openAndWeigh(const QString& app);
-    // One line: the live count, the app's own footprint, and the budget it is
-    // being read against.
+    // One line: the live count, the app's own footprint, what the budget
+    // actually weighs on this platform, and the budget it is read against.
+    // Records the weighed figure against the live count for step 4.
     void weigh(const QString& occasion);
+    // Step 4's verdict, from what weigh() recorded plus the figure taken after
+    // the memory warning settled. Prints one WRONG line per broken claim and
+    // one OK line when the figure tracked the pages.
+    void reportWhetherTheFigureMoved(qint64 afterShedBytes, int pagesShed);
 
     BundledSetShellHost* m_host;  // not owned
+    // The weighed figure at each live-runtime count the pass passed through,
+    // most recent last, paired with the count it was taken at.
+    QList<QPair<int, qint64>> m_weighed;
 };

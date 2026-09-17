@@ -106,7 +106,13 @@ killed the app. `LiveRuntimeBudget::forThisDevice()` now reads
 | | how it is derived | what it does |
 |---|---|---|
 | the **count** | a sixth of the device's memory, divided by one page's 290 MB, floored at 1 and capped at 3 | how many UI pages may be live at once |
-| the **ceiling** | a third of the device's memory — under what the OS acts on, not at it | what the app as a whole may weigh before a page is shed on weight alone |
+| the **ceiling** (iOS/macOS) | a third of the device's memory — under what the OS acts on, not at it | what the app as a whole may weigh before a page is shed on weight alone |
+| the **ceiling** (Android/Linux) | the device's memory less the OS's own low-memory line (`ActivityManager.MemoryInfo.threshold`) and one page's margin | how much of the **device** may be in use before a page is shed on weight alone |
+
+The ceiling has two rows because the figure it is read against does
+(logos-workspace#244, below): on iOS the pages are charged to this process and
+on Android they are not, so what is weighed there is the device's own book and
+the ceiling has to be a level of device use rather than a share of the app.
 
 The cap is not about memory: a user flips between two or three apps, and the
 pages' real cost is in a renderer process this app cannot weigh (below), so
@@ -120,13 +126,14 @@ measure what two and three live runtimes cost on a device whose policy says one.
 **And the measurement is read.** Two entry points, both ending in the same
 eviction the count makes:
 
-* `observeMemory()` — what the app weighs right now, against the ceiling. Called
-  when a page is shown and on the container's existing 20 s poll-timer cadence,
-  which is the only way growth *inside* a page is ever noticed. Over the
-  ceiling it gives up ONE page per observation (the reading is the host's, not
-  the page's, so the container cannot know which page grew); it relaxes again
-  only well under the ceiling, so it cannot oscillate around a number that moves
-  by megabytes between frames.
+* `observeMemory()` — what this **platform** weighs right now
+  (`AppMemory::budgetWeighedBytes()`), against the ceiling. Called when a page is
+  shown and on the container's existing 20 s poll-timer cadence, which is the
+  only way growth *inside* a page is ever noticed. Over the ceiling it gives up
+  ONE page per observation (the reading is never the page's own, so the container
+  cannot know which page grew); it relaxes again only a page's worth below the
+  ceiling, so it cannot oscillate around a number that moves by megabytes between
+  frames.
 * `memoryWarning()` — the OS asking, which is the one signal here that is not
   this app's own opinion. Everything but the visible page goes at once, because
   iOS kills an app rather than ask it twice. Subscribed through
@@ -197,9 +204,57 @@ Two things follow, and both are about the budget rather than the log:
   thing it governs does not appear in.
 
 `deviceAvailableBytes()` is the one reading a page does appear in on Android,
-and the pass now prints it as `device free`. It is the DEVICE's book, not the
+and the pass prints it as `device free`. It is the DEVICE's book, not the
 app's — every other process is in it too — so it is reported beside the app's
 figure and never instead of it; see `AppMemory.h`.
+
+### What the budget weighs, per platform (logos-workspace#244)
+
+The consequence of the table above is that `observe()`'s branch was
+**unreachable on Android**: the Xiaomi's ceiling was 930 MB and the app sat at
+435 MB holding three pages, so `observe()` answered `{}` on every observation of
+every run and the policy silently degenerated to the fixed count #153 replaced.
+`AppMemory::budgetWeighedBytes()` is the fix, and it is one call with two
+answers:
+
+| platform | what it answers | why |
+|---|---|---|
+| iOS / macOS | `appResidentBytes()` — this process's `phys_footprint` | the pages are charged here, and #153's reading was right |
+| Android / Linux | `deviceMemoryBytes() - deviceAvailableBytes()` — how much of the device is in use | the pages are in a Chromium renderer that is not this process, and the device's book is the only one it appears in |
+
+**Can an app weigh its own renderer in-process?** That answer would change this
+design — the renderer's own figure beats the device's book on every count — so
+the `--drive web-budget` pass prints the evidence rather than assuming, as
+`web budget: process visibility — …` (`AppMemory::processVisibilityReport()`):
+what `ActivityManager.getRunningAppProcesses()` returns, and how many pids
+`/proc` shows this uid. Compare it against the host's `adb shell ps -A -o
+PID,RSS,NAME`, which does see the renderer.
+
+**Why the OS's own line and not a fraction.** `MemAvailable` is the whole
+device's, so "the app is over its share" cannot be read off it, and no absolute
+headroom is right on two devices at once: the Xiaomi lost its renderer with
+1.24 GB still available while the Samsung was untroubled at 1.05 GB.
+`ActivityManager.MemoryInfo.threshold` is the level at which *that* device's
+system starts killing background processes, computed per device, and is the one
+per-device calibration Android gives an app. `AppMemory::deviceLowMemoryBytes()`
+reads it by JNI reflection; where it is not available (plain Linux, or before
+there is a context) the fallback is an eighth of the device.
+
+**And the stated cost is one renderer, not one per page.** Since all pages share
+a renderer, `budgetBytes()`/`projectedBytes()` are now `kDeviceRuntimeBytes` for
+the first page plus `kAdditionalRuntimeBytes` (8 MB) for each after it, instead
+of the count times 290 MB — which had every device log over-reporting three live
+runtimes by about 3x. The **count** deliberately stays on the renderer's price:
+divided by 8 MB every device would afford the cap and the count would stop being
+a device question at all, which is #153's fixed number arrived at from the other
+side.
+
+**The pass says whether the figure moved.** `--drive web-budget` records the
+weighed figure at 0, 1, … N live runtimes and again after the memory warning,
+and prints `WRONG:` when the pages did not move it or when shedding them did not
+take it back down. The last of those is the discriminating one: the blind
+reading passes the others (starting a renderer does cost the app something) and
+fails only on the sign.
 
 **A page can be taken away without the budget doing it.** On the Xiaomi, two
 runs holding two live pages through a 60-second idle wait had the shared
@@ -225,7 +280,7 @@ Nothing here changes when it does: the budget already governs UI pages only.
 | `nix build .#mobile-bridge-test` | seconds, any desktop with Qt WebEngine | the JavaScript the bridge ships — the poll loop, the chunked sender, the console wrapper — in a real browser |
 | the smoke host's `web probe` line | a device or simulator | that THIS platform's webview delivers a request to its interceptor when the page is entered under Qt's separate main stack |
 | the smoke host's `web modules` line (`WebModuleRunner`) | a device or simulator | that a `ui_qml` module's `web` variant LOADS through the real core into this platform's webview, what its UI costs to cold-start here, and that showing a second one puts the first over the budget |
-| the Shell's `--drive web-budget` pass (`ShellWebBudgetDriver`) | a device or simulator | what the app WEIGHS with one, two and three `web` runtimes live on this device, and what a memory warning sheds |
+| the Shell's `--drive web-budget` pass (`ShellWebBudgetDriver`) | a device or simulator | what the app WEIGHS with one, two and three `web` runtimes live on this device, what a memory warning sheds, and whether the figure the budget reads actually MOVED with the pages (#244) |
 
 ### A page's console arrives on a background thread
 
