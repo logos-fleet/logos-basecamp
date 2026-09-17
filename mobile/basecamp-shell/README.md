@@ -709,8 +709,7 @@ module in any image that could answer, whatever the run did.
 
 ```bash
 ws run logos-basecamp --target ios-sim-arm64 --app shell \
-  --bundle capability_module,eth_rpc_module,uniswap_module,token_list_module,\
-railgun_module,evm_signer_cli
+  --bundle capability_module,eth_rpc_module,uniswap_module,token_list_module,railgun_module,evm_signer_cli
 ```
 
 Its closure is one name — `keystore_module` — and that one is **not** a Bundled
@@ -719,14 +718,28 @@ the image's `web` half instead and is recorded in `bundled-set.json` as
 `webSatisfied: ["keystore_module"]`, which is ADR 0010 doing exactly what it was
 written for.
 
-A set with the signer in it can be driven past `sign`:
+A set with the signer in it puts an approver **in the image**; walking the route
+past `sign` is a second thing, and this repository cannot do it yet:
 
 ```bash
-# launch 1 -- the wallet imports a seed, and its configure names the approver
---drive web-input:seed-import
-# launch 2 -- the role survived the restart, in the module's own words
+# the signer is in the set, loaded and answering, in its own words
 --call evm_signer_cli.status
+# ...and the wallet names it as approver in the same run it asks for one
+--drive web-input:seed-import,web-input:private-shield
 ```
+
+**The role has to be named with every request**, which is why the wallet's `web`
+backend sends its `configure` immediately before `request_approval` rather than
+once, when the account is created. Measured on an iPad Air 13-inch (M2)
+simulator: a restart brings the imported ACCOUNT back out of idbfs and puts the
+ROLES back at their built-in defaults, so a shield started on any later launch
+would lodge a request no module in the image is allowed to answer.
+
+**Approving one from inside a run still needs a drive pass that does not exist
+yet.** `--call` is sequenced ahead of `--drive`, and a request lives in the
+keystore page's memory, so the signer's `list` → `show` → `approve` cannot be
+reached from a later launch: they have to be driven from inside the run that
+pressed `Shield`.
 
 `--call` reaches it because the gate that matters is on `keystore_module`, not
 here: a `--call` arrives as the host anchor, but the call the SIGNER then makes
