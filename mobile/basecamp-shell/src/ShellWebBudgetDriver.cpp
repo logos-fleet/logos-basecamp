@@ -278,6 +278,21 @@ void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, in
                           QString::number(m_weighed.last().first), megabytes(movedUp),
                           megabytes(atRest)));
     }
+
+#if defined(Q_OS_DARWIN)
+    // A WRONG HERE ON DARWIN IS A KNOWN, RECORDED GAP and not a fresh
+    // regression, which is worth one line: #244 fixed Android on the
+    // instruction that iOS was already correct, and the first iOS run of this
+    // check falsified that instruction -- on an iPad Air 13-inch (M2)
+    // simulator, 2026-09-17, shedding two pages left phys_footprint 1 MB
+    // HIGHER (151 -> 152 MB). The physical-device measurement that settles it
+    // is logos-workspace#254; without this line a later cycle spends itself
+    // rediscovering it.
+    emit log(QStringLiteral("web budget: on this platform a WRONG above is the open "
+                            "question in logos-workspace#254 -- #244 left the iOS reading "
+                            "alone on the premise that phys_footprint moves with the pages, "
+                            "and a simulator says it does not"));
+#endif
 }
 
 bool ShellWebBudgetDriver::openAndWeigh(const QString& app)

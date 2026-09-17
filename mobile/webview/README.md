@@ -301,6 +301,17 @@ mounted with `hidepid`. That is why the device's book is read and not the
 renderer's own figure — the renderer's figure would be better, and this app
 cannot have it.
 
+**iOS is left alone, and the first iOS run of the check questioned that.** #244
+fixed Android on the instruction that `phys_footprint` already moves with the
+pages on iOS. On an iPad Air 13-inch (M2) simulator (2026-09-17) it read
+`101 / 133 / 152 / 151 MB` for 0/1/2/3 live runtimes and **152 MB after a shed
+of two pages** — 1 MB higher, the same wrong sign Android had. #153's physical
+iPad Air 4 figures have the same shape (`178 / 221 / 221`, a second page costing
+0 MB) but no after-shed reading was ever taken there. The metric was NOT changed
+on Darwin; the measurement that settles it needs a physical device and is
+logos-workspace#254, and the pass names that issue beside the `WRONG:` so an iOS
+run is not read as a fresh regression.
+
 **The ceiling trips, and it was watched doing it.** With `--web-ceiling 1440` on
 the Xiaomi (at rest 1294 MB in use), the first page took the figure to 1596 MB,
 the allowance dropped 3 → 1 on that observation, and each page opened after it
