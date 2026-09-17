@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 
@@ -80,6 +81,19 @@ enum class DrivePass {
 //     --drive all                  the historic behaviour, spelled out
 //     (nothing)                    a plain app, on a phone as on the desktop
 //
+// A PASS MAY TAKE AN OPTION, after a colon (logos-workspace#238):
+//
+//     --drive web-input:private-sync            which flow the page pass walks
+//     --drive web-input:seed-import,web-input:private-sync      both, in order
+//     --drive web-input                         the app's first flow, as before
+//
+// Only `web-input` takes one today, and what its options MEAN is the driver's
+// (WebDriveFlows) rather than this parser's: a flow name that no app carries is
+// refused by the pass that looked for it, beside the names it does have. What
+// belongs here is that an option on a pass that cannot use one is refused
+// rather than silently dropped, for the same reason every other refusal is
+// kept.
+//
 // THE PASSES THEMSELVES ARE UNCHANGED and print exactly what they printed
 // before: roughly ten issues quote their assertions as on-device evidence
 // (`SHELL MODULES TAB LISTS WHAT THE APP HAS`, `APP SHOWN: … ms after the
@@ -107,9 +121,16 @@ public:
 
     bool wants(DrivePass pass) const;
 
+    // What a pass was asked to do, in the order it was asked -- `private-sync`
+    // for `--drive web-input:private-sync`. Empty when the pass was named
+    // plainly, which every pass reads as "your default".
+    QStringList optionsFor(DrivePass pass) const;
+
     // The passes this run asked for, once each, IN THE ORDER THEY WILL RUN
     // rather than the order they were written -- the sequencing is the app's,
-    // so the console line should read as the run it is about to be.
+    // so the console line should read as the run it is about to be. A pass with
+    // options is printed once per option (`web-input:private-sync`), because
+    // that is what the run is about to be.
     QStringList passes() const;
 
     // One sentence per refused argument, in the order they were met.
@@ -121,8 +142,9 @@ public:
     bool isEmpty() const { return m_passes.isEmpty() && m_refusals.isEmpty(); }
 
 private:
-    QList<DrivePass> m_passes;
-    QStringList      m_refusals;
+    QList<DrivePass>          m_passes;
+    QMap<DrivePass, QStringList> m_options;
+    QStringList               m_refusals;
 };
 
 } // namespace basecamp::shell

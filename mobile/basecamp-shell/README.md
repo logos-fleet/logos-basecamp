@@ -83,8 +83,10 @@ The Shell knows how to drive itself through nine acceptance passes, and it runs
                     menu and the dialog on the way to it are drawn at all (#187)
 --drive web-apps    open a `web` app, check its page is inset to the workspace,
                     and LEAVE it again (#110)
---drive web-input   open a `web` app and TYPE into its form, with real pointer
-                    and key events at the page, then read the field back (#174)
+--drive web-input   open a `web` app and walk one of its NAMED FLOWS with real
+                    pointer and key events at the page (#174, #238). Takes the
+                    flow after a colon -- `--drive web-input:private-sync`;
+                    named plainly it walks the app's first
 --drive web-budget  open EVERY `web` app the build carries, one at a time, and
                     say what the app weighs with each of them live -- then
                     answer a memory warning and say what it shed (#153).
@@ -97,7 +99,9 @@ The Shell knows how to drive itself through nine acceptance passes, and it runs
 
 Composable, on one flag or several: `--drive apps,modules` and `--drive apps
 --drive modules` are the same run. An unknown name is refused on the console,
-by name, and the passes beside it still run.
+by name, and the passes beside it still run. So is an option on a pass that
+takes none (`--drive modules:something`), and so is `--drive all:something` —
+an option would have to mean the same thing to ten passes.
 
 **Why it is not the default.** It used to be: every launch fired all of them
 from one timer, gated only by whether the BUILD carried something drivable, so
@@ -604,16 +608,78 @@ either. Only the LOCATING is done through the accessibility tree.
         'issue174', put there by real key events at the page
 ```
 
-So the wallet's flow names `Advanced` and `Import` (their text) and
-`advSeedField`, `advAcctLabelField` and `advAcctPwField` (their objectNames,
-which wallet_ui already carries for the desktop inspector). An accessible name
-is matched from the front, so `Refresh` finds `Refresh balances`.
+So the wallet's `seed-import` flow names `Advanced` and `Import` (their text)
+and `advSeedField`, `advAcctLabelField` and `advAcctPwField` (their
+objectNames, which wallet_ui already carries for the desktop inspector). An
+accessible name is matched from the front, so `Refresh` finds `Refresh
+balances`.
+
+### Several flows per app, and a run picks one
+
+This pass arrived knowing exactly ONE flow per app, and the wallet then grew a
+second thing worth driving. With one flow per app the only way to reach it was
+to REPLACE the seed import — trading one uncheckable flow for another
+(logos-workspace#238). So an app carries several named flows and the launch
+says which it wants:
+
+```
+--drive web-input                                     the app's first, as before
+--drive web-input:private-sync                        one named flow
+--drive web-input:seed-import,web-input:private-sync  both, in that order
+```
+
+The catalogue is [`src/WebDriveFlows.h`](src/WebDriveFlows.h) — data, not code
+in the driver, so the next `web` app adds to it and a unit test can state it on
+a desktop with no webview. A flow name no app in the build carries is refused
+by name, with the `app:flow` pairs the build does offer beside it.
+
+### A verdict that is a page console line
+
+The seed import's verdict is a FIELD, read back: the text `advAcctLabelField`
+holds after the form was submitted is the module's own state. The wallet's
+Private tab has no such field. Its whole surface — the leg, the percentage, the
+blocks left, the note a cancel leaves — is a PROP the view renders, and a
+progress bar's pixels are not a number.
+
+What there is, is the module's own announcement of every publication, which the
+container already forwards to the app's log. So an `Await` step's verdict is
+that line, described as data: which lines are its (a marker), which JSON field
+on one is the reading, and what the reading has to do.
+
+**And it can require that the number MOVED.** `--drive web-input:private-sync`
+presses `Private`, `Check`, `Sync now` and `Cancel`, and asserts:
+
+```
+[shell] wallet_ui page [log]: [wallet_ui web] private sync idle:
+        {"targetBlock":11721332,"percent":0,…}
+[shell] web input: wallet_ui published the distance to the chain head --
+        targetBlock = 11721332
+[shell] web input: pressed wallet_ui's 'Sync now'
+[shell] web input: wallet_ui published a percentage that moved -- percent = 43
+[shell] web input: pressed wallet_ui's 'Cancel'
+[shell] web input: wallet_ui published the block the cancelled walk kept --
+        keptToBlock = 11720700
+[shell] THE WALLET'S PRIVATE SYNC RUNS AND CAN BE LEFT, from inside the app:
+        wallet_ui's 'private-sync' flow, every step from inside the app
+```
+
+"a `private sync running:` line appeared" would be satisfied by the line
+`startPrivateSync` publishes *before it has asked for a single window* — it
+proves the button was pressed and nothing about the walk. So the percentage
+step takes the first reading as a baseline and waits for one that differs from
+it.
+
+The `keptToBlock` assertion is the one a human looking at the screen would not
+make: a cancel that publishes `state: "cancelled"` and keeps no block has
+thrown away the walk it just paid minutes for, and the page looks exactly the
+same either way (logos-workspace#235's clause 2).
 
 The script and the console vocabulary its answers come back in are
 [`mobile/webview/WebPageInput.h`](../webview/WebPageInput.h); the walk is
 [`src/ShellWebInputDriver.h`](src/ShellWebInputDriver.h), and the reading of
 those answers is stated without a webview in
-[`tests/web_page_input_test.cpp`](../../tests/web_page_input_test.cpp).
+[`tests/web_page_input_test.cpp`](../../tests/web_page_input_test.cpp) and
+[`tests/web_drive_flows_test.cpp`](../../tests/web_drive_flows_test.cpp).
 
 This pass does not scroll: a field below the fold is reported as "on the page
 and not reachable" rather than worked around, because a form whose fields are
