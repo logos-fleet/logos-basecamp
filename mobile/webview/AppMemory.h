@@ -63,6 +63,86 @@ qint64 deviceMemoryBytes();
 // that there is no such reading, not `hw.memsize` minus a guess.
 qint64 deviceAvailableBytes();
 
+// HOW MUCH ROOM THE OS ITSELF WANTS KEPT FREE on this device, in bytes, or -1
+// where the platform does not publish one -- `ActivityManager.MemoryInfo`'s
+// `threshold` on Android, which is the level at which the system starts killing
+// background processes to get memory back.
+//
+// IT IS THE OS'S OWN LINE, which is why it is read rather than a fraction being
+// invented: logos-workspace#244 measured the same absolute headroom meaning
+// opposite things on two phones -- a Xiaomi 25028RN03Y reaped the shared
+// renderer with MemAvailable still at 1.24 GB while a Samsung SM-G990B was
+// untroubled at 1.05 GB -- so the reserve has to be the number the system
+// itself acts at rather than one this container picked.
+//
+// IT SCALES LESS THAN ITS NAME SUGGESTS. Measured 2026-09-17, it answers
+// **216 MB on both** a 2.7 GB Xiaomi 25028RN03Y and a 14.9 GB Lenovo TB520FU,
+// so on the venue's devices it is a near-constant reserve and not a fraction of
+// the device. That is fine for what it is used for -- the ceiling's
+// device-dependence comes from MemTotal, not from this -- but it is not a
+// per-device scale factor and must not be read as one.
+//
+// READ THROUGH JNI, so it answers -1 until there is an Android context --
+// implemented in AndroidWebPage.cpp beside the other JNI reading in this header
+// and answered with -1 in AppMemory.cpp everywhere else, plain Linux included
+// (there is no ActivityManager there).
+qint64 deviceLowMemoryBytes();
+
+// WHICH OF THE TWO FRAMES THE BUDGET IS IN ON THIS PLATFORM, asked ONCE.
+//
+// True where a `web` page lives in a renderer process of its own and the only
+// book it appears in is the device's, false where the page is charged to the
+// process that opened it. Four things have to agree about this and none of them
+// can tell on its own that it disagrees: budgetWeighedBytes() below, the
+// ceiling forThisDevice() pairs with it (LiveRuntimeBudget::ceilingForDeviceInUse
+// against ceilingForDeviceMemory), the name a device log prints for the figure,
+// and how far a page is expected to move it. A mismatch between any two of them
+// is silent in exactly the way logos-workspace#244 was -- a ceiling that could
+// never trip, for a whole landing -- so the question is named here and answered
+// nowhere else.
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+constexpr bool kBudgetWeighsTheDevice = true;
+#else
+constexpr bool kBudgetWeighsTheDevice = false;
+#endif
+
+// WHAT THE LIVE-RUNTIME BUDGET WEIGHS ON THIS PLATFORM, in bytes, or -1 where
+// there is nothing here that moves with a page.
+//
+// ONE CALL, TWO FRAMES, and the split is the whole of logos-workspace#244:
+//
+//   * iOS/macOS: appResidentBytes(). The pages are charged to this process, so
+//     the process's own footprint is the figure the budget is spent against and
+//     #153's reading was right here.
+//   * Android/Linux: deviceMemoryBytes() - deviceAvailableBytes(), i.e. HOW
+//     MUCH OF THE DEVICE IS IN USE. The pages are NOT in this process -- every
+//     `web` page of a build shares one Chromium renderer that is a separate
+//     process of its own -- so appResidentBytes() is blind to them, and was
+//     measured carrying the WRONG SIGN: on 2026-09-17 a memory warning that
+//     shed two pages took the renderer down 65 MB while the app's own figure
+//     went UP 3 MB. A budget reading that number learns that evicting costs
+//     memory. `MemAvailable` is the book the renderer is on.
+//
+// THE ANDROID FIGURE IS NOT THIS APP'S and must not be read as one: every other
+// process on the device is in it. What it supports is the question the budget
+// actually has to answer on a phone -- "is there still room on this device for
+// the pages I am holding" -- which is why the ceiling it is read against is
+// stated in the same frame (LiveRuntimeBudget::ceilingForDeviceInUse) rather
+// than as a share of the app.
+qint64 budgetWeighedBytes();
+
+// WHAT THIS PROCESS CAN SEE OF THE PAGES' RENDERER, as one line for a device
+// log. Never a decision -- evidence, and it is here because
+// logos-workspace#244 asked for the answer to be stated with its evidence
+// rather than assumed: if an app CAN weigh its own WebView renderer in-process
+// then the Android reading above is the wrong design and should be replaced by
+// the renderer's own figure.
+//
+// On Android it reports what `ActivityManager.getRunningAppProcesses()` returns
+// and how much of /proc this app's uid can see; everywhere else it says the
+// question does not arise.
+QString processVisibilityReport();
+
 // SUBSCRIBE TO THE PLATFORM'S MEMORY WARNING. `onWarning` is called on the Qt
 // main thread when the OS says it wants memory back; returns false where this
 // platform has no such signal, and then the container is left with the polling

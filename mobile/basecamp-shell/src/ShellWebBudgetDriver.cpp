@@ -127,6 +127,8 @@ void ShellWebBudgetDriver::weigh(const QString& occasion)
     const LiveRuntimeBudget& budget = MobileWebContainerBackend::instance()->budget();
     const qint64 ceiling = budget.appCeilingBytes();
     const QString unreported = QStringLiteral("not reported by this platform");
+    const qint64 weighed = basecamp::web::budgetWeighedBytes();
+    m_weighed.append(Reading{ int(budget.live().size()), weighed });
     const QString appResident = reportedAs(basecamp::web::appResidentBytes(), unreported);
     // THE PAGE'S OWN COST IS ONLY IN THIS ONE, on Android (logos-workspace#230):
     // the app's figure is this process and the page lives in a Chromium renderer
@@ -134,16 +136,170 @@ void ShellWebBudgetDriver::weigh(const QString& occasion)
     // under-reported what a `web` runtime costs here by about 2.5x. See
     // AppMemory.h for why it is not the app's number and must not be read as one.
     const QString deviceFree = reportedAs(basecamp::web::deviceAvailableBytes(), unreported);
+    // AND THE FIGURE THE BUDGET ACTUALLY READS, named as such (#244). It is one
+    // of the two above -- the app's on iOS, the device's in-use figure on
+    // Android -- and which one it is has to be legible from the log, because
+    // the whole of #244 is that the wrong one was being read on one of the two
+    // phones for a full landing without anything looking broken.
     emit log(QStringLiteral("WEB BUDGET: %1 -- %2 live runtime(s), app %3, device free %4, "
-                            "budget %5 (%6 x %7), ceiling %8")
+                            "weighed %5, budget %6 (one renderer + %7 x %8), ceiling %9")
                  .arg(occasion,
                       QString::number(budget.live().size()),
                       appResident,
                       deviceFree,
+                      reportedAs(weighed, unreported),
                       megabytes(budget.budgetBytes()),
-                      QString::number(budget.maxLiveRuntimes()),
-                      megabytes(budget.runtimeFootprintBytes()),
+                      QString::number(budget.maxLiveRuntimes() - 1),
+                      megabytes(LiveRuntimeBudget::kAdditionalRuntimeBytes),
                       ceiling > 0 ? megabytes(ceiling) : QStringLiteral("none")));
+}
+
+namespace {
+
+// HOW MUCH THE FIGURE IS ALLOWED TO WANDER BETWEEN TWO READINGS before a
+// direction is claimed from it. On Android the figure is the whole device's, so
+// every other process's allocations are in it; 32 MB is a tenth of what one
+// renderer costs, and the drift measured across a settled pass on the venue's
+// two Android devices was up to 62 MB on the 14.9 GB tablet -- which is why the
+// only step this allowance guards is the one whose signal is 250 MB or more.
+constexpr qint64 kFigureNoiseBytes = 32LL * 1024 * 1024;
+
+// ...AND HOW FAR A PAGE MUST MOVE IT before the figure counts as weighing the
+// pages at all. Per platform, because the two frames are charged differently:
+//
+//   * Android/Linux: the device's book carries the whole renderer. The first
+//     page moved it +127, +215, +272 and +302 MB across four runs on a Xiaomi
+//     25028RN03Y and +1031 MB on a Lenovo TB520FU (2026-09-17). It reads under
+//     the renderer's 290 MB on the phone because MemAvailable counts page cache
+//     the kernel gives up in the same seconds, so a third of a renderer is the
+//     floor rather than a whole one.
+//   * iOS/macOS: this process is charged only PART of the WebContent process.
+//     Measured on a physical iPad Air 4 (#153), the first page moved
+//     appResidentBytes() 178 -> 221 MB -- 43 MB, a seventh of the Android
+//     signal. A floor set to Android's would report WRONG on every iOS run for
+//     a reading that is correct there, so the floor here is the noise figure:
+//     what the check still catches is a figure that does not move at all.
+qint64 pageMovesAtLeastBytes()
+{
+    return basecamp::web::kBudgetWeighsTheDevice
+               ? LiveRuntimeBudget::kDeviceRuntimeBytes / 3
+               : kFigureNoiseBytes;
+}
+
+} // namespace
+
+void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, int pagesShed)
+{
+    if (m_weighed.size() < 2) {
+        emit log(QStringLiteral("web budget: only %1 reading(s) -- nothing to say about "
+                                "whether the figure moves with the pages")
+                     .arg(m_weighed.size()));
+        return;
+    }
+
+    const qint64 atRest = m_weighed.first().weighedBytes;
+    const qint64 atMost = m_weighed.last().weighedBytes;
+    if (atRest < 0 || atMost < 0) {
+        emit log(QStringLiteral("WRONG: this platform reports no figure for the budget to "
+                                "weigh, so its ceiling can never trip"));
+        return;
+    }
+
+    // ONE: THE PAGES HAVE TO BE IN IT AT ALL, by whatever this platform's
+    // pages are expected to move it -- see pageMovesAtLeastBytes().
+    const qint64 movedUp = atMost - atRest;
+    const qint64 floor = pageMovesAtLeastBytes();
+    if (movedUp < floor) {
+        emit log(QStringLiteral("WRONG: %1 live runtime(s) moved the weighed figure by only "
+                                "%2 (from %3 to %4) -- a page costs about %5, so this figure "
+                                "is blind to them")
+                     .arg(QString::number(m_weighed.last().liveRuntimes), megabytes(movedUp),
+                          megabytes(atRest), megabytes(atMost),
+                          megabytes(LiveRuntimeBudget::kDeviceRuntimeBytes)));
+    }
+
+    // TWO: THE STEPS, REPORTED RATHER THAN ASSERTED PAST THE FIRST ONE.
+    //
+    // #244 asks for the figure to move monotonically with the page count, and
+    // the FIRST step is the one that can carry that: a renderer starting is
+    // ~290 MB and dwarfs anything else on the device. Past it there is nothing
+    // to be monotonic about -- #230 weighed every page of a build into ONE
+    // renderer, so pages two and three cost ~5 MB each, which is under the
+    // noise floor of a figure the whole device is in. Measured on the venue's
+    // Lenovo TB520FU (14.9 GB) on 2026-09-17: going from one live runtime to
+    // two took the figure DOWN 62 MB while nothing had shed anything, because
+    // some other process gave memory back in the same four seconds. Asserting
+    // there would be asserting a physical claim this container's own
+    // measurements contradict, so the steps are printed and the verdict is
+    // carried by the two checks that are not noise-bound.
+    //
+    // THE FIRST STEP IS ASSERTED, and only it. It is a whole renderer; a figure
+    // that a renderer starting does not move up is blind whatever else it does.
+    const qint64 firstStep = m_weighed.at(1).weighedBytes - m_weighed.first().weighedBytes;
+    if (m_weighed.at(1).liveRuntimes > m_weighed.first().liveRuntimes && firstStep < floor)
+        emit log(QStringLiteral("WRONG: the first live runtime moved the weighed figure "
+                                "by only %1; this platform's pages should move it at "
+                                "least %2")
+                     .arg(megabytes(firstStep), megabytes(floor)));
+
+    QStringList steps;
+    for (int i = 1; i < m_weighed.size(); ++i) {
+        const Reading& before = m_weighed.at(i - 1);
+        const Reading& after = m_weighed.at(i);
+        // A reading taken at the same count as the one before it is not a step:
+        // the figure before the pass opens anything and the one after the shed
+        // are both taken without the live set having grown.
+        if (after.liveRuntimes <= before.liveRuntimes) continue;
+        const qint64 step = after.weighedBytes - before.weighedBytes;
+        steps << QStringLiteral("%1->%2 runtime(s) %3%4")
+                     .arg(QString::number(before.liveRuntimes),
+                          QString::number(after.liveRuntimes),
+                          step < 0 ? QString() : QStringLiteral("+"), megabytes(step));
+    }
+    emit log(QStringLiteral("web budget: the weighed figure, page by page: %1 (the pages "
+                            "share one renderer, so only the first step is a page's real "
+                            "cost -- see #244)")
+                 .arg(steps.isEmpty() ? QStringLiteral("(no step to report)")
+                                      : steps.join(QStringLiteral(", "))));
+
+    // THREE: AND SHEDDING HAS TO TAKE IT BACK DOWN. This is the discriminating
+    // one. #153's reading passed both of the above on a Xiaomi 25028RN03Y and
+    // failed here by going UP 3 MB on a shed of two pages -- a container that
+    // trusted it would learn that evicting costs memory.
+    if (pagesShed <= 0) {
+        emit log(QStringLiteral("web budget: the warning shed nothing, so this run says "
+                                "nothing about the figure's sign on an eviction"));
+    } else if (afterShedBytes < 0) {
+        emit log(QStringLiteral("WRONG: no figure after the shed"));
+    } else if (afterShedBytes >= atMost - kFigureNoiseBytes) {
+        emit log(QStringLiteral("WRONG: shedding %1 page(s) did not take the weighed figure "
+                                "down -- %2 before, %3 after")
+                     .arg(QString::number(pagesShed), megabytes(atMost),
+                          megabytes(afterShedBytes)));
+    } else {
+        emit log(QStringLiteral("WEB BUDGET OK: shedding %1 page(s) took the weighed figure "
+                                "from %2 to %3, and %4 live runtime(s) had moved it up %5 "
+                                "from %6 at rest")
+                     .arg(QString::number(pagesShed), megabytes(atMost),
+                          megabytes(afterShedBytes),
+                          QString::number(m_weighed.last().liveRuntimes), megabytes(movedUp),
+                          megabytes(atRest)));
+    }
+
+#if defined(Q_OS_DARWIN)
+    // A WRONG HERE ON DARWIN IS A KNOWN, RECORDED GAP and not a fresh
+    // regression, which is worth one line: #244 fixed Android on the
+    // instruction that iOS was already correct, and the first iOS run of this
+    // check falsified that instruction -- on an iPad Air 13-inch (M2)
+    // simulator, 2026-09-17, shedding two pages left phys_footprint 1 MB
+    // HIGHER (151 -> 152 MB). The physical-device measurement that settles it
+    // is logos-workspace#254; without this line a later cycle spends itself
+    // rediscovering it.
+    emit log(QStringLiteral("web budget: on this platform a WRONG above is the open "
+                            "question in logos-workspace#254 -- #244 left the iOS reading "
+                            "alone on the premise that phys_footprint moves with the pages, "
+                            "and a simulator says it does not"));
+#endif
 }
 
 bool ShellWebBudgetDriver::openAndWeigh(const QString& app)
@@ -190,6 +346,13 @@ void ShellWebBudgetDriver::run()
                  .arg(reportedAs(deviceMemory, QStringLiteral("no memory figure")),
                       QString::number(LiveRuntimeBudget::runtimesForDeviceMemory(deviceMemory)),
                       QString::number(web->budget().maxLiveRuntimes())));
+    // WHAT THIS APP CAN SEE OF THE PAGES' RENDERER (#244). Evidence for the
+    // design, printed once per run: if an app CAN weigh its own WebView
+    // renderer in-process then the device-frame reading is the wrong answer and
+    // the renderer's own figure is the right one. Compared against the host's
+    // `adb shell ps -A -o PID,RSS,NAME`.
+    emit log(QStringLiteral("web budget: process visibility -- %1")
+                 .arg(basecamp::web::processVisibilityReport()));
     weigh(QStringLiteral("before any web app is open"));
 
     loadShippedWebModules();
@@ -214,12 +377,15 @@ void ShellWebBudgetDriver::run()
     const QStringList shed = web->memoryWarning();
     settle(kSettleMs);
     const qint64 after = basecamp::web::appResidentBytes();
+    const qint64 weighedAfter = basecamp::web::budgetWeighedBytes();
     emit log(QStringLiteral("WEB BUDGET: a memory warning shed %1 page(s) [%2]; the app "
-                            "went from %3 to %4")
+                            "went from %3 to %4 and the weighed figure to %5")
                  .arg(QString::number(shed.size()),
                       shed.isEmpty() ? QStringLiteral("nothing to give up")
                                      : shed.join(QStringLiteral(", ")),
                       reportedAs(before, QStringLiteral("?")),
-                      reportedAs(after, QStringLiteral("?"))));
+                      reportedAs(after, QStringLiteral("?")),
+                      reportedAs(weighedAfter, QStringLiteral("?"))));
+    reportWhetherTheFigureMoved(weighedAfter, shed.size());
     emit log(QStringLiteral("SHELL WEIGHED ITS WEB RUNTIMES"));
 }

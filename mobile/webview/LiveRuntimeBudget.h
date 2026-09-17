@@ -5,6 +5,8 @@
 
 #include <QtGlobal>
 
+#include <algorithm>
+
 namespace basecamp::web {
 
 // HOW MANY DOWNLOADED MODULES MAY HAVE A QML RUNTIME ALIVE AT ONCE.
@@ -58,6 +60,24 @@ public:
     // that the cap is a memory decision -- see kMaxLiveRuntimes.
     static constexpr qint64 kDeviceRuntimeBytes = 290LL * 1024 * 1024;
 
+    // ...AND WHAT EVERY PAGE AFTER THE FIRST COSTS, which is almost nothing
+    // (logos-workspace#244 decided this; #230 measured it).
+    //
+    // All of a build's pages share ONE renderer, so the figure above is the
+    // price of STARTING one and this is the price of a second document in the
+    // one that is already running: 290 -> 298 -> 300 MB for one, two and three
+    // pages on a Xiaomi 25028RN03Y and 345 -> 345 -> 348 MB on a Samsung
+    // SM-G990B, both on 2026-09-17. 8 MB is the larger of the two per-page
+    // deltas rounded up.
+    //
+    // IT IS A STATED COST, READ ONLY BY THE LOG. budgetBytes() and
+    // projectedBytes() exist so a device run can say what the container holds,
+    // and multiplying the renderer's price by the page count made them say
+    // 870 MB for three pages that weigh about 300 -- a log that was wrong by 3x
+    // about the one thing it was added to report. The COUNT is deliberately not
+    // re-fitted to this: see runtimesForDeviceMemory().
+    static constexpr qint64 kAdditionalRuntimeBytes = 8LL * 1024 * 1024;
+
     // HOW MANY PAGES A DEVICE OF THIS SIZE MAY KEEP (#153).
     //
     // The count used to be 1 on every device, and the comment above admitted
@@ -80,6 +100,16 @@ public:
     // third is a bet against a number nobody here can read. A simulator makes
     // the same point loudly: it reports the Mac's 64 GB.
     static constexpr int kMaxLiveRuntimes = 3;
+    //
+    // AND THE COUNT STAYS ON THE RENDERER'S PRICE, not on kAdditionalRuntimeBytes
+    // (logos-workspace#244). Divided by 8 MB every device the venue has would
+    // afford the cap, and the count would stop being a device question at all --
+    // which is the fixed number #153 removed, arrived at from the other side.
+    // What a second page really costs a user is a second live document in a
+    // renderer that is already the app's largest single allocation, plus the
+    // cold start of getting it there; the bytes are the smaller half of that.
+    // The count is the conservative half of this policy and the MEASUREMENT is
+    // the half that acts -- and as of #244 the measurement can finally trip.
     static int runtimesForDeviceMemory(qint64 deviceMemoryBytes,
                                        qint64 runtimeFootprintBytes = kDeviceRuntimeBytes);
 
@@ -97,7 +127,39 @@ public:
     // Zero means "there is nothing to weigh against" -- a device that will not
     // say its memory -- and a budget with a ceiling of zero counts and does not
     // weigh, which is what this class did before #153.
+    //
+    // THE FRAME IS THE PROCESS'S, so this is the ceiling for a platform whose
+    // pages are charged to the process that opened them -- iOS and macOS. See
+    // ceilingForDeviceInUse() for Android's, and AppMemory::budgetWeighedBytes()
+    // for why there are two.
     static qint64 ceilingForDeviceMemory(qint64 deviceMemoryBytes);
+
+    // ...AND THE SAME QUESTION IN THE DEVICE'S FRAME (logos-workspace#244).
+    //
+    // On Android what observe() weighs is HOW MUCH OF THE DEVICE IS IN USE,
+    // because that is the only book a `web` page appears in, so the ceiling has
+    // to be a level of device use rather than a share of the app. A third of
+    // the device would be nonsense here: the Xiaomi 25028RN03Y idles with
+    // 1.15 GB of its 2.72 GB in use and would evict on its first observation,
+    // every run, before a page had been opened.
+    //
+    // EVERYTHING EXCEPT THE ROOM THE OS WANTS KEPT FREE, AND A PAGE'S MARGIN.
+    // `deviceLowMemoryBytes` is Android's own line (AppMemory.h) -- the level at
+    // which the system starts killing background processes, measured at 216 MB
+    // on both venue devices -- and the extra page's worth is so the container
+    // sheds BEFORE the OS does: at the line itself, the thing that gets reaped
+    // is the shared renderer, and then every page goes at once instead of the
+    // least recently visible one. The ceiling's device-dependence comes from
+    // MemTotal, not from the line: 2283 MB on a 2.7 GB Xiaomi 25028RN03Y and
+    // 14769 MB on a 14.9 GB Lenovo TB520FU, both measured 2026-09-17.
+    //
+    // A DEVICE THAT WILL NOT SAY ITS LINE GETS AN EIGHTH OF ITSELF, which is
+    // the order of what Android's own threshold comes to on the venue's phones,
+    // and a device that will not say its memory gets 0 -- no ceiling, count
+    // only, which is the one honest answer to "weigh this against nothing".
+    static qint64 ceilingForDeviceInUse(qint64 deviceMemoryBytes,
+                                        qint64 deviceLowMemoryBytes,
+                                        qint64 runtimeFootprintBytes = kDeviceRuntimeBytes);
 
     // THE BUDGET THIS DEVICE GETS, measured rather than assumed. The count and
     // the ceiling both come from deviceMemoryBytes().
@@ -110,6 +172,13 @@ public:
     // flag because there is no environment to speak of on a phone: an APK's
     // process inherits nothing a developer typed, while the launcher forwards
     // arguments on both platforms.
+    //
+    // ...AND SO CAN THE CEILING, `--web-ceiling <MB>` or
+    // `LOGOS_WEB_APP_CEILING_MB` (#244). A ceiling that cannot be reached is
+    // indistinguishable from one that never needed to be, which is exactly how
+    // #153's unreachable branch survived a landing: a run has to be able to put
+    // the ceiling where this device will cross it and watch the eviction it
+    // causes. Stated in MB, against whatever frame this platform weighs.
     static LiveRuntimeBudget forThisDevice(const QStringList& args = {});
 
     // One runtime is the DEFAULT still, and deliberately: a host that states no
@@ -138,19 +207,24 @@ public:
     // after free rather than a no-op.
     void forget(const QString& module);
 
-    // WHAT THE APP WEIGHS RIGHT NOW, answered rather than logged (#153).
+    // WHAT THE PLATFORM WEIGHS RIGHT NOW, answered rather than logged (#153).
     //
-    // `appResidentBytes` is what AppMemory measured, or -1 where the platform
-    // will not say -- and a platform that will not say is not a reason to
-    // evict, so -1 changes nothing. Over the ceiling, ONE page is given up per
-    // observation, least recently visible first: one at a time because the
-    // number is the host's and not the page's (AppMemory.h), so the container
-    // cannot know which page is the expensive one and shedding the lot on one
-    // reading would cost three cold starts to answer a spike.
+    // `weighedBytes` is AppMemory::budgetWeighedBytes() -- this process's
+    // footprint on iOS, how much of the DEVICE is in use on Android -- or -1
+    // where the platform will not say, and a platform that will not say is not
+    // a reason to evict, so -1 changes nothing. It must be read against a
+    // ceiling stated in the same frame; this class does not know which frame it
+    // is in and does not need to, because both sides of the comparison come
+    // from forThisDevice().
+    //
+    // ONE PAGE PER OBSERVATION, least recently visible first: the number is
+    // never the page's own on either platform (AppMemory.h), so the container
+    // cannot know which page is the expensive one, and shedding the lot on one
+    // reading would cost three cold starts to answer a spike that was passing.
     //
     // Never the visible module: one page is the floor here exactly as it is in
     // the constructor.
-    QStringList observe(qint64 appResidentBytes);
+    QStringList observe(qint64 weighedBytes);
 
     // THE OS ASKED FOR MEMORY BACK, which is the one signal in this file that
     // is not this app's own opinion. Everything but the module the user is
@@ -183,19 +257,35 @@ public:
     // its budget is and to show that switching modules brings the app back
     // inside it, and a number the host never prints cannot be checked from a
     // device run.
-    qint64 budgetBytes() const { return qint64(m_maxLive) * m_footprintBytes; }
-    qint64 projectedBytes() const { return qint64(m_live.size()) * m_footprintBytes; }
+    // ONE RENDERER AND THEN A DOCUMENT EACH, not a renderer each. See
+    // kAdditionalRuntimeBytes: the pages share one process, and stating them as
+    // a multiple of the first page's price over-reported three live runtimes by
+    // about 3x in every device log this container has printed.
+    qint64 budgetBytes() const { return statedCostOf(m_maxLive); }
+    qint64 projectedBytes() const { return statedCostOf(int(m_live.size())); }
     qint64 runtimeFootprintBytes() const { return m_footprintBytes; }
     qint64 appCeilingBytes() const { return m_ceilingBytes; }
 
 private:
     // Trim to the current allowance, least recently visible first.
     QStringList trimToAllowance();
-    // WHERE A TIGHTENED BUDGET IS ALLOWED TO GROW AGAIN. Three quarters of the
-    // ceiling: a budget that relaxed the moment the reading dipped under the
+    // What `pages` live runtimes are stated to cost. Zero pages cost nothing;
+    // the first pays for the renderer and the rest for a document each.
+    qint64 statedCostOf(int pages) const
+    {
+        return pages <= 0 ? 0 : m_footprintBytes + qint64(pages - 1) * kAdditionalRuntimeBytes;
+    }
+    // WHERE A TIGHTENED BUDGET IS ALLOWED TO GROW AGAIN. A page's worth below
+    // the ceiling: a budget that relaxed the moment the reading dipped under the
     // ceiling would follow a number that moves by megabytes between two frames,
     // and the user would pay a 3-second cold start for each oscillation.
-    qint64 relaxBelowBytes() const { return m_ceilingBytes / 4 * 3; }
+    //
+    // A PAGE'S WORTH RATHER THAN A FRACTION (logos-workspace#244), because it is
+    // the same sentence in both frames -- "there is room for another one again"
+    // -- and three quarters of the ceiling is not: on Android the ceiling is a
+    // level of DEVICE use and a phone that idles above three quarters of it
+    // could never earn its pages back.
+    qint64 relaxBelowBytes() const { return std::max<qint64>(0, m_ceilingBytes - m_footprintBytes); }
 
     int m_maxLive;
     int m_allowance;

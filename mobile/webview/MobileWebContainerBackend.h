@@ -147,18 +147,26 @@ public:
     // watchAppMemoryPressure(), and is public because a host and a test both
     // have reason to fire it.
     //
-    // observeMemory() is the other, quieter half: what the app weighs RIGHT NOW,
-    // read against the budget's ceiling. The container calls it whenever a page
-    // is shown and on the poll timer's cadence while pages are live, which is
-    // the only way growth inside a page is ever noticed -- nothing else in this
-    // class wakes up between two taps. `bytes` is what AppMemory measured, or
-    // -1 for a platform that will not say, and -1 changes nothing.
+    // observeMemory() is the other, quieter half: what this PLATFORM weighs
+    // right now, read against the budget's ceiling. The container calls it
+    // whenever a page is shown and on the poll timer's cadence while pages are
+    // live, which is the only way growth inside a page is ever noticed --
+    // nothing else in this class wakes up between two taps. `weighedBytes` is
+    // AppMemory::budgetWeighedBytes(), or -1 for a platform that will not say,
+    // and -1 changes nothing.
+    //
+    // IT IS NOT ALWAYS THIS PROCESS'S FIGURE (#244). On Android a `web` page
+    // lives in a Chromium renderer of its own, so what is weighed there is how
+    // much of the DEVICE is in use -- the only book the page appears in. The
+    // caller passes budgetWeighedBytes() and the ceiling install() was given is
+    // stated in the matching frame; the pair is chosen together in
+    // LiveRuntimeBudget::forThisDevice().
     //
     // Both answer with the modules whose UI page was given up, and both give it
     // up the same way a count eviction does (uiEvicted / uiEvictionRequired):
     // there is one way out of a page in this container, whatever decided.
     QStringList memoryWarning();
-    QStringList observeMemory(qint64 bytes);
+    QStringList observeMemory(qint64 weighedBytes);
 
     // NOBODY IS LOOKING AT A MODULE. Every page goes behind the host's own
     // surface and the budget's books are not touched: closing an app is not
