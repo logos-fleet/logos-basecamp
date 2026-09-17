@@ -628,8 +628,10 @@ either. Only the LOCATING is done through the accessibility tree.
 ```
 [shell] web input: pressed wallet_ui's 'Advanced'
 [shell] web input: typed 12 character(s) into wallet_ui's 'Account label'
-[shell] TYPED TEXT REACHES A WEB APP'S PAGE: wallet_ui's 'Account label' holds
-        'issue174', put there by real key events at the page
+[shell] web input: wallet_ui's 'Account label' holds 'issue174' -- the module's
+        own state, read back off the page
+[shell] TYPED TEXT REACHES A WEB APP'S PAGE: wallet_ui's 'seed-import' flow,
+        every step from inside the app
 ```
 
 So the wallet's `seed-import` flow names `Advanced` and `Import` (their text)
@@ -842,6 +844,14 @@ those answers is stated without a webview in
 This pass does not scroll: a field below the fold is reported as "on the page
 and not reachable" rather than worked around, because a form whose fields are
 off the page is a finding.
+
+That rule is about DISPATCHING A POINTER EVENT, so a `read` step is exempt from
+it (logos-workspace#250). Reachable means at least 20x20 and wholly inside the
+canvas — Qt hands out a token 16x6 rect at the window's origin for an item that
+is not showing, and a press at one of those lands in the corner of the scene.
+Reading asks for a `text` property, which is right whatever the rect says: the
+wallet's proxy status line is one line of secondary text, ~18 px tall, and
+asking what it held was refused for being too small to press.
 
 ## The Settings page at a phone's width
 
@@ -1177,10 +1187,10 @@ so. That control is new: `proxyStatus` was a property the backend had always
 published and the view rendered nowhere, so pressing Apply changed the screen in
 no way at all whether the setting was applied, refused, or never asked for.
 
-Both press their buttons by `objectName` rather than by text. An accessible name
-is matched case-insensitively FROM THE FRONT, and the Advanced tab's `Import`
-button sits under an `Import account (seed phrase)` heading that matches
-`Import` just as well and is not a button.
+Both name the TABS by their text and the BUTTONS by `objectName`. An accessible
+name is matched case-insensitively FROM THE FRONT, and the Advanced tab's
+`Import` button sits under an `Import account (seed phrase)` heading that
+matches `Import` just as well and is not a button.
 
 ### A call that takes minutes
 

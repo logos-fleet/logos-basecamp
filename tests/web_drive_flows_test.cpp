@@ -378,6 +378,25 @@ private slots:
                  std::nullopt);
     }
 
+    // ...AND AN EMPTY KEYSTORE IS NOT AN ACCOUNT. The wallet publishes this
+    // line once at startup for a list with nothing in it, before the flow has
+    // imported anything, and it lands after the flow's cursor. `selected` is
+    // null there rather than an empty string precisely so this gate does NOT
+    // open on it and go on to press a button the view has disabled.
+    void anEmptyAccountListDoesNotOpenTheHistoryGate()
+    {
+        QCOMPARE(WebPageWatcher::readingOf(
+                     QStringLiteral(R"([wallet_ui web] accounts now: {"count":0,)"
+                                    R"("selected":null,"from":"keystore_module"})"),
+                     QStringLiteral("accounts now:"), QStringLiteral("selected")),
+                 std::nullopt);
+        QCOMPARE(WebPageWatcher::readingOf(
+                     QStringLiteral(R"([wallet_ui web] accounts now: {"count":1,)"
+                                    R"("selected":"0xabc","from":"keystore_module"})"),
+                     QStringLiteral("accounts now:"), QStringLiteral("selected")),
+                 std::optional<QString>(QStringLiteral("0xabc")));
+    }
+
     // Every Await has a budget, because a step with none waits forever on a
     // device nobody is watching.
     void everyAwaitIsBounded()

@@ -317,8 +317,8 @@ const QString kProxyUrl = QStringLiteral("socks5h://127.0.0.1:9050");
 // src/wallet_ui_web_backend.cpp, for a proxy that is not required -- this flow
 // leaves the fail-closed box alone. A readback of a control is the strongest
 // verdict this driver has and it is also a COUPLING: change that sentence and
-// this flow says the keys did not reach the field. Which is the trade this one
-// step is worth making, because `proxyStatus` is the module's own state.
+// this flow says the tab holds something else. Which is the trade this one step
+// is worth making, because `proxyStatus` is the module's own state.
 const QString kProxyApplied =
     QStringLiteral("Proxy applied: %1 (optional)").arg(kProxyUrl);
 
