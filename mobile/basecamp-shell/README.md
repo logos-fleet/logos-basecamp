@@ -628,8 +628,10 @@ either. Only the LOCATING is done through the accessibility tree.
 ```
 [shell] web input: pressed wallet_ui's 'Advanced'
 [shell] web input: typed 12 character(s) into wallet_ui's 'Account label'
-[shell] TYPED TEXT REACHES A WEB APP'S PAGE: wallet_ui's 'Account label' holds
-        'issue174', put there by real key events at the page
+[shell] web input: wallet_ui's 'Account label' holds 'issue174' -- the module's
+        own state, read back off the page
+[shell] TYPED TEXT REACHES A WEB APP'S PAGE: wallet_ui's 'seed-import' flow,
+        every step from inside the app
 ```
 
 So the wallet's `seed-import` flow names `Advanced` and `Import` (their text)
@@ -652,7 +654,8 @@ says which it wants:
 --drive web-input:seed-import,web-input:private-sync  both, in that order
 ```
 
-`wallet_ui` carries three: `seed-import`, `private-sync` and `private-shield`.
+`wallet_ui` carries five: `seed-import`, `private-sync`, `private-shield`,
+`history` and `proxy-config`.
 
 The catalogue is [`src/WebDriveFlows.h`](src/WebDriveFlows.h) — data, not code
 in the driver, so the next `web` app adds to it and a unit test can state it on
@@ -841,6 +844,14 @@ those answers is stated without a webview in
 This pass does not scroll: a field below the fold is reported as "on the page
 and not reachable" rather than worked around, because a form whose fields are
 off the page is a finding.
+
+That rule is about DISPATCHING A POINTER EVENT, so a `read` step is exempt from
+it (logos-workspace#250). Reachable means at least 20x20 and wholly inside the
+canvas — Qt hands out a token 16x6 rect at the window's origin for an item that
+is not showing, and a press at one of those lands in the corner of the scene.
+Reading asks for a `text` property, which is right whatever the rect says: the
+wallet's proxy status line is one line of secondary text, ~18 px tall, and
+asking what it held was refused for being too small to press.
 
 ## The Settings page at a phone's width
 
@@ -1133,6 +1144,53 @@ xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
   --call 'keystore_module.list_accounts'
 # [shell] CALL OK keystore_module.list_accounts -> {"accounts":["0x5a3a5A89…"],"ok":true,…}
 ```
+
+### `history` and `proxy-config` — the two screens #250 was reported against
+
+An operator's physical iPad answered "History needs `wallet_backend_module`"
+and "Proxy config needs `wallet_backend_module`" with that module bundled into
+the same app image, unloaded, because `wallet_ui` never declared it and never
+called it (logos-workspace#250). The fix was one line of metadata and two calls;
+what there was no way to do was ASK THE TABS AGAIN, on a device where nothing
+can tap.
+
+```
+--drive web-input:history
+--drive web-input:proxy-config
+```
+
+`history` imports the all-zero BIP-39 vector on the Advanced tab first, because
+`Refresh history` is disabled until the wallet holds an account — and it waits
+for the wallet's own `accounts now:` line rather than sleeping. Then it presses
+`History`, `Refresh history`, and requires the answer:
+
+```
+[shell] web input: wallet_ui published the account the tabs will ask about --
+        selected = 0x9858EfFD232B4033E47d90003D41EC34EcaEda94
+[shell] web input: wallet_ui published the coordinator's answer, and how many
+        rows were in it -- rows = 0
+[shell] THE HISTORY TAB IS ANSWERED BY wallet_backend_module, on the device:
+        wallet_ui's 'history' flow, every step from inside the app
+```
+
+**The ask is not the answer.** `refreshHistory: asking wallet_backend_module …`
+is published before the wallet knows anything, and it was published on the
+operator's iPad too. `history updated:` is published only for a reply the
+coordinator answered, and `rows` is the reading rather than its emptiness: an
+account with no transactions is an answer, and it is the answer a device with a
+fresh keystore gives.
+
+`proxy-config` types a SOCKS URL into the Settings tab, presses `Apply proxy`
+and makes two claims — the console line (the coordinator took the document, and
+which document), and a READBACK of `proxyStatusText`, which is the tab saying
+so. That control is new: `proxyStatus` was a property the backend had always
+published and the view rendered nowhere, so pressing Apply changed the screen in
+no way at all whether the setting was applied, refused, or never asked for.
+
+Both name the TABS by their text and the BUTTONS by `objectName`. An accessible
+name is matched case-insensitively FROM THE FRONT, and the Advanced tab's
+`Import` button sits under an `Import account (seed phrase)` heading that
+matches `Import` just as well and is not a button.
 
 ### A call that takes minutes
 

@@ -302,9 +302,14 @@ bool ShellWebInputDriver::walk(const WebDriveFlow& flow)
                          .arg(flow.app, step.control));
             return false;
         }
+        // A READ IS NOT ALWAYS A READBACK OF SOMETHING TYPED. `seed-import` reads
+        // the field it filled, where a mismatch means the keys never landed;
+        // `proxy-config` reads a status line the module wrote, where it means
+        // the module said something else. So this states what was required and
+        // what is there, and leaves the cause to the lines above it.
         if (reading && held != step.text) {
-            emit log(QStringLiteral("WRONG: %1's '%2' was typed '%3' and holds '%4' -- the "
-                                    "keys did not reach the field")
+            emit log(QStringLiteral("WRONG: %1's '%2' was required to hold '%3' and holds "
+                                    "'%4'")
                          .arg(flow.app, step.control, step.text, held));
             return false;
         }
@@ -312,8 +317,9 @@ bool ShellWebInputDriver::walk(const WebDriveFlow& flow)
             emit log(QStringLiteral("web input: typed %1 character(s) into %2's '%3'")
                          .arg(step.text.size()).arg(flow.app, step.control));
         else if (reading)
-            emit log(QStringLiteral("web input: %1's '%2' holds '%3', put there by real key "
-                                    "events at the page").arg(flow.app, step.control, held));
+            emit log(QStringLiteral("web input: %1's '%2' holds '%3' -- the module's own "
+                                    "state, read back off the page")
+                         .arg(flow.app, step.control, held));
         else
             emit log(QStringLiteral("web input: pressed %1's '%2'").arg(flow.app, step.control));
     }

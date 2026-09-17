@@ -292,6 +292,135 @@ WebDriveFlow privateShield()
     return flow;
 }
 
+// ── #250's two other screens ─────────────────────────────────────────────────
+//
+// IMPORTING A SEED IS THE SLOW STEP, not the tab. `import_mnemonic` derives a
+// key and writes a scrypt vault, in wasm, on a tablet -- and it runs behind the
+// keystore's Tier D chain (`caller_identity`, `configure`) with the core's
+// admission retry in front of that. Two minutes rather than a measured number:
+// nothing here is waiting on the wallet being quick, only on it answering.
+constexpr int kAccountBudgetMs = 120000;
+// One call to a module in the same app image, which keeps the record locally
+// and may read receipts over the radio to freshen it. A minute covers both.
+constexpr int kHistoryBudgetMs = 60000;
+// The same shape, and shorter work: `set_proxy_config` is a document handed to
+// the coordinator, which answers a bare bool.
+constexpr int kProxyBudgetMs = 60000;
+
+// THE PROXY THIS TYPES. A Tor SOCKS endpoint on the device's own loopback, and
+// nothing is dialled by applying it: `set_proxy_config` stores the setting and
+// pushes it into eth_rpc's chains. It is the placeholder the field itself
+// suggests, so a screenshot of the run reads as the tab's own example.
+const QString kProxyUrl = QStringLiteral("socks5h://127.0.0.1:9050");
+
+// ...and what the wallet's settings line then holds. `proxyApplied()` in
+// src/wallet_ui_web_backend.cpp, for a proxy that is not required -- this flow
+// leaves the fail-closed box alone. A readback of a control is the strongest
+// verdict this driver has and it is also a COUPLING: change that sentence and
+// this flow says the tab holds something else. Which is the trade this one step
+// is worth making, because `proxyStatus` is the module's own state.
+const QString kProxyApplied =
+    QStringLiteral("Proxy applied: %1 (optional)").arg(kProxyUrl);
+
+// wallet_ui's History tab: "History → Refresh history returns data", the first
+// of the three failures logos-workspace#250 was reported with.
+//
+// WHY IT IMPORTS AN ACCOUNT FIRST. `Refresh history` is disabled until the
+// wallet holds one (`enabled: root.ready && acctBox.currentText.length > 0`),
+// so on a freshly installed app this flow would press a dead button and then
+// wait out a budget for an answer nobody was asked for. The seed is the all-zero
+// BIP-39 test vector for the same reason the seed-import flow uses it: it is
+// worthless, every wallet test in this workspace uses it, and it must never be a
+// phrase anyone could have funded. Importing it twice is the same key again.
+//
+// THE GATE IS THE WALLET'S OWN ACCOUNT LINE, not a sleep: `accounts now:`
+// carries the account the tabs will ask about, and it is published when
+// `list_accounts` answered -- which is after the import landed.
+//
+// AND THE VERDICT IS THE ANSWER, NOT THE ASK. The wallet announces
+// `refreshHistory: asking wallet_backend_module …` before it knows anything,
+// and it announced that on the operator's iPad too -- the ask is exactly what
+// #250 fixed and exactly what cannot tell a run that WORKED from a run that was
+// refused. `history updated:` is published only on a reply the coordinator
+// answered, and `rows` is the reading rather than its emptiness: an account with
+// no transactions in it is an answer, and it is the answer a device with a
+// fresh keystore gives.
+WebDriveFlow history()
+{
+    WebDriveFlow flow;
+    flow.name = QStringLiteral("history");
+    flow.app = QStringLiteral("wallet_ui");
+    flow.verdict =
+        QStringLiteral("THE HISTORY TAB IS ANSWERED BY wallet_backend_module, on the device");
+
+    WebPageWatch account;
+    account.marker = QStringLiteral("accounts now:");
+    account.field = QStringLiteral("selected");
+    account.want = WebPageWatch::Want::Present;
+    account.budgetMs = kAccountBudgetMs;
+    account.what = QStringLiteral("the account the tabs will ask about");
+
+    WebPageWatch answered;
+    answered.marker = QStringLiteral("history updated:");
+    answered.field = QStringLiteral("rows");
+    answered.want = WebPageWatch::Want::Present;
+    answered.budgetMs = kHistoryBudgetMs;
+    answered.what = QStringLiteral("the coordinator's answer, and how many rows were in it");
+
+    flow.steps = {
+        WebDriveStep::press(QStringLiteral("Advanced")),
+        WebDriveStep::type(QStringLiteral("advSeedField"),
+                           QStringLiteral("abandon abandon abandon abandon abandon abandon "
+                                          "abandon abandon abandon abandon abandon about")),
+        WebDriveStep::type(QStringLiteral("advAcctLabelField"), QStringLiteral("issue250")),
+        WebDriveStep::type(QStringLiteral("advAcctPwField"), QStringLiteral("hunter2")),
+        // BY objectName. The accessible name is matched from the front and this
+        // button sits under an "Import account (seed phrase)" heading, which
+        // matches "Import" just as well and is not a button.
+        WebDriveStep::press(QStringLiteral("advImportButton")),
+        WebDriveStep::await(account),
+        WebDriveStep::press(QStringLiteral("History")),
+        WebDriveStep::press(QStringLiteral("historyRefreshButton")),
+        WebDriveStep::await(answered),
+    };
+    return flow;
+}
+
+// wallet_ui's Settings tab: "Advanced → Proxy config opens", the second of the
+// three. The operator's tab answered "Proxy config needs wallet_backend_module"
+// and made no call at all.
+//
+// TWO CLAIMS, AND THE SECOND IS THE ONE A PERSON WOULD HAVE MADE. The console
+// line says the coordinator took the document and carries what was applied; the
+// READBACK says the TAB shows it. `proxyStatus` is a property the backend has
+// always published and the view rendered nowhere, so pressing Apply changed the
+// screen in no way at all -- applied, refused or, before #250, never asked for.
+// A flow that only read the console would have left that unnoticed.
+WebDriveFlow proxyConfig()
+{
+    WebDriveFlow flow;
+    flow.name = QStringLiteral("proxy-config");
+    flow.app = QStringLiteral("wallet_ui");
+    flow.verdict = QStringLiteral(
+        "THE WALLET'S PROXY SETTING REACHES wallet_backend_module AND THE TAB SAYS SO");
+
+    WebPageWatch applied;
+    applied.marker = QStringLiteral("proxy applied:");
+    applied.field = QStringLiteral("proxy");
+    applied.want = WebPageWatch::Want::Present;
+    applied.budgetMs = kProxyBudgetMs;
+    applied.what = QStringLiteral("the proxy the coordinator accepted");
+
+    flow.steps = {
+        WebDriveStep::press(QStringLiteral("Settings")),
+        WebDriveStep::type(QStringLiteral("proxyUrlField"), kProxyUrl),
+        WebDriveStep::press(QStringLiteral("proxyApplyButton")),
+        WebDriveStep::await(applied),
+        WebDriveStep::read(QStringLiteral("proxyStatusText"), kProxyApplied),
+    };
+    return flow;
+}
+
 // The object a `<something>: {…}` line carries, or an empty one.
 QJsonObject objectOn(const QString& line)
 {
@@ -393,7 +522,7 @@ bool WebPageWatcher::offer(const QString& line)
 QList<WebDriveFlow> WebDriveFlows::forApp(const QString& app)
 {
     if (app == QLatin1String("wallet_ui"))
-        return { seedImport(), privateSync(), privateShield() };
+        return { seedImport(), privateSync(), privateShield(), history(), proxyConfig() };
     return {};
 }
 

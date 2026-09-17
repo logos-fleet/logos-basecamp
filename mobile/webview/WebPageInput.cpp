@@ -121,14 +121,17 @@ QString WebPageInput::driverScript()
              value: item.text, via: 'objectName' });
     }).catch(function () { done(null); });
   };
-  var fromTree = function (name) {
+  var fromTree = function (name, forReading) {
     var all = controls(), named = [], reach = [];
     for (var i = 0; i < all.length; i++) {
       if (!matches(all[i], name)) continue;
       named.push(all[i]);
       if (reachable(all[i])) reach.push(all[i]);
     }
-    var el = reach.length ? reach[0] : null;
+    // A READ TAKES ONE A FINGER COULD NOT HIT. See `find` below: the
+    // reachability rule is about dispatching a pointer event, and reading a
+    // control dispatches nothing.
+    var el = reach.length ? reach[0] : (forReading && named.length ? named[0] : null);
     if (!el) return { el: null, onPage: named.length > 0 };
     var r = el.getBoundingClientRect();
     return { el: el, left: r.left, top: r.top, width: r.width, height: r.height,
@@ -145,12 +148,25 @@ QString WebPageInput::driverScript()
     }
     return here;
   };
-  var find = function (name, done) {
+  // `forReading` TURNS THE REACHABILITY RULE OFF, and only that one rule
+  // (logos-workspace#250). Reachable means a finger could hit it -- at least
+  // 20x20 and wholly inside the canvas -- because Qt gives every item on a page
+  // that is not showing a 16x6 rect at the window's origin, and a press at one
+  // of those lands in the corner of the scene and looks like a platform that
+  // swallows events. Reading asks for a `text` PROPERTY, which is right
+  // whatever the rect says.
+  //
+  // Measured on the venue's physical iPad: the wallet's proxy status line is
+  // one line of secondary text, ~18 px tall, and asking what it held was
+  // refused as "on the page and not reachable" -- a readback turned down for
+  // being too small to press.
+  var find = function (name, done, forReading) {
     fromRuntime(name, function (item) {
       if (item) {
-        if (!onCanvas({ left: item.left, top: item.top,
-                        right: item.left + item.width, bottom: item.top + item.height,
-                        width: item.width, height: item.height })) {
+        if (!forReading
+            && !onCanvas({ left: item.left, top: item.top,
+                           right: item.left + item.width, bottom: item.top + item.height,
+                           width: item.width, height: item.height })) {
           say("'" + name + "' is on the page and not reachable");
           done(null);
           return;
@@ -158,7 +174,7 @@ QString WebPageInput::driverScript()
         done(item);
         return;
       }
-      var found = fromTree(name);
+      var found = fromTree(name, forReading);
       if (found.el) { done(found); return; }
       if (found.onPage) { say("'" + name + "' is on the page and not reachable"); }
       else {
@@ -319,7 +335,7 @@ QString WebPageInput::driverScript()
       afterWaking(function () {
         find(name, function (found) {
           if (found) say("'" + name + "' now " + valueOf(found));
-        });
+        }, true);
       });
     }
   };
