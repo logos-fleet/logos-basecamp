@@ -110,9 +110,12 @@ private:
     // gate coming back down, which is the page's own report that the install
     // finished rather than stalled behind a modal.
     bool waitUntilGone(const QString& objectName, int timeoutMs);
-    // The scene this item is in, as a PNG under the app's data directory, and
-    // the line to report it by. Empty when it could not be written.
-    QString savePicture(QQuickItem* item);
+    // The scene this item is in, as a PNG under the app's data directory named
+    // `<basename>.png`, and the line to report it by. Empty when it could not
+    // be written. The basename is the caller's because a run takes more than
+    // one -- a refused row, and the signer gate -- and one fixed filename meant
+    // the second write destroyed the first.
+    QString savePicture(QQuickItem* item, const QString& basename);
 
     BundledSetShellHost* m_host;  // not owned
     // Where the picture of the first refused row went, once one has been taken.

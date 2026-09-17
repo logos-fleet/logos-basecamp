@@ -268,6 +268,17 @@ bool ShellCatalogPageDriver::driveInstall(const QString& packageName)
                      .arg(textOf(item).replace(QLatin1Char('\n'), QLatin1Char(' '))));
     }
 
+    // ...AND A PICTURE OF IT, while it is up. The assertions above are read off
+    // the live scene and are the proof; this is the thing a person can look at,
+    // and on a phone there is no inspector to take one with (ADR 0002). It
+    // matters more here than for a row: the defect this whole flow had was a
+    // dialog that EXISTED in the model and was on no screen, and a console line
+    // saying "the gate is on screen" is the same kind of claim that was already
+    // being made about `signerPrompt`.
+    if (const QString shot = savePicture(title, QStringLiteral("signer-gate"));
+        !shot.isEmpty())
+        emit log(QStringLiteral("signer gate picture: %1").arg(shot));
+
     QQuickItem* approve = waitFor(kSignerInstall, 2000);
     if (!approve) {
         dumpNames(QStringLiteral("the signer gate has no way to approve"));
@@ -515,7 +526,7 @@ bool ShellCatalogPageDriver::checkRows()
                 // look at, and on a phone there is no inspector to take it
                 // with (ADR 0002). One is enough: they all render the same way.
                 if (m_picture.isEmpty())
-                    m_picture = savePicture(row);
+                    m_picture = savePicture(row, QStringLiteral("catalog-page"));
             }
         }
     };
@@ -609,7 +620,7 @@ bool ShellCatalogPageDriver::checkRows()
 // change for the whole of this pass -- measured, 24 captures a second apart on
 // an iPad Air 13-inch (M2), every one of them identical. The app is the only
 // thing here that can see what the app drew.
-QString ShellCatalogPageDriver::savePicture(QQuickItem* item)
+QString ShellCatalogPageDriver::savePicture(QQuickItem* item, const QString& basename)
 {
     const QImage frame = frameOf(surfaceOf(item));
     if (frame.isNull()) {
@@ -619,7 +630,10 @@ QString ShellCatalogPageDriver::savePicture(QQuickItem* item)
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (dir.isEmpty() || !QDir().mkpath(dir))
         return {};
-    const QString path = dir + QStringLiteral("/catalog-page.png");
+    // NAMED PER SUBJECT, so the refused row's picture and the signer gate's are
+    // both still there when the run is over -- one fixed filename meant the
+    // second write destroyed the first piece of evidence.
+    const QString path = dir + QLatin1Char('/') + basename + QStringLiteral(".png");
     if (!frame.save(path)) {
         emit log(QStringLiteral("catalog page: could not write %1").arg(path));
         return {};
