@@ -212,6 +212,30 @@
     logos-evm-wallet-ui.inputs.keystore_module.follows = "logos-evm-keystore-module";
     logos-evm-wallet-ui.inputs.uniswap_module.follows = "logos-evm-uniswap-module";
     logos-evm-wallet-ui.inputs.token_list_module.follows = "logos-evm-token-list-module";
+    # THE APPROVER (#245), and the module that ends the shield route's wait.
+    # `keystore_module` signs nothing without a human: a wallet asks through
+    # `request_approval`, and only a CONFIGURED APPROVER may claim the request
+    # and answer `approve(handle, bundle_id, password)`. On a desktop that is
+    # `evm_signer_ui`; on a phone there was NO approver at all, so the wallet
+    # UI's shield parked at its `sign` leg for ever and its `wrap` / `approve` /
+    # `shield` legs had never reached a chain.
+    #
+    # It is an ordinary `core` / `cdylib` module, so it joins the Bundled set
+    # like the six above and is driveable by `--call`. Its one declared
+    # dependency is `keystore_module`, which this image carries in its `web`
+    # half -- ADR 0010, the same resolution `railgun_module` relies on.
+    # `token_list_module` is OPTIONAL to it and is not in `dependencies`, so
+    # `--bundle evm_signer_cli` does not drag a token list onto a device.
+    #
+    # LOCKED TO THE logos-fleet FORK, for the reason the notes above give:
+    # upstream publishes no mobile keys, so a bare `nix flake update` walks the
+    # lock back to logos-co and this catalog entry stops EVALUATING. Re-pin with
+    #   nix flake lock --override-input logos-evm-signer-cli \
+    #     github:logos-fleet/logos-evm-signer-cli/<rev>
+    logos-evm-signer-cli.url = "github:logos-co/logos-evm-signer-cli";
+    logos-evm-signer-cli.inputs.logos-module-builder.follows = "logos-module-builder";
+    logos-evm-signer-cli.inputs.keystore_module.follows = "logos-evm-keystore-module";
+    logos-evm-signer-cli.inputs.token_list_module.follows = "logos-evm-token-list-module";
     # The capability broker, and a MEMBER of the mobile dev catalog
     # (mobileCatalogFor below): the catalog carries its `bare` output, reached
     # as `legacyPackages.<buildSystem>.mobile.<target>.bare`. A module-to-module
@@ -393,7 +417,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-token-list-module, logos-evm-fee-module, logos-evm-railgun-module, logos-evm-wallet-backend-module, logos-evm-wallet-ui, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-plugin-qt, logos-qt-sdk, logos-module, logos-module-loader-qt, logos-liblogos, logos-libp2p-module, logos-delivery-module, logos-chat-module, logos-chat-ui, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-modules-state-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-module-builder, logos-evm-keystore-module, logos-evm-eth-rpc-module, logos-evm-uniswap-module, logos-evm-token-list-module, logos-evm-fee-module, logos-evm-railgun-module, logos-evm-wallet-backend-module, logos-evm-wallet-ui, logos-evm-signer-cli, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-lgx, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the app binary so
@@ -961,6 +985,45 @@
               description = "The wallet coordinator: accounts, balances, quotes, approvals, sends and history";
               module = logos-evm-wallet-backend-module;
               dependencies = logos-evm-wallet-backend-module.config.dependencies;
+            };
+
+            # ...AND THE SEVENTH (#245), which is the one that lets the six
+            # above SPEND anything on a phone.
+            #
+            # `keystore_module` signs nothing without a human. A wallet asks
+            # (`request_approval`) and only a CONFIGURED APPROVER may claim the
+            # request, read the keystore's own render lines and answer
+            # `approve(handle, bundle_id, password)`. The built-in approver is
+            # `evm_signer_ui`, a desktop `ui_qml` module that has never been in
+            # this workspace, so on a device the wallet UI's shield route parked
+            # at its `sign` leg for ever: `plan` and `sign` and a cancel at
+            # `sign` were driveable (#235), and `wrap` / `approve` / `shield` --
+            # the three legs that touch a chain -- had never run at all.
+            #
+            # `evm_signer_cli` is the headless approver: the same role
+            # `evm_signer_ui` holds, driven by method calls instead of a window.
+            # It is an ordinary `core` / `cdylib` module, which is what makes it
+            # bundleable here and driveable by the Shell's `--call`.
+            #
+            # ITS CLOSURE IS ONE NAME, and it is the ADR 0010 case:
+            # `keystore_module` is NOT a catalog entry and deliberately never
+            # one (see `railgun_module` above -- one vault, one module), so the
+            # closure resolves it out of the image's `web` half and records it
+            # in `webSatisfied`. `token_list_module` is an OPTIONAL dependency
+            # of this module and is not in its `dependencies`, so a
+            # `--bundle evm_signer_cli` does not drag a token list onto a device
+            # that has no use for one; when the list IS in the set, the signer's
+            # third render section gains its naming lines.
+            #
+            # `dependencies` read off the module's own metadata.json, for the
+            # reason mkBareSpec gives.
+            evm_signer_cli = mkBareSpec {
+              name = "evm_signer_cli";
+              version = logos-evm-signer-cli.config.version;
+              category = "wallet";
+              description = "Headless approver for keystore_module: shows what a module asked to sign, and takes the decision";
+              module = logos-evm-signer-cli;
+              dependencies = logos-evm-signer-cli.config.dependencies;
             };
 
             # ── the apps (slices 22 and 27) ──────────────────────────────

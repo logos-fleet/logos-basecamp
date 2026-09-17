@@ -692,10 +692,61 @@ it presses `Private`, types an asset and an amount, arms `Shield` and then
 the amount.** The route is `plan → sign → wrap → approve → shield` and only the
 last three touch a chain. `plan` is `railgun_module.prepare_shield` (pure
 calldata, no network) plus two eth_rpc reads; `sign` lodges one approval request
-with `keystore_module` and then waits for a human in the **Signer app**, which
-is not installed on this venue's simulators. So the route parks at `sign`
-indefinitely, nothing is ever signed or broadcast, and the cancel is pressed
-exactly where #235's second clause has its interesting answer.
+with `keystore_module` and then waits for an **approver** to answer it. This
+flow never provides one, so the route parks at `sign`, nothing is ever signed or
+broadcast, and the cancel is pressed exactly where #235's second clause has its
+interesting answer.
+
+**What parks it is the ABSENCE of an approver, and that is now a choice the
+`--bundle` line makes** (logos-workspace#245). `keystore_module` signs nothing
+without a human: only a *configured* approver may claim a request, read the
+keystore's own render lines and answer `approve(handle, bundle_id, password)`.
+The built-in approver is `evm_signer_ui`, the desktop Signer app, which is not
+in this workspace and does not run on a phone — so until this issue there was no
+module in any image that could answer, whatever the run did.
+
+`evm_signer_cli` is the headless one, and it is a catalog entry now:
+
+```bash
+ws run logos-basecamp --target ios-sim-arm64 --app shell \
+  --bundle capability_module,eth_rpc_module,uniswap_module,token_list_module,railgun_module,evm_signer_cli
+```
+
+Its closure is one name — `keystore_module` — and that one is **not** a Bundled
+entry and deliberately never will be (one vault, one module). It resolves out of
+the image's `web` half instead and is recorded in `bundled-set.json` as
+`webSatisfied: ["keystore_module"]`, which is ADR 0010 doing exactly what it was
+written for.
+
+A set with the signer in it puts an approver **in the image**; walking the route
+past `sign` is a second thing, and this repository cannot do it yet:
+
+```bash
+# the signer is in the set, loaded and answering, in its own words
+--call evm_signer_cli.status
+# ...and the wallet names it as approver in the same run it asks for one
+--drive web-input:seed-import,web-input:private-shield
+```
+
+**The role has to be named with every request**, which is why the wallet's `web`
+backend sends its `configure` immediately before `request_approval` rather than
+once, when the account is created. Measured on an iPad Air 13-inch (M2)
+simulator: a restart brings the imported ACCOUNT back out of idbfs and puts the
+ROLES back at their built-in defaults, so a shield started on any later launch
+would lodge a request no module in the image is allowed to answer.
+
+**Approving one from inside a run still needs a drive pass that does not exist
+yet.** `--call` is sequenced ahead of `--drive`, and a request lives in the
+keystore page's memory, so the signer's `list` → `show` → `approve` cannot be
+reached from a later launch: they have to be driven from inside the run that
+pressed `Shield`.
+
+`--call` reaches it because the gate that matters is on `keystore_module`, not
+here: a `--call` arrives as the host anchor, but the call the SIGNER then makes
+arrives as `evm_signer_cli`, which is the configured approver. `list`, `show` and
+`approve` are the three that walk a request to a signature; nothing in this
+repository approves unattended, and `approve` still names the handle and the
+bundle id that were rendered.
 
 **The cancel is correct wherever it lands**, which is why its delay is generous
 rather than tuned: during `plan` the wallet sets a flag and the reply in flight
