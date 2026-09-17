@@ -179,23 +179,7 @@ bool ShellModulesBackend::ensureRunning(const QString& name)
         return false;
     emit log(QStringLiteral("bringing up %1, which this device has and nothing has "
                             "asked for yet").arg(name));
-    // ...AND WITH WHATEVER OPTIONAL COLLABORATORS THIS IMAGE CARRIES
-    // (logos-workspace#250). `RequiredDeps` -- the default, and what this call
-    // used to take -- resolves the hard closure and ORDERS the optional edges
-    // without ever adding one, so a module an app declares in
-    // `optional_dependencies` was never brought up by a mount, whatever the
-    // image shipped. The wallet's `web` half is what found it: its coordinator
-    // and `railgun_module` are Bundled members an image carries only when
-    // `--bundle` asked for them, so they cannot be REQUIRED without refusing
-    // every build that lacks them -- and left optional they were simply never
-    // loaded, which is three screens reporting a module that was in the image.
-    //
-    // `RequiredAndOptional` is what optional means: an installed one comes up,
-    // an absent one is skipped and is not a failure
-    // (DependencyResolver::OptionalLoad::BestEffort). It is also what the
-    // DESKTOP shell has always passed here (app/CoreModuleManager.cpp); this
-    // call is the mobile half catching up.
-    const bool loaded = m_modules->loadModule(name, LoadPolicy::RequiredAndOptional);
+    const bool loaded = m_modules->loadModule(name);
     rebuildRows();
     return loaded;
 }
@@ -206,7 +190,7 @@ ShellModulesBackend::bringUpViewDependencies(const QString& name)
     // ONE READING of the facts for the whole walk, and `ensureRunning` is what
     // loads: it is already the one place that says "this device has it and
     // nothing has asked for it yet", and the core loads each name's closure
-    // behind it (LoadPolicy::RequiredAndOptional -- see ensureRunning).
+    // behind it (LoadPolicy::RequiredDeps).
     //
     // The snapshot's `loaded` goes stale inside the walk -- loading the first
     // name can bring the second up with it, and chat_module pulling
