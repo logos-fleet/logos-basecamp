@@ -45,10 +45,15 @@ private slots:
     void anAppCarriesSeveralNamedFlows()
     {
         const QStringList names = WebDriveFlows::namesFor(QStringLiteral("wallet_ui"));
-        QVERIFY(names.size() >= 3);
+        QVERIFY(names.size() >= 5);
         QVERIFY(names.contains(QStringLiteral("seed-import")));
         QVERIFY(names.contains(QStringLiteral("private-sync")));
         QVERIFY(names.contains(QStringLiteral("private-shield")));
+        // ...and the two screens #250 was reported against, which no flow
+        // reached: the operator's History and Proxy config failures were read
+        // off a photograph and nothing in this repo could ask the tabs again.
+        QVERIFY(names.contains(QStringLiteral("history")));
+        QVERIFY(names.contains(QStringLiteral("proxy-config")));
     }
 
     // ...and a run picks one by name.
@@ -240,6 +245,137 @@ private slots:
         // every line is published inside the seconds the plan takes.
         QVERIFY(movedAt > cancelAt);
         QVERIFY(flow.steps.at(movedAt).watch.overTheWholeFlow);
+    }
+
+    // ── #250's two other screens ───────────────────────────────────────────
+    //
+    // THE HISTORY TAB, AND THE ACCOUNT IN FRONT OF IT. `Refresh history` is
+    // disabled until the wallet holds an account (`enabled: root.ready &&
+    // acctBox.currentText.length > 0`), so a flow that pressed it on a freshly
+    // installed app would press a dead button and then time out waiting for an
+    // answer nobody was asked for. The flow therefore imports the same
+    // worthless all-zero BIP-39 vector the seed flow types, WAITS for the
+    // wallet to publish an account, and only then asks the tab.
+    //
+    // The verdict is `history updated:`, which the wallet publishes only when
+    // the coordinator ANSWERED -- a refusal publishes no such line. `rows` is
+    // the reading and not its emptiness: an account with no transactions is an
+    // answer, and it is the answer this device will get.
+    void theHistoryFlowMakesAnAccountAndThenAsksTheCoordinator()
+    {
+        const WebDriveFlow flow =
+            WebDriveFlows::select(QStringLiteral("wallet_ui"), QStringLiteral("history"));
+        QCOMPARE(flow.name, QStringLiteral("history"));
+        QCOMPARE(flow.app, QStringLiteral("wallet_ui"));
+        QVERIFY(!flow.isEmpty());
+
+        QStringList pressed;
+        QStringList typedInto;
+        QStringList awaited;
+        int accountAwaitAt = -1;
+        int refreshPressAt = -1;
+        for (int i = 0; i < flow.steps.size(); ++i) {
+            const WebDriveStep& step = flow.steps.at(i);
+            if (step.act == WebDriveStep::Act::Press
+                || step.act == WebDriveStep::Act::PressAhead) {
+                pressed << step.control;
+                if (step.control == QLatin1String("historyRefreshButton")) refreshPressAt = i;
+            }
+            if (step.act == WebDriveStep::Act::Type)
+                typedInto << step.control;
+            if (step.act == WebDriveStep::Act::Await) {
+                awaited << step.watch.marker + step.watch.field;
+                if (step.watch.marker.contains(QLatin1String("accounts now:")))
+                    accountAwaitAt = i;
+            }
+        }
+
+        // THE TABS BY THEIR TEXT AND THE BUTTONS BY objectName. An accessible
+        // name is matched case-insensitively FROM THE FRONT, and the Advanced
+        // tab's "Import" button sits under an "Import account (seed phrase)"
+        // heading that matches "Import" just as well -- a press by text there
+        // is one layout read away from pressing a label.
+        QCOMPARE(pressed, (QStringList{ "Advanced", "advImportButton", "History",
+                                        "historyRefreshButton" }));
+        QCOMPARE(typedInto, (QStringList{ "advSeedField", "advAcctLabelField",
+                                          "advAcctPwField" }));
+        // THE GATE IS BEFORE THE PRESS, not after it.
+        QVERIFY(accountAwaitAt >= 0);
+        QVERIFY(refreshPressAt > accountAwaitAt);
+
+        QCOMPARE(awaited.size(), 2);
+        QVERIFY(awaited.at(0).contains(QLatin1String("accounts now:")));
+        QVERIFY(awaited.at(0).contains(QLatin1String("selected")));
+        QVERIFY(awaited.at(1).contains(QLatin1String("history updated:")));
+        QVERIFY(awaited.at(1).contains(QLatin1String("rows")));
+    }
+
+    // THE SETTINGS TAB'S PROXY CONFIG, which the operator saw refuse with
+    // "Proxy config needs wallet_backend_module". It is two claims: the
+    // coordinator took the document (the console line, carrying what was
+    // applied), and the TAB SAYS SO -- `proxyStatus` was a property nothing
+    // rendered, so pressing Apply changed the screen in no way whatever
+    // happened. The readback is of the module's own state through a control,
+    // which is the strongest verdict this driver has.
+    void theProxyFlowAppliesADocumentAndTheTabSaysSo()
+    {
+        const WebDriveFlow flow =
+            WebDriveFlows::select(QStringLiteral("wallet_ui"), QStringLiteral("proxy-config"));
+        QCOMPARE(flow.name, QStringLiteral("proxy-config"));
+        QVERIFY(!flow.isEmpty());
+
+        QStringList pressed;
+        QStringList typedInto;
+        QStringList awaited;
+        QString readControl;
+        QString readHolds;
+        for (const WebDriveStep& step : flow.steps) {
+            if (step.act == WebDriveStep::Act::Press
+                || step.act == WebDriveStep::Act::PressAhead)
+                pressed << step.control;
+            if (step.act == WebDriveStep::Act::Type)
+                typedInto << step.control;
+            if (step.act == WebDriveStep::Act::Await)
+                awaited << step.watch.marker + step.watch.field;
+            if (step.act == WebDriveStep::Act::Read) {
+                readControl = step.control;
+                readHolds = step.text;
+            }
+        }
+
+        QCOMPARE(pressed, (QStringList{ "Settings", "proxyApplyButton" }));
+        QCOMPARE(typedInto, (QStringList{ "proxyUrlField" }));
+        QCOMPARE(awaited.size(), 1);
+        QVERIFY(awaited.at(0).contains(QLatin1String("proxy applied:")));
+        QVERIFY(awaited.at(0).contains(QLatin1String("proxy")));
+        // The tab's own line, and it must carry the proxy that was typed --
+        // "applied" with no address in it is a sentence about nothing.
+        QCOMPARE(readControl, QStringLiteral("proxyStatusText"));
+        QVERIFY(!readHolds.isEmpty());
+        for (const WebDriveStep& step : flow.steps)
+            if (step.act == WebDriveStep::Act::Type)
+                QVERIFY(readHolds.contains(step.text));
+    }
+
+    // A HISTORY WITH NOTHING IN IT IS STILL AN ANSWER. `rows: 0` is the reading
+    // a fresh account on a device gives, and a watcher that treated 0 as
+    // "nothing there" would time out on the very run this issue is about.
+    void aHistoryWithNoRowsIsStillAReading()
+    {
+        const QString line = QStringLiteral(
+            R"([wallet_ui web] history updated: {"address":"0x1","from":"wallet_backend_module",)"
+            R"("rows":0})");
+        QCOMPARE(WebPageWatcher::readingOf(line, QStringLiteral("history updated:"),
+                                           QStringLiteral("rows")),
+                 std::optional<QString>(QStringLiteral("0")));
+        // ...and the ASK is not the answer: the wallet announces it before it
+        // knows anything, and a watch that matched it would settle on a
+        // refusal.
+        QCOMPARE(WebPageWatcher::readingOf(
+                     QStringLiteral("[wallet_ui web] refreshHistory: asking "
+                                    "wallet_backend_module for 0x1, channel=yes admitted=yes"),
+                     QStringLiteral("history updated:"), QStringLiteral("rows")),
+                 std::nullopt);
     }
 
     // Every Await has a budget, because a step with none waits forever on a
