@@ -45,9 +45,10 @@ private slots:
     void anAppCarriesSeveralNamedFlows()
     {
         const QStringList names = WebDriveFlows::namesFor(QStringLiteral("wallet_ui"));
-        QVERIFY(names.size() >= 2);
+        QVERIFY(names.size() >= 3);
         QVERIFY(names.contains(QStringLiteral("seed-import")));
         QVERIFY(names.contains(QStringLiteral("private-sync")));
+        QVERIFY(names.contains(QStringLiteral("private-shield")));
     }
 
     // ...and a run picks one by name.
@@ -156,6 +157,87 @@ private slots:
         QVERIFY(firstAwaitAfterStart > cancelAt);
         // ...so the movement has to be read over the whole flow: by then every
         // line that carried it is behind the cursor.
+        QVERIFY(movedAt > cancelAt);
+        QVERIFY(flow.steps.at(movedAt).watch.overTheWholeFlow);
+    }
+
+    // ── the shield, which is the same shape and a different safety argument ──
+    //
+    // logos-workspace#235's other direction: `wrap` / `approve` / `shield`, the
+    // legs that put PUBLIC funds into the pool. The flow drives them on a
+    // device with no money in it and cannot reach a transaction, BY
+    // CONSTRUCTION rather than by being careful: the route parks at `sign`
+    // waiting for a human in a Signer app that is not installed here, and the
+    // cancel is pressed there. Nothing is ever signed or broadcast.
+    void theShieldFlowPlansAndThenLeavesBeforeAnythingIsSigned()
+    {
+        const WebDriveFlow flow =
+            WebDriveFlows::select(QStringLiteral("wallet_ui"), QStringLiteral("private-shield"));
+        QCOMPARE(flow.name, QStringLiteral("private-shield"));
+        QVERIFY(!flow.isEmpty());
+
+        QStringList pressed;
+        QStringList typedInto;
+        QStringList awaited;
+        for (const WebDriveStep& step : flow.steps) {
+            if (step.act == WebDriveStep::Act::Press
+                || step.act == WebDriveStep::Act::PressAhead)
+                pressed << step.control;
+            if (step.act == WebDriveStep::Act::Type)
+                typedInto << step.control;
+            if (step.act == WebDriveStep::Act::Await)
+                awaited << step.watch.marker + step.watch.field;
+        }
+
+        // THE BUTTONS ARE PRESSED BY objectName. The accessible name is matched
+        // case-insensitively FROM THE FRONT, and this tab has a "Shield" button
+        // under a "Shield into the pool" heading and three controls whose names
+        // begin with "Cancel" — so a flow that named them by text would be one
+        // layout change away from pressing the wrong one.
+        QCOMPARE(pressed, (QStringList{ "Private", "privateShieldButton",
+                                        "privateShieldCancelButton" }));
+        QCOMPARE(typedInto, (QStringList{ "privateShieldAssetField",
+                                          "privateShieldAmountField" }));
+
+        QCOMPARE(awaited.size(), 3);
+        QVERIFY(awaited.at(0).contains(QLatin1String("private shield running:")));
+        QVERIFY(awaited.at(0).contains(QLatin1String("leg")));
+        // THE CANCEL LEFT SOMETHING TO SAY, which is clause 2's answer: a note
+        // stating that nothing was signed and nothing reached the chain.
+        QVERIFY(awaited.at(1).contains(QLatin1String("private shield cancelled:")));
+        QVERIFY(awaited.at(1).contains(QLatin1String("note")));
+        QVERIFY(awaited.at(2).contains(QLatin1String("state")));
+    }
+
+    // ...and the same arming rule, for the same reason: the plan's RPC reads
+    // are answered synchronously on the thread this driver's loop turns, so the
+    // host cannot read "pressed 'Shield'" until they are done. A Cancel sent on
+    // the strength of that confirmation would be seconds late.
+    void theShieldsTwoPressesAreArmedTogether()
+    {
+        const WebDriveFlow flow =
+            WebDriveFlows::select(QStringLiteral("wallet_ui"), QStringLiteral("private-shield"));
+        int startAt = -1;
+        int cancelAt = -1;
+        int firstAwait = -1;
+        int movedAt = -1;
+        for (int i = 0; i < flow.steps.size(); ++i) {
+            const WebDriveStep& step = flow.steps.at(i);
+            if (step.control == QLatin1String("privateShieldButton")) startAt = i;
+            if (step.control == QLatin1String("privateShieldCancelButton")) cancelAt = i;
+            if (step.act == WebDriveStep::Act::Await && firstAwait < 0) firstAwait = i;
+            if (step.act == WebDriveStep::Act::Await
+                && step.watch.want == WebPageWatch::Want::Moved)
+                movedAt = i;
+        }
+        QVERIFY(startAt >= 0);
+        QCOMPARE(flow.steps.at(startAt).act, WebDriveStep::Act::PressAhead);
+        QCOMPARE(flow.steps.at(cancelAt).act, WebDriveStep::Act::PressAhead);
+        QCOMPARE(cancelAt, startAt + 1);
+        QVERIFY(flow.steps.at(cancelAt).afterMs > 0);
+        QVERIFY(firstAwait > cancelAt);
+        // The state that moved is read over the whole flow: on a fast device
+        // every line is published inside the seconds the plan takes.
         QVERIFY(movedAt > cancelAt);
         QVERIFY(flow.steps.at(movedAt).watch.overTheWholeFlow);
     }
