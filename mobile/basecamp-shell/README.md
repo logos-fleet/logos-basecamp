@@ -896,6 +896,7 @@ before each newly installed module is loaded. Undeclared, every module is
 
 ```
 --call <module>.<method>(<arg>,...)     repeatable, run IN ORDER
+--call-timeout <ms>                     how long the --calls AFTER it may take
 ```
 
 The on-device `logoscore call`, and the only way to reach a `core` module here:
@@ -908,6 +909,43 @@ The driver loads each module it names, waits for it to become reachable -- a
 xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
   --call 'keystore_module.list_accounts'
 # [shell] CALL OK keystore_module.list_accounts -> {"accounts":["0x5a3a5A89…"],"ok":true,…}
+```
+
+### A call that takes minutes
+
+The per-call budget is **60 000 ms** and it was never a fact about calls -- it
+was a number this driver picked. A RAILGUN private send is **154 s** on an iPad
+Air 13-inch simulator and **239 s** on a physical iPad Air 4, almost all of it
+the accumulator sync, so the run that worked printed this
+(logos-fleet/logos-workspace#235):
+
+```
+[shell] CALL FAILED railgun_module.live_send_probe(str:{}): call to
+        'railgun_module.live_send_probe' timed out after 60000ms (timeout)
+[shell] CALLS: 2 ok, 1 failed
+... 94 seconds later ...
+railgun_module: live-send probe: SENT (... rootOnChain=Some(true) ...)
+```
+
+Nothing had failed. The waiter had left, the module finished correctly a minute
+and a half later, and the verdict line said the opposite of what the console
+line went on to say. `--call-timeout` is the budget written down:
+
+```bash
+xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
+  --call 'eth_rpc_module.init_defaults()' \
+  --call-timeout 400000 \
+  --call 'railgun_module.live_send_probe(str:{})'
+```
+
+**It covers the calls after it, not the whole line** -- so a module that is
+simply not answering still says so in 60 s, and a later `--call-timeout 60000`
+narrows it again. A value that is not a positive number is refused and changes
+nothing. And a call that does run out of budget now says what happened:
+
+```
+[shell] call: railgun_module.live_send_probe(str:{}) was given 60000 ms and is
+        STILL RUNNING -- raise it with --call-timeout <ms> before --call
 ```
 
 **Two things it cannot reach, and both are easier to hit than to diagnose.**

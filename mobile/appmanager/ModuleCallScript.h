@@ -14,6 +14,8 @@ struct ModuleCall {
     QVariantList args;
     // The whole `<module>.<method>(...)` as it was written, for the console.
     QString      source;
+    // How long the driver waits for THIS call's answer. See kDefaultTimeoutMs.
+    int          timeoutMs = 60000;
 };
 
 // THE ON-DEVICE `logoscore call`, parsed once from the app's own command line.
@@ -53,12 +55,33 @@ struct ModuleCall {
 //
 //     int:42   bool:true   json:{"chainId":1}   str:0x2a   0x2a (also a string)
 //
+// AND HOW LONG ONE MAY TAKE, which 60 000 ms was never a fact about.
+//
+//     --call-timeout 400000 --call railgun_module.live_send_probe(str:{})
+//
+// The budget was fixed at 60 s and a RAILGUN private send is 154 s on a
+// simulator and 239 s on an iPad Air 4 (logos-fleet/logos-workspace#235), so a
+// run that worked printed `CALL FAILED ... timed out after 60000ms` and the
+// module went on to finish 94 s after the waiter had left. A waiter that
+// reports a failure for work that succeeded is worse than one that waits: the
+// console line is then the only evidence and the verdict line contradicts it.
+//
+// IT COVERS THE CALLS AFTER IT, not the whole line. One long operation on a
+// script should not make a module that is simply not answering take the same
+// four minutes to say so, so the budget is positional like the calls are and a
+// later `--call-timeout` narrows it again.
+//
 // EVERY REFUSAL IS KEPT rather than dropped, for the reason CatalogSource keeps
 // its own: a phone's whole diagnostic surface is one console, and a mistyped
 // flag that silently does nothing is indistinguishable from a module that did
 // not answer.
 class ModuleCallScript {
 public:
+    // What a call waits by default, and what it waited always before #235.
+    // Generous for a read and far short of a private send, which is why it is
+    // now a floor rather than a ceiling.
+    static constexpr int kDefaultTimeoutMs = 60000;
+
     // Parse an argument list -- QCoreApplication::arguments(), program name
     // included. Anything unrecognised belongs to Qt or to the platform and is
     // left alone.

@@ -105,6 +105,53 @@ private slots:
             QVERIFY2(!refusal.isEmpty(), "a refusal with no sentence is not a report");
     }
 
+    // AND HOW LONG A CALL MAY TAKE, because 60 s is not a property of calls.
+    //
+    // A RAILGUN private send is ~154 s on a simulator and ~239 s on an iPad Air
+    // 4 (logos-fleet/logos-workspace#235), and the driver's fixed budget made
+    // that read as `CALL FAILED ... timed out after 60000ms` for an operation
+    // that went on to finish correctly 94 s later. A waiter that reports a
+    // failure for work that succeeded is worse than one that waits.
+    void aCallMaySayHowLongItMayTake()
+    {
+        const ModuleCallScript deflt = parse({ "--call", "m.f" });
+        QCOMPARE(deflt.calls().at(0).timeoutMs, 60000);
+
+        const ModuleCallScript s = parse({ "--call-timeout", "400000",
+                                           "--call", "railgun_module.live_send_probe" });
+        QVERIFY2(s.refusals().isEmpty(), qPrintable(s.refusals().join("; ")));
+        QCOMPARE(s.calls().at(0).timeoutMs, 400000);
+    }
+
+    // IT APPLIES TO WHAT FOLLOWS IT, so one long call does not make every other
+    // call on the line wait as long before it reports a module that is simply
+    // not answering.
+    void aBudgetCoversTheCallsAfterItAndNotTheOnesBefore()
+    {
+        const ModuleCallScript s = parse({ "--call", "m.quick",
+                                           "--call-timeout", "400000",
+                                           "--call", "m.slow",
+                                           "--call-timeout", "1000",
+                                           "--call", "m.quickAgain" });
+        QCOMPARE(s.calls().size(), 3);
+        QCOMPARE(s.calls().at(0).timeoutMs, 60000);
+        QCOMPARE(s.calls().at(1).timeoutMs, 400000);
+        QCOMPARE(s.calls().at(2).timeoutMs, 1000);
+    }
+
+    void aBudgetThatIsNotAPositiveNumberIsRefusedAndChangesNothing()
+    {
+        const ModuleCallScript s = parse({ "--call-timeout", "soon",
+                                           "--call-timeout", "0",
+                                           "--call-timeout",
+                                           "--call", "m.f" });
+        QCOMPARE(s.calls().size(), 1);
+        QCOMPARE(s.calls().at(0).timeoutMs, 60000);
+        QCOMPARE(s.refusals().size(), 3);
+        for (const QString& refusal : s.refusals())
+            QVERIFY2(refusal.contains("--call-timeout"), qPrintable(refusal));
+    }
+
     void aGoodCallSurvivesABadNeighbour()
     {
         const ModuleCallScript s = parse({ "--call", "m.bad(int:x)",

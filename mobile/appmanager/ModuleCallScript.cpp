@@ -9,6 +9,7 @@ namespace basecamp::appmanager {
 namespace {
 
 const QLatin1String kCall("--call");
+const QLatin1String kCallTimeout("--call-timeout");
 
 // The value that follows the flag, or empty when the flag was last on the line
 // or the next token is itself a flag. The second case is what stops
@@ -154,8 +155,27 @@ bool parseCall(const QString& spec, ModuleCall* out, QString* refusal)
 ModuleCallScript ModuleCallScript::fromArguments(const QStringList& args)
 {
     ModuleCallScript out;
+    // The budget in force AT THIS POINT ON THE LINE -- see the header: a
+    // `--call-timeout` covers the calls that follow it and a later one narrows
+    // it again, so this is carried down the argument list rather than collected
+    // from it.
+    int timeoutMs = kDefaultTimeoutMs;
 
     for (int i = 0; i < args.size(); ++i) {
+        if (args.at(i) == kCallTimeout) {
+            const QString ms = valueAfter(args, i);
+            bool ok = false;
+            const int parsed = ms.toInt(&ok);
+            // Zero is refused with the rest: a call budget of nothing is not a
+            // shorter wait, it is a call that cannot succeed.
+            if (!ok || parsed <= 0) {
+                out.m_refusals << QStringLiteral("--call-timeout needs a positive number of "
+                                                 "milliseconds, not '%1'").arg(ms);
+                continue;
+            }
+            timeoutMs = parsed;
+            continue;
+        }
         if (args.at(i) != kCall)
             continue;
 
@@ -166,6 +186,7 @@ ModuleCallScript ModuleCallScript::fromArguments(const QStringList& args)
         }
 
         ModuleCall call;
+        call.timeoutMs = timeoutMs;
         QString refusal;
         if (parseCall(spec, &call, &refusal))
             out.m_calls << call;
