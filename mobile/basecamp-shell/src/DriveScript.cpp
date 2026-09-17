@@ -18,18 +18,18 @@ struct Named {
 };
 
 const Named kPasses[] = {
-    { DrivePass::Chat,     QLatin1String("chat"), false },
-    { DrivePass::Apps,     QLatin1String("apps"), false },
-    { DrivePass::Packages, QLatin1String("packages"), false },
-    { DrivePass::Catalog,  QLatin1String("catalog"), false },
-    { DrivePass::Popups,   QLatin1String("popups"), false },
-    { DrivePass::Keyboard, QLatin1String("keyboard"), false },
-    { DrivePass::WebApps,  QLatin1String("web-apps"), false },
+    { DrivePass::Chat,      QLatin1String("chat"),       false },
+    { DrivePass::Apps,      QLatin1String("apps"),       false },
+    { DrivePass::Packages,  QLatin1String("packages"),   false },
+    { DrivePass::Catalog,   QLatin1String("catalog"),    false },
+    { DrivePass::Popups,    QLatin1String("popups"),     false },
+    { DrivePass::Keyboard,  QLatin1String("keyboard"),   false },
+    { DrivePass::WebApps,   QLatin1String("web-apps"),   false },
     // ...which flow of the app's it walks (logos-workspace#238). The names are
     // WebDriveFlows', not this parser's.
-    { DrivePass::WebInput, QLatin1String("web-input"), true },
+    { DrivePass::WebInput,  QLatin1String("web-input"),  true  },
     { DrivePass::WebBudget, QLatin1String("web-budget"), false },
-    { DrivePass::Modules,  QLatin1String("modules"), false },
+    { DrivePass::Modules,   QLatin1String("modules"),    false },
 };
 
 // The pass a name spells, or null. `all` is deliberately absent: it stands for

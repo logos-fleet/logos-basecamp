@@ -80,6 +80,10 @@ private:
     // that carries it. Empty when there is none.
     QString appFor(const QString& flowName) const;
 
+    // Every `app:flow` pair this build's tiles offer, for a refusal that says
+    // what there is instead of leaving the reader a blank.
+    QStringList offeredFlows() const;
+
     // One flow, start to finish. False having said why.
     bool walk(const basecamp::shell::WebDriveFlow& flow);
 
@@ -89,10 +93,23 @@ private:
     // must not toggle the first one's window away.
     bool openApp(const QString& app);
 
+    // Whether the app's page is the one docked and on screen right now.
+    bool pageIsFrontmost(const QString& app) const;
+
+    // Put the driver script and then `call` into the app's page. False having
+    // said that this platform cannot script a page at all. Nothing is waited
+    // for: what the call did is read by the caller, or by a later step.
+    bool send(const QString& app, const QString& call);
+
+    // Offer every page line from `from` on to `answered`, each exactly once,
+    // until one satisfies it or the budget runs out. `from` is left past the
+    // line that answered -- or past everything seen, when none did -- so the
+    // step after this one reads what it did not.
+    bool waitForLine(const std::function<bool(const QString&)>& answered, int budgetMs,
+                     int& from);
+
     // Send one script into the page and wait for the answer the caller is
-    // after. `answered` is asked of every page line from `from` on; false when
-    // none satisfied it inside the budget. `from` is advanced past the line
-    // that answered, so the step after this one reads what it did not.
+    // after.
     bool ask(const QString& app, const QString& call,
              const std::function<bool(const QString&)>& answered, int budgetMs, int& from);
 

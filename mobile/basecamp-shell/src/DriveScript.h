@@ -142,9 +142,9 @@ public:
     bool isEmpty() const { return m_passes.isEmpty() && m_refusals.isEmpty(); }
 
 private:
-    QList<DrivePass>          m_passes;
+    QList<DrivePass>             m_passes;
     QMap<DrivePass, QStringList> m_options;
-    QStringList               m_refusals;
+    QStringList                  m_refusals;
 };
 
 } // namespace basecamp::shell
