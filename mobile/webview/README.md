@@ -261,6 +261,46 @@ take it back down. The last of those is the discriminating one: the blind
 reading passes the others (starting a renderer does cost the app something) and
 fails only on the sign.
 
+Measured 2026-09-17 with `--drive web-budget --web-budget 3`, `app` being
+`appResidentBytes()` and `weighed` being what the budget now reads:
+
+| device | RAM | ceiling | `app` — 0/1/2/3 live, then after the shed | `weighed` — 0/1/2/3, then after the shed |
+|---|---|---|---|---|
+| Xiaomi 25028RN03Y | 2789 MB | 2283 MB | 305 / 400 / 382 / 369 → **365** | 1381 / 1508 / 1501 / 1517 → **1410** |
+| Lenovo TB520FU | 15275 MB | 14769 MB | 387 / 501 / 483 / 484 → **486** | 5349 / 6379 / 6311 / 6191 → **5959** |
+
+The app's figure goes the wrong way on both — a shed of two pages left it 4 MB
+lower on the phone and 2 MB *higher* on the tablet — while the weighed figure
+falls 107 MB and 232 MB, which is the renderer the host's `ps` sees give its
+pages back.
+
+**Steps past the first are printed, not asserted.** The pages share a renderer,
+so the second and third cost ~5 MB each — under the noise of a figure the whole
+device is in. On the Lenovo the second page's step read −68 MB and the third's
+−120 MB with nothing shed; the first page's step was +1031 MB.
+
+**And the renderer is NOT reachable in-process.** `processVisibilityReport()` on
+both devices:
+
+```
+getRunningAppProcesses() -> 1: co.logos.basecamp.shell(pid 1284);
+/proc shows 1 pid(s) to this uid: 1284; this process is pid 1284
+```
+
+while the host's `ps -A -o PID,RSS,NAME` at the same instant showed
+`com.google.android.webview:sandboxed_process0:…` at pid 29955 holding 308 MB.
+The renderer is an *isolated* process with a uid of its own, so it is in neither
+list: `getRunningAppProcesses()` answers the caller's uid only, and `/proc` is
+mounted with `hidepid`. That is why the device's book is read and not the
+renderer's own figure — the renderer's figure would be better, and this app
+cannot have it.
+
+**The ceiling trips, and it was watched doing it.** With `--web-ceiling 1440` on
+the Xiaomi (at rest 1294 MB in use), the first page took the figure to 1596 MB,
+the allowance dropped 3 → 1 on that observation, and each page opened after it
+gave the previous one up: `1596 → 1537 → 1492 MB` with one live runtime held
+throughout. That is the branch #153 wrote, acting for the first time.
+
 **A page can be taken away without the budget doing it.** On the Xiaomi, two
 runs holding two live pages through a 60-second idle wait had the shared
 renderer reaped (`onServiceDisconnected (crash or killed by oom)`, both pages

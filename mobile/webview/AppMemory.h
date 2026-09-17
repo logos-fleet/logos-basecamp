@@ -68,13 +68,19 @@ qint64 deviceAvailableBytes();
 // `threshold` on Android, which is the level at which the system starts killing
 // background processes to get memory back.
 //
-// IT IS THE ONE PER-DEVICE CALIBRATION ANDROID GIVES AN APP, and that is why it
-// is read rather than a fraction being invented: logos-workspace#244 measured
-// the same absolute headroom meaning opposite things on two phones -- a Xiaomi
-// 25028RN03Y reaped the shared renderer with MemAvailable still at 1.24 GB
-// while a Samsung SM-G990B was untroubled at 1.05 GB. A policy stated as "this
-// many MB free" cannot be right on both; one stated against the device's own
-// line can.
+// IT IS THE OS'S OWN LINE, which is why it is read rather than a fraction being
+// invented: logos-workspace#244 measured the same absolute headroom meaning
+// opposite things on two phones -- a Xiaomi 25028RN03Y reaped the shared
+// renderer with MemAvailable still at 1.24 GB while a Samsung SM-G990B was
+// untroubled at 1.05 GB -- so the reserve has to be the number the system
+// itself acts at rather than one this container picked.
+//
+// IT SCALES LESS THAN ITS NAME SUGGESTS. Measured 2026-09-17, it answers
+// **216 MB on both** a 2.7 GB Xiaomi 25028RN03Y and a 14.9 GB Lenovo TB520FU,
+// so on the venue's devices it is a near-constant reserve and not a fraction of
+// the device. That is fine for what it is used for -- the ceiling's
+// device-dependence comes from MemTotal, not from this -- but it is not a
+// per-device scale factor and must not be read as one.
 //
 // READ THROUGH JNI, so it answers -1 until there is an Android context --
 // implemented in AndroidWebPage.cpp beside the other JNI reading in this header

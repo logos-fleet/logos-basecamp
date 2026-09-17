@@ -144,11 +144,14 @@ public:
     // every run, before a page had been opened.
     //
     // EVERYTHING EXCEPT THE ROOM THE OS WANTS KEPT FREE, AND A PAGE'S MARGIN.
-    // `deviceLowMemoryBytes` is Android's own per-device line (AppMemory.h) --
-    // the level at which the system starts killing background processes -- and
-    // the extra page's worth is so the container sheds BEFORE the OS does: at
-    // the line itself, the thing that gets reaped is the shared renderer, and
-    // then every page goes at once instead of the least recently visible one.
+    // `deviceLowMemoryBytes` is Android's own line (AppMemory.h) -- the level at
+    // which the system starts killing background processes, measured at 216 MB
+    // on both venue devices -- and the extra page's worth is so the container
+    // sheds BEFORE the OS does: at the line itself, the thing that gets reaped
+    // is the shared renderer, and then every page goes at once instead of the
+    // least recently visible one. The ceiling's device-dependence comes from
+    // MemTotal, not from the line: 2283 MB on a 2.7 GB Xiaomi 25028RN03Y and
+    // 14769 MB on a 14.9 GB Lenovo TB520FU, both measured 2026-09-17.
     //
     // A DEVICE THAT WILL NOT SAY ITS LINE GETS AN EIGHTH OF ITSELF, which is
     // the order of what Android's own threshold comes to on the venue's phones,

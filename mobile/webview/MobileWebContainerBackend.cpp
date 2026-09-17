@@ -400,17 +400,32 @@ void MobileWebContainerBackend::applyEvictions(const QStringList& evicted,
 
 QStringList MobileWebContainerBackend::observeMemory(qint64 weighedBytes)
 {
+    const int allowanceBefore = m_budget.liveAllowance();
     const QStringList evicted = m_budget.observe(weighedBytes);
-    if (evicted.isEmpty()) return {};
-    // THE FIGURE, NOT "THE APP" (#244). What is weighed here is this process on
-    // iOS and how much of the DEVICE is in use on Android, and a log line that
+    const int allowanceNow = m_budget.liveAllowance();
+
+    // THE CROSSING IS ANNOUNCED EVEN WHEN NOTHING WAS EVICTED (#244). An
+    // observation over the ceiling with ONE page live tightens the allowance
+    // and takes nothing away -- one page is the floor -- and the eviction it
+    // causes then happens at the next show(), several lines later. Logged only
+    // here, the moment the ceiling was crossed was invisible, which is exactly
+    // the failure this issue is about: a ceiling nobody ever saw trip reads the
+    // same as one that never needed to.
+    if (allowanceNow == allowanceBefore && evicted.isEmpty()) return {};
+
+    // THE FIGURE, NOT "THE APP". What is weighed here is this process on iOS
+    // and how much of the DEVICE is in use on Android, and a log line that
     // called the second one "the app" would be claiming the app had grown by
     // whatever some other process just allocated.
     qInfo().noquote()
-        << QStringLiteral("Web container: the figure this platform weighs is %1, over its "
-                          "%2 ceiling -- %3 page(s) to give up")
+        << QStringLiteral("Web container: the figure this platform weighs is %1 against a "
+                          "%2 ceiling -- the allowance goes %3 -> %4 page(s), %5 to give "
+                          "up now")
                .arg(megabytes(weighedBytes), megabytes(m_budget.appCeilingBytes()))
+               .arg(allowanceBefore)
+               .arg(allowanceNow)
                .arg(evicted.size());
+    if (evicted.isEmpty()) return {};
     applyEvictions(evicted, QStringLiteral("over the app's memory ceiling"));
     return evicted;
 }
