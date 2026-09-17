@@ -88,6 +88,24 @@ qint64 deviceAvailableBytes();
 // (there is no ActivityManager there).
 qint64 deviceLowMemoryBytes();
 
+// WHICH OF THE TWO FRAMES THE BUDGET IS IN ON THIS PLATFORM, asked ONCE.
+//
+// True where a `web` page lives in a renderer process of its own and the only
+// book it appears in is the device's, false where the page is charged to the
+// process that opened it. Four things have to agree about this and none of them
+// can tell on its own that it disagrees: budgetWeighedBytes() below, the
+// ceiling forThisDevice() pairs with it (LiveRuntimeBudget::ceilingForDeviceInUse
+// against ceilingForDeviceMemory), the name a device log prints for the figure,
+// and how far a page is expected to move it. A mismatch between any two of them
+// is silent in exactly the way logos-workspace#244 was -- a ceiling that could
+// never trip, for a whole landing -- so the question is named here and answered
+// nowhere else.
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+constexpr bool kBudgetWeighsTheDevice = true;
+#else
+constexpr bool kBudgetWeighsTheDevice = false;
+#endif
+
 // WHAT THE LIVE-RUNTIME BUDGET WEIGHS ON THIS PLATFORM, in bytes, or -1 where
 // there is nothing here that moves with a page.
 //

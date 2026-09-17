@@ -64,7 +64,6 @@
 #include "ShellSceneDriver.h"
 
 #include <QList>
-#include <QPair>
 #include <QStringList>
 
 class BundledSetShellHost;
@@ -113,8 +112,16 @@ private:
     // one OK line when the figure tracked the pages.
     void reportWhetherTheFigureMoved(qint64 afterShedBytes, int pagesShed);
 
+    // One reading taken by weigh(): what the budget weighed, and how many
+    // runtimes were live when it was taken. The pair is what step 4 reasons
+    // about, so neither half means anything without the other.
+    struct Reading
+    {
+        int liveRuntimes;
+        qint64 weighedBytes;
+    };
+
     BundledSetShellHost* m_host;  // not owned
-    // The weighed figure at each live-runtime count the pass passed through,
-    // most recent last, paired with the count it was taken at.
-    QList<QPair<int, qint64>> m_weighed;
+    // Every reading the pass passed through, in the order it took them.
+    QList<Reading> m_weighed;
 };

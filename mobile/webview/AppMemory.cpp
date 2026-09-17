@@ -121,7 +121,8 @@ QString processVisibilityReport()
 
 qint64 budgetWeighedBytes()
 {
-#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+    if (!kBudgetWeighsTheDevice) return appResidentBytes();
+
     // THE DEVICE'S BOOK, because the page is not in this process's. See the
     // header: a `web` page lives in a Chromium renderer of its own and the only
     // figure it appears in is how much of the device is in use.
@@ -129,9 +130,6 @@ qint64 budgetWeighedBytes()
     const qint64 available = deviceAvailableBytes();
     if (total <= 0 || available < 0) return -1;
     return total - available;
-#else
-    return appResidentBytes();
-#endif
 }
 
 #if !defined(Q_OS_IOS) && !defined(Q_OS_ANDROID)

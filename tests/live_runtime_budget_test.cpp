@@ -377,21 +377,24 @@ private slots:
         // use, which moves when the renderer grows and falls when it is shed.
         const qint64 weighed = basecamp::web::budgetWeighedBytes();
         QVERIFY2(weighed > 0, qPrintable(QStringLiteral("budgetWeighedBytes() = %1").arg(weighed)));
-#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
-        const qint64 inUse =
-            basecamp::web::deviceMemoryBytes() - basecamp::web::deviceAvailableBytes();
-        // Two samples a few microseconds apart on a live machine, so near
-        // rather than equal -- the claim is which figure it is, not that a
-        // phone stood still between two reads.
-        QVERIFY2(qAbs(weighed - inUse) < 64LL * 1024 * 1024,
-                 qPrintable(QStringLiteral("weighed %1 vs device in use %2")
-                                .arg(weighed).arg(inUse)));
-        QVERIFY(weighed < basecamp::web::deviceMemoryBytes());
-#else
-        QVERIFY2(qAbs(weighed - basecamp::web::appResidentBytes()) < 64LL * 1024 * 1024,
-                 qPrintable(QStringLiteral("weighed %1 vs app resident %2")
-                                .arg(weighed).arg(basecamp::web::appResidentBytes())));
-#endif
+        // Off kBudgetWeighsTheDevice rather than a second copy of the platform
+        // condition: a copy that drifted from AppMemory.h's would assert the
+        // frame this test thinks it is on instead of the one the budget uses.
+        if (basecamp::web::kBudgetWeighsTheDevice) {
+            const qint64 inUse =
+                basecamp::web::deviceMemoryBytes() - basecamp::web::deviceAvailableBytes();
+            // Two samples a few microseconds apart on a live machine, so near
+            // rather than equal -- the claim is which figure it is, not that a
+            // phone stood still between two reads.
+            QVERIFY2(qAbs(weighed - inUse) < 64LL * 1024 * 1024,
+                     qPrintable(QStringLiteral("weighed %1 vs device in use %2")
+                                    .arg(weighed).arg(inUse)));
+            QVERIFY(weighed < basecamp::web::deviceMemoryBytes());
+        } else {
+            QVERIFY2(qAbs(weighed - basecamp::web::appResidentBytes()) < 64LL * 1024 * 1024,
+                     qPrintable(QStringLiteral("weighed %1 vs app resident %2")
+                                    .arg(weighed).arg(basecamp::web::appResidentBytes())));
+        }
     }
 
     void theCeilingIsStatedInTheSameFrameAsTheFigure()
@@ -467,13 +470,12 @@ private slots:
         // the unreachable branch this issue is about.
         const LiveRuntimeBudget budget = LiveRuntimeBudget::forThisDevice();
         const qint64 device = basecamp::web::deviceMemoryBytes();
-#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
-        QCOMPARE(budget.appCeilingBytes(),
-                 LiveRuntimeBudget::ceilingForDeviceInUse(
-                     device, basecamp::web::deviceLowMemoryBytes()));
-#else
-        QCOMPARE(budget.appCeilingBytes(), LiveRuntimeBudget::ceilingForDeviceMemory(device));
-#endif
+        const qint64 ceilingForThisFrame =
+            basecamp::web::kBudgetWeighsTheDevice
+                ? LiveRuntimeBudget::ceilingForDeviceInUse(
+                      device, basecamp::web::deviceLowMemoryBytes())
+                : LiveRuntimeBudget::ceilingForDeviceMemory(device);
+        QCOMPARE(budget.appCeilingBytes(), ceilingForThisFrame);
         // ...and a machine that says how much memory it has gets a ceiling,
         // which is what stops this from passing by both halves being zero.
         QVERIFY(budget.appCeilingBytes() > 0);

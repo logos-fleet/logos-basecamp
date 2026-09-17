@@ -227,6 +227,15 @@ answers:
 | iOS / macOS | `appResidentBytes()` — this process's `phys_footprint` | the pages are charged here, and #153's reading was right |
 | Android / Linux | `deviceMemoryBytes() - deviceAvailableBytes()` — how much of the device is in use | the pages are in a Chromium renderer that is not this process, and the device's book is the only one it appears in |
 
+Which of the two frames this platform is in is asked **once**, as
+`AppMemory::kBudgetWeighsTheDevice`. Four things have to agree about it and none
+can tell on its own that it disagrees: the figure above, the ceiling
+`forThisDevice()` pairs with it, the name a device log prints for it, and how
+far the `--drive web-budget` pass expects a page to move it. A second copy of
+the platform condition that drifted from the first would put the two halves of
+the comparison in different frames — silently, which is how #244 lasted a whole
+landing.
+
 **Can an app weigh its own renderer in-process?** That answer would change this
 design — the renderer's own figure beats the device's book on every count — so
 the `--drive web-budget` pass prints the evidence rather than assuming, as

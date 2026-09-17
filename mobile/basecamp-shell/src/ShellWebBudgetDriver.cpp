@@ -128,7 +128,7 @@ void ShellWebBudgetDriver::weigh(const QString& occasion)
     const qint64 ceiling = budget.appCeilingBytes();
     const QString unreported = QStringLiteral("not reported by this platform");
     const qint64 weighed = basecamp::web::budgetWeighedBytes();
-    m_weighed.append(qMakePair(int(budget.live().size()), weighed));
+    m_weighed.append(Reading{ int(budget.live().size()), weighed });
     const QString appResident = reportedAs(basecamp::web::appResidentBytes(), unreported);
     // THE PAGE'S OWN COST IS ONLY IN THIS ONE, on Android (logos-workspace#230):
     // the app's figure is this process and the page lives in a Chromium renderer
@@ -154,13 +154,15 @@ void ShellWebBudgetDriver::weigh(const QString& occasion)
                       ceiling > 0 ? megabytes(ceiling) : QStringLiteral("none")));
 }
 
+namespace {
+
 // HOW MUCH THE FIGURE IS ALLOWED TO WANDER BETWEEN TWO READINGS before a
 // direction is claimed from it. On Android the figure is the whole device's, so
 // every other process's allocations are in it; 32 MB is a tenth of what one
 // renderer costs, and the drift measured across a settled pass on the venue's
 // two Android devices was up to 62 MB on the 14.9 GB tablet -- which is why the
 // only step this allowance guards is the one whose signal is 250 MB or more.
-static constexpr qint64 kFigureNoiseBytes = 32LL * 1024 * 1024;
+constexpr qint64 kFigureNoiseBytes = 32LL * 1024 * 1024;
 
 // ...AND HOW FAR A PAGE MUST MOVE IT before the figure counts as weighing the
 // pages at all. Per platform, because the two frames are charged differently:
@@ -179,12 +181,12 @@ static constexpr qint64 kFigureNoiseBytes = 32LL * 1024 * 1024;
 //     what the check still catches is a figure that does not move at all.
 qint64 pageMovesAtLeastBytes()
 {
-#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
-    return LiveRuntimeBudget::kDeviceRuntimeBytes / 3;
-#else
-    return kFigureNoiseBytes;
-#endif
+    return basecamp::web::kBudgetWeighsTheDevice
+               ? LiveRuntimeBudget::kDeviceRuntimeBytes / 3
+               : kFigureNoiseBytes;
 }
+
+} // namespace
 
 void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, int pagesShed)
 {
@@ -195,8 +197,8 @@ void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, in
         return;
     }
 
-    const qint64 atRest = m_weighed.first().second;
-    const qint64 atMost = m_weighed.last().second;
+    const qint64 atRest = m_weighed.first().weighedBytes;
+    const qint64 atMost = m_weighed.last().weighedBytes;
     if (atRest < 0 || atMost < 0) {
         emit log(QStringLiteral("WRONG: this platform reports no figure for the budget to "
                                 "weigh, so its ceiling can never trip"));
@@ -211,7 +213,7 @@ void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, in
         emit log(QStringLiteral("WRONG: %1 live runtime(s) moved the weighed figure by only "
                                 "%2 (from %3 to %4) -- a page costs about %5, so this figure "
                                 "is blind to them")
-                     .arg(QString::number(m_weighed.last().first), megabytes(movedUp),
+                     .arg(QString::number(m_weighed.last().liveRuntimes), megabytes(movedUp),
                           megabytes(atRest), megabytes(atMost),
                           megabytes(LiveRuntimeBudget::kDeviceRuntimeBytes)));
     }
@@ -230,24 +232,29 @@ void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, in
     // there would be asserting a physical claim this container's own
     // measurements contradict, so the steps are printed and the verdict is
     // carried by the two checks that are not noise-bound.
+    //
+    // THE FIRST STEP IS ASSERTED, and only it. It is a whole renderer; a figure
+    // that a renderer starting does not move up is blind whatever else it does.
+    const qint64 firstStep = m_weighed.at(1).weighedBytes - m_weighed.first().weighedBytes;
+    if (m_weighed.at(1).liveRuntimes > m_weighed.first().liveRuntimes && firstStep < floor)
+        emit log(QStringLiteral("WRONG: the first live runtime moved the weighed figure "
+                                "by only %1; this platform's pages should move it at "
+                                "least %2")
+                     .arg(megabytes(firstStep), megabytes(floor)));
+
     QStringList steps;
     for (int i = 1; i < m_weighed.size(); ++i) {
-        if (m_weighed.at(i).first <= m_weighed.at(i - 1).first) continue;
-        const qint64 step = m_weighed.at(i).second - m_weighed.at(i - 1).second;
-        const QString entry = QStringLiteral("%1->%2 runtime(s) %3%4")
-                                  .arg(QString::number(m_weighed.at(i - 1).first),
-                                       QString::number(m_weighed.at(i).first),
-                                       step < 0 ? QString() : QStringLiteral("+"),
-                                       megabytes(step));
-        steps << entry;
-        if (i != 1) continue;
-        // THE FIRST STEP IS ASSERTED. It is a whole renderer; a figure that a
-        // renderer starting does not move up is blind whatever else it does.
-        if (step < floor)
-            emit log(QStringLiteral("WRONG: the first live runtime moved the weighed figure "
-                                    "by only %1; this platform's pages should move it at "
-                                    "least %2")
-                         .arg(megabytes(step), megabytes(floor)));
+        const Reading& before = m_weighed.at(i - 1);
+        const Reading& after = m_weighed.at(i);
+        // A reading taken at the same count as the one before it is not a step:
+        // the figure before the pass opens anything and the one after the shed
+        // are both taken without the live set having grown.
+        if (after.liveRuntimes <= before.liveRuntimes) continue;
+        const qint64 step = after.weighedBytes - before.weighedBytes;
+        steps << QStringLiteral("%1->%2 runtime(s) %3%4")
+                     .arg(QString::number(before.liveRuntimes),
+                          QString::number(after.liveRuntimes),
+                          step < 0 ? QString() : QStringLiteral("+"), megabytes(step));
     }
     emit log(QStringLiteral("web budget: the weighed figure, page by page: %1 (the pages "
                             "share one renderer, so only the first step is a page's real "
@@ -275,7 +282,7 @@ void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, in
                                 "from %6 at rest")
                      .arg(QString::number(pagesShed), megabytes(atMost),
                           megabytes(afterShedBytes),
-                          QString::number(m_weighed.last().first), megabytes(movedUp),
+                          QString::number(m_weighed.last().liveRuntimes), megabytes(movedUp),
                           megabytes(atRest)));
     }
 

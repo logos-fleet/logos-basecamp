@@ -112,13 +112,12 @@ LiveRuntimeBudget LiveRuntimeBudget::forThisDevice(const QStringList& args)
     // IN (logos-workspace#244). The pair has to match: observe() weighs
     // AppMemory::budgetWeighedBytes() and knows nothing about which of the two
     // it was handed, so the only place the two halves can be kept together is
-    // here, where both are chosen at once.
-#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+    // here, where both are chosen at once -- off the same answer that call
+    // chooses by (AppMemory::kBudgetWeighsTheDevice).
     const qint64 fromDevice =
-        ceilingForDeviceInUse(device, deviceLowMemoryBytes(), kDeviceRuntimeBytes);
-#else
-    const qint64 fromDevice = ceilingForDeviceMemory(device);
-#endif
+        kBudgetWeighsTheDevice
+            ? ceilingForDeviceInUse(device, deviceLowMemoryBytes(), kDeviceRuntimeBytes)
+            : ceilingForDeviceMemory(device);
 
     // ...AND A RUN CAN STATE THE CEILING TOO, for the same reason it can state
     // the count (#244). A ceiling that cannot be reached is indistinguishable
@@ -128,9 +127,9 @@ LiveRuntimeBudget LiveRuntimeBudget::forThisDevice(const QStringList& args)
     // happen. It is stated in MB against whatever frame this platform weighs:
     // `--web-ceiling 1400` on a phone that idles with 1318 MB in use is one
     // page's worth above the resting figure.
-    const qint64 stated_ceiling = statedCeilingBytes(args);
+    const qint64 statedCeiling = statedCeilingBytes(args);
     return LiveRuntimeBudget(runtimes, kDeviceRuntimeBytes,
-                             stated_ceiling > 0 ? stated_ceiling : fromDevice);
+                             statedCeiling > 0 ? statedCeiling : fromDevice);
 }
 
 LiveRuntimeBudget::LiveRuntimeBudget(int maxLiveRuntimes, qint64 runtimeFootprintBytes,

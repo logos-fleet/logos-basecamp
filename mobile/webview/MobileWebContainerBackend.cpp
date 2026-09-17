@@ -20,17 +20,9 @@ namespace {
 // Android, and the two are nowhere near each other.
 QString weighedFigureName()
 {
-#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
-    return QStringLiteral("this device's memory in use");
-#else
-    return QStringLiteral("app memory");
-#endif
+    return kBudgetWeighsTheDevice ? QStringLiteral("this device's memory in use")
+                                  : QStringLiteral("app memory");
 }
-
-} // namespace
-
-
-namespace {
 
 // A directory holding the runtime's glue script IS the runtime; anything else
 // named as one is a misconfiguration, and saying so beats a page that comes up
@@ -421,10 +413,9 @@ QStringList MobileWebContainerBackend::observeMemory(qint64 weighedBytes)
         << QStringLiteral("Web container: the figure this platform weighs is %1 against a "
                           "%2 ceiling -- the allowance goes %3 -> %4 page(s), %5 to give "
                           "up now")
-               .arg(megabytes(weighedBytes), megabytes(m_budget.appCeilingBytes()))
-               .arg(allowanceBefore)
-               .arg(allowanceNow)
-               .arg(evicted.size());
+               .arg(megabytes(weighedBytes), megabytes(m_budget.appCeilingBytes()),
+                    QString::number(allowanceBefore), QString::number(allowanceNow),
+                    QString::number(evicted.size()));
     if (evicted.isEmpty()) return {};
     applyEvictions(evicted, QStringLiteral("over the app's memory ceiling"));
     return evicted;
