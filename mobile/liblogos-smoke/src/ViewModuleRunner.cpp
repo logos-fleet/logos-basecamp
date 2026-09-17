@@ -10,7 +10,9 @@
 #include <QAbstractItemModel>
 #include <QAbstractItemModelReplica>
 #include <QCoreApplication>
+#include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QLocalSocket>
@@ -23,6 +25,7 @@
 #include <QRemoteObjectHost>
 #include <QRemoteObjectNode>
 #include <QRemoteObjectReplica>
+#include <QStandardPaths>
 #include <QUrl>
 
 #include <cerrno>
@@ -97,6 +100,76 @@ template <typename Fn>
 Fn resolve(void* handle, const char* name)
 {
     return reinterpret_cast<Fn>(dlsym(handle, name));
+}
+
+// ── THE QML DISK CACHE IS NOT SAFE ACROSS AN UPGRADE HERE (logos-workspace#248) ──
+//
+// Qt keeps a compiled unit for every QML document it loads under
+// QStandardPaths::CacheLocation/qmlcache/, names it after the SHA1 of the
+// document's path, and re-uses it when the timestamp recorded inside matches
+// the source's. BOTH HALVES OF THAT KEY ARE BUILD-INVARIANT for a view module:
+// the path is the module's fixed qrc path (":/logos/chat_ui/ChatUi/StatusBar.qml"),
+// and the timestamp is whatever rcc stamped into the resource -- 1980-01-01 for
+// everything nix builds, because nix normalises source mtimes. So the check can
+// never fail, and a unit a PREVIOUS build compiled is loaded against THIS
+// build's bytes.
+//
+// Measured on the iPad Air 13-inch (M3) simulator: chat_ui's StatusBar.qml
+// gained a `failures` property, the app was upgraded over a 2026-09-15
+// `8cb7c1dc….qmlc` -- sha1(":/logos/chat_ui/ChatUi/StatusBar.qml"),
+// sourceTimeStamp 315532800000 -- that had not, and the mount died on
+// `Cannot assign to non-existent property "failures"`. QML_IMPORT_TRACE showed
+// the RIGHT file resolved; what was wrong was an old compilation of it.
+//
+// The Shell's own QML never goes through this directory (qmlcachegen compiles
+// it into the binary), so what is at risk is exactly the QML that arrives by
+// dlopen -- and, for the same timestamp reason, Qt's own bundled imports.
+//
+// So the directory is dropped ONCE per process, and only when the application
+// image is not the one it was written for. Keeping it otherwise is worth it:
+// a cold compile of chat_ui's whole view is 98 ms on that simulator.
+//
+// Returns a line worth logging, or an empty string when the cache was already
+// this build's.
+QString dropQmlDiskCacheIfAppChanged()
+{
+    static bool asked = false;
+    if (asked)
+        return {};
+    asked = true;
+
+    const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                             + QStringLiteral("/qmlcache");
+    // The application image, as size and mtime. Not a hash of it: this runs on
+    // the way to a mount a user is waiting for, and an installer rewrites both
+    // of these for every file it lays down.
+    const QFileInfo image(QCoreApplication::applicationFilePath());
+    const QByteArray stamp = QStringLiteral("%1:%2")
+                                 .arg(image.lastModified().toMSecsSinceEpoch())
+                                 .arg(image.size())
+                                 .toUtf8();
+    const QString stampPath = cacheDir + QStringLiteral("/.logos-app-build");
+
+    QFile stampFile(stampPath);
+    if (stampFile.open(QIODevice::ReadOnly) && stampFile.readAll() == stamp)
+        return {};
+    stampFile.close();
+
+    QDir dir(cacheDir);
+    const bool existed = dir.exists();
+    if (existed && !dir.removeRecursively())
+        return QStringLiteral("view module: the stale QML disk cache at %1 would not go away"
+                              " -- a view whose QML changed may still load the old one")
+            .arg(cacheDir);
+    if (!QDir().mkpath(cacheDir))
+        return QStringLiteral("view module: could not create %1").arg(cacheDir);
+    QFile out(stampPath);
+    if (!out.open(QIODevice::WriteOnly) || out.write(stamp) != stamp.size())
+        return QStringLiteral("view module: could not stamp %1 -- the cache will be "
+                              "dropped again next launch").arg(cacheDir);
+    return existed
+        ? QStringLiteral("QML disk cache dropped: it was written for another build of this app")
+        : QStringLiteral("QML disk cache stamped for this build of the app");
 }
 
 } // namespace
@@ -202,6 +275,12 @@ bool ViewModuleRunner::run(QQuickWidget* surface)
         emit log(QStringLiteral("view module: no surface to render into"));
         return false;
     }
+
+    // Before the engine is asked for anything: a compiled unit from a previous
+    // build of this app would otherwise be preferred over the bytes the dlopen
+    // below is about to register. See dropQmlDiskCacheIfAppChanged().
+    if (const QString said = dropQmlDiskCacheIfAppChanged(); !said.isEmpty())
+        emit log(said);
 
     const QString imagePath = viewImagePathFor(m_stem);
     if (imagePath.isEmpty()) {
