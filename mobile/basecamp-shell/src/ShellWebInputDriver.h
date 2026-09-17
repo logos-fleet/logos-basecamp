@@ -1,4 +1,5 @@
-// "TYPED TEXT REACHES A `web` APP'S FORM", asked from inside the app.
+// "A `web` APP'S OWN CONTROLS ARE PRESSED, AND THE PAGE SAYS WHAT THEY DID",
+// asked from inside the app.
 //
 // The pass logos-workspace#174 exists for. A wallet flow whose input is typed
 // -- the seed-phrase import, a Send's recipient and amount, the Advanced tab's
@@ -17,21 +18,36 @@
 // an accessibility DOM -- names and rects for every control, and the field's
 // CONTENTS afterwards. WebPageInput.h holds the account of that.
 //
-// WHAT IT ASSERTS, and what it deliberately does not. It presses a form open,
-// types into its fields and reads one back. A field that holds what was typed
-// is the module's own state, arrived at through real pointer and key events
-// crossing the container into the page -- which is the fact the issue asks for.
-// Whether the form's BUTTON then did the right thing is the module's business:
-// the press is made and whatever the module says about it is on the console,
-// unasserted, because a wallet's import failing for want of a keystore grant is
-// not this pass reporting a defect in itself.
+// SEVERAL NAMED FLOWS PER APP, AND A RUN PICKS ONE (logos-workspace#238). This
+// driver arrived knowing exactly one flow per app -- wallet_ui's Advanced-tab
+// seed import -- and the wallet then grew a second thing worth driving: the
+// Private tab's accumulator sync, the `Sync now` and `Cancel` #235 shipped and
+// could not check on a device. With one flow per app the only way to reach it
+// was to REPLACE the first, trading one uncheckable flow for another. So the
+// catalogue is WebDriveFlows and a launch says which it wants:
+//
+//     --drive web-input                        the app's first flow, as before
+//     --drive web-input:private-sync           one named flow
+//     --drive web-input:seed-import,web-input:private-sync    both, in order
+//
+// WHAT IT ASSERTS, and what it deliberately does not. It presses controls,
+// types into fields, reads one back, and waits for lines the MODULE printed. A
+// field that holds what was typed is the module's own state, arrived at through
+// real pointer and key events crossing the container into the page. Whether a
+// form's button then did the right thing is the module's business UNLESS the
+// flow says otherwise: the seed import's press is made and whatever the module
+// says about it is on the console, unasserted, because a wallet's import
+// failing for want of a keystore grant is not this pass reporting a defect in
+// itself. The private sync's presses ARE asserted, because there the module's
+// own announcement is the only verdict there is (WebDriveFlows.h).
 //
 // IT LEAVES THE APP OPEN. Every other pass puts the Shell back; this one ends
-// with the form on screen holding what it was given, which is the one state a
-// screenshot of the run is worth taking.
+// with the app on screen in whatever state the flow left it, which is the one
+// state a screenshot of the run is worth taking.
 #pragma once
 
 #include "ShellSceneDriver.h"
+#include "WebDriveFlows.h"
 
 #include <QList>
 #include <QString>
@@ -48,46 +64,60 @@ public:
     ShellWebInputDriver(BundledSetShellHost* host, QWidget* shellWidget,
                         QObject* parent = nullptr);
 
-    // Whether this build carries a `web` app whose typed path this driver
-    // knows. A set without one reports that it had no work rather than failing.
+    // Whether this build carries a `web` app whose flows this driver knows. A
+    // set without one reports that it had no work rather than failing.
     bool hasWork() const;
 
-    // Open the app from its sidebar tile, walk its form and report. Runs after
-    // the other scene passes for the reason every page-opening pass does: the
-    // window goes to a platform view and the Shell's own chrome is no longer
-    // what is on screen.
-    void run();
+    // Walk the named flows, in the order given; an empty list walks the one
+    // flow a plain `--drive web-input` has always walked. Runs after the other
+    // scene passes for the reason every page-opening pass does: the window goes
+    // to a platform view and the Shell's own chrome is no longer what is on
+    // screen.
+    void run(const QStringList& flowNames = {});
 
 private:
-    // ONE STEP OF A TYPED FLOW, named the way the page names its controls --
-    // an accessible name, which for a Logos text field is its placeholder. Text
-    // empty means "press this", text set means "type this into it".
-    struct Step {
-        QString control;
-        QString text;
-    };
-    // The flow this driver knows for an app, and which of its fields is the one
-    // read back for the verdict. Empty when the app is not one it knows.
-    struct TypedFlow {
-        QList<Step> steps;
-        QString     verdictField;   // must end up holding verdictText
-        QString     verdictText;
-    };
-    static TypedFlow flowFor(const QString& app);
+    // The `web` app this build would drive for `flowName`: the first tiled one
+    // that carries it. Empty when there is none.
+    QString appFor(const QString& flowName) const;
 
-    // The `web` app this build would drive: the first tiled one whose flow is
-    // known. Empty when there is none.
-    QString appToDrive() const;
+    // Every `app:flow` pair this build's tiles offer, for a refusal that says
+    // what there is instead of leaving the reader a blank.
+    QStringList offeredFlows() const;
+
+    // One flow, start to finish. False having said why.
+    bool walk(const basecamp::shell::WebDriveFlow& flow);
 
     // Press the app's sidebar tile and wait until the Shell has docked a page
-    // for it. Returns false having said why.
+    // for it. Returns false having said why. A page already on screen is
+    // ALREADY OPEN and is not pressed again -- a second flow on the same app
+    // must not toggle the first one's window away.
     bool openApp(const QString& app);
 
+    // Whether the app's page is the one docked and on screen right now.
+    bool pageIsFrontmost(const QString& app) const;
+
+    // Put the driver script and then `call` into the app's page. False having
+    // said that this platform cannot script a page at all. Nothing is waited
+    // for: what the call did is read by the caller, or by a later step.
+    bool send(const QString& app, const QString& call);
+
+    // Offer every page line from `from` on to `answered`, each exactly once,
+    // until one satisfies it or the budget runs out. `from` is left past the
+    // line that answered -- or past everything seen, when none did -- so the
+    // step after this one reads what it did not.
+    bool waitForLine(const std::function<bool(const QString&)>& answered, int budgetMs,
+                     int& from);
+
     // Send one script into the page and wait for the answer the caller is
-    // after. `answered` is asked of every `logos-drive:` line the page prints
-    // from here on; false when none satisfied it inside the budget.
+    // after.
     bool ask(const QString& app, const QString& call,
-             const std::function<bool(const QString&)>& answered, int budgetMs);
+             const std::function<bool(const QString&)>& answered, int budgetMs, int& from);
+
+    // Wait for a page line WITHOUT sending anything: the verdict of a step
+    // whose answer is the module's own announcement rather than a control's
+    // contents. Reads from `from`, which is where the step BEFORE it started --
+    // a module may answer a press before the page has finished reporting it.
+    bool watch(basecamp::shell::WebPageWatcher& watcher, int budgetMs, int& from);
 
     BundledSetShellHost* m_host;  // not owned
     // Every page line since this driver started listening. A member because the

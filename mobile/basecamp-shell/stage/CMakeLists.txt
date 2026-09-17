@@ -36,6 +36,8 @@ set(BASECAMP_MOBILE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 add_library(basecamp_shell_host STATIC
     ${SRC}/DriveScript.cpp
     ${SRC}/DriveScript.h
+    ${SRC}/WebDriveFlows.cpp
+    ${SRC}/WebDriveFlows.h
     ${SRC}/ShellModuleRows.cpp
     ${SRC}/ShellModuleRows.h
     ${SRC}/ViewDependencies.cpp
@@ -124,6 +126,7 @@ set_target_properties(basecamp_shell_host PROPERTIES EXPORT_NAME ShellHost)
 install(TARGETS basecamp_shell_host EXPORT BasecampShellHostTargets ARCHIVE DESTINATION lib)
 install(FILES
     ${SRC}/DriveScript.h
+    ${SRC}/WebDriveFlows.h
     ${SRC}/ShellModuleRows.h
     ${SRC}/ViewDependencies.h
     ${SRC}/InstalledPackages.h

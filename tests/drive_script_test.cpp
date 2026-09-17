@@ -34,7 +34,8 @@ class DriveScriptTest : public QObject
     {
         return { DrivePass::Chat, DrivePass::Apps, DrivePass::Packages,
                  DrivePass::Catalog, DrivePass::Popups, DrivePass::Keyboard,
-                 DrivePass::WebApps, DrivePass::WebInput, DrivePass::Modules };
+                 DrivePass::WebApps, DrivePass::WebInput, DrivePass::WebBudget,
+                 DrivePass::Modules };
     }
 
 private slots:
@@ -198,6 +199,73 @@ private slots:
         QVERIFY(!input.wants(DrivePass::WebApps));
     }
 
+    // ── a pass that takes an option (logos-workspace#238) ──────────────────
+    //
+    // WHY IT EXISTS. `web-input` walked ONE flow per app, and the wallet grew a
+    // second thing worth driving -- the Private tab's sync. With one flow per
+    // app the only way to reach it was to replace the seed import, trading one
+    // uncheckable flow for another.
+    void aPassCanBeToldWhichFlowToWalk()
+    {
+        const DriveScript s = parse({ "--drive", "web-input:private-sync" });
+        QVERIFY(s.wants(DrivePass::WebInput));
+        QCOMPARE(s.optionsFor(DrivePass::WebInput), QStringList{ "private-sync" });
+        // ...and the console line reads as the run it is about to be.
+        QCOMPARE(s.passes(), QStringList{ "web-input:private-sync" });
+    }
+
+    // Two flows are one pass, walked in the order the run asked for -- which is
+    // the run's choice and not the catalogue's.
+    void severalFlowsAreOnePassInTheOrderAsked()
+    {
+        const DriveScript s = parse({ "--drive", "web-input:private-sync,web-input:seed-import" });
+        QCOMPARE(s.optionsFor(DrivePass::WebInput),
+                 (QStringList{ "private-sync", "seed-import" }));
+        QCOMPARE(s.passes(),
+                 (QStringList{ "web-input:private-sync", "web-input:seed-import" }));
+        // Named twice is named once, as for a pass.
+        QCOMPARE(parse({ "--drive", "web-input:a,web-input:a" }).optionsFor(DrivePass::WebInput),
+                 QStringList{ "a" });
+    }
+
+    // THE COMPATIBILITY CONTRACT. `--drive web-input` asked for no flow before
+    // this existed and still asks for none, which every pass reads as "your
+    // default".
+    void aPassNamedPlainlyCarriesNoOption()
+    {
+        QVERIFY(parse({ "--drive", "web-input" }).optionsFor(DrivePass::WebInput).isEmpty());
+        QVERIFY(parse({ "--drive", "all" }).optionsFor(DrivePass::WebInput).isEmpty());
+        QCOMPARE(parse({ "--drive", "web-input" }).passes(), QStringList{ "web-input" });
+    }
+
+    // An option on a pass that has no use for one is REFUSED rather than
+    // dropped: a run that thought it was selecting something and got the
+    // default is the failure this parser exists to prevent.
+    void anOptionOnAPassThatTakesNoneIsRefused()
+    {
+        const DriveScript s = parse({ "--drive", "modules:tab-two" });
+        QCOMPARE(s.refusals().size(), 1);
+        QVERIFY(s.refusals().at(0).contains("modules"));
+        QVERIFY(s.refusals().at(0).contains("tab-two"));
+        QVERIFY(!s.wants(DrivePass::Modules));
+
+        // ...including on `all`, where it would have to mean the same thing to
+        // ten passes and means nothing to nine of them.
+        const DriveScript everything = parse({ "--drive", "all:private-sync" });
+        QCOMPARE(everything.refusals().size(), 1);
+        QVERIFY(everything.passes().isEmpty());
+    }
+
+    // The flow NAME is not this parser's vocabulary -- WebDriveFlows owns it,
+    // and the driver refuses one no app carries beside the names it has. So a
+    // name this parser has never heard of is passed through untouched.
+    void aFlowNameIsPassedThroughUnjudged()
+    {
+        const DriveScript s = parse({ "--drive", "web-input:kitchen-sink" });
+        QVERIFY(s.refusals().isEmpty());
+        QCOMPARE(s.optionsFor(DrivePass::WebInput), QStringList{ "kitchen-sink" });
+    }
+
     // A name written the way a person writes it. The vocabulary is closed, so
     // there is nothing a case or a space could otherwise have meant.
     void aNameIsTrimmedAndCaseInsensitive()
@@ -206,6 +274,14 @@ private slots:
         QVERIFY(s.wants(DrivePass::Apps));
         QVERIFY(s.wants(DrivePass::WebApps));
         QVERIFY(s.refusals().isEmpty());
+
+        // ...and so is a pass with an option. The PASS half is lowered, the
+        // option half is not -- flow names are the catalogue's and it is the
+        // one that decides what they look like.
+        const DriveScript flow = parse({ "--drive", " WEB-INPUT : private-sync " });
+        QVERIFY(flow.wants(DrivePass::WebInput));
+        QCOMPARE(flow.optionsFor(DrivePass::WebInput), QStringList{ "private-sync" });
+        QVERIFY(flow.refusals().isEmpty());
     }
 };
 

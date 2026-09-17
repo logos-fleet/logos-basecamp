@@ -488,8 +488,14 @@ int main(int argc, char* argv[])
         // because the Modules tab unloads and reloads modules underneath
         // whatever is on screen, and a form holding typed text is exactly the
         // state that would not survive it.
-        if (drive.wants(DrivePass::WebInput) && webInput->hasWork())
-            webInput->run();
+        // WHICH FLOW, if the run named one (logos-workspace#238). `hasWork()`
+        // asks whether the build carries an app with a DEFAULT flow, which is
+        // the right gate for a plain `--drive web-input` and the wrong one for
+        // a run that named a flow: a named flow reports what it found either
+        // way, including that no app in this build carries it.
+        const QStringList webInputFlows = drive.optionsFor(DrivePass::WebInput);
+        if (drive.wants(DrivePass::WebInput) && (webInput->hasWork() || !webInputFlows.isEmpty()))
+            webInput->run(webInputFlows);
         // AFTER both of those and BEFORE the Modules tab, for the same two
         // reasons: it wants the pages already built (a cold start it did not
         // pay for is not the figure it is reporting) and it wants them still

@@ -73,6 +73,21 @@ public:
     // a webview may act on one path and not the other.
     static QString pressCall(const QString& control);
 
+    // ...THE SAME PRESS, ARMED IN THE PAGE AND FIRED `afterMs` LATER.
+    //
+    // WHY A HOST WOULD WANT THAT (logos-workspace#238). A page's JS thread and
+    // the HOST's event loop are not the same thread: a `web` module's outbound
+    // call crosses to the host, and the host answers it synchronously -- so a
+    // module call that takes seconds stops the host answering anything, the
+    // driver included, while the page goes on running. A flow whose second
+    // press has to land DURING such a call therefore cannot wait for the first
+    // press to be confirmed: by the time the host can read the confirmation,
+    // the work is over. Both presses are sent before the host blocks and the
+    // PAGE sequences them, which is also what a person with two fingers does.
+    //
+    // `afterMs` of 0 is the plain call.
+    static QString pressCall(const QString& control, int afterMs);
+
     // Press a field and type into it, then read it back. The readback is the
     // point: it is the module's own state, not the driver's report of what it
     // dispatched.
