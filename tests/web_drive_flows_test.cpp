@@ -95,7 +95,9 @@ private slots:
         QStringList pressed;
         QStringList awaited;
         for (const WebDriveStep& step : flow.steps) {
-            if (step.act == WebDriveStep::Act::Press) pressed << step.control;
+            if (step.act == WebDriveStep::Act::Press
+                || step.act == WebDriveStep::Act::PressAhead)
+                pressed << step.control;
             if (step.act == WebDriveStep::Act::Await)
                 awaited << step.watch.marker + step.watch.field;
         }
@@ -105,6 +107,7 @@ private slots:
         QVERIFY(awaited.at(2).contains(QLatin1String("private sync cancelled:")));
         QVERIFY(awaited.at(2).contains(QLatin1String("keptToBlock")));
         QVERIFY(awaited.at(3).contains(QLatin1String("percent")));
+        QCOMPARE(pressed, (QStringList{ "Private", "Check", "Sync now", "Cancel" }));
 
         // ...and the percentage step is the MOVED one. A `Present` there would
         // pass on the line the wallet publishes before the first window.
@@ -115,29 +118,45 @@ private slots:
         }
     }
 
-    // THE CANCEL IS PRESSED BEFORE THE MOVEMENT IS ASSERTED, and that order is
-    // what a device measured: the whole cold Sepolia sync is 3.7 s on an M2
-    // simulator, so waiting for a moved percentage first waits for a walk that
-    // has already finished and then presses a Cancel the view has disabled.
-    void theCancelIsPressedBeforeTheMovementIsAsserted()
+    // BOTH PRESSES GO IN BEFORE ANYTHING IS ASSERTED, and that order is what two
+    // device runs measured. The whole cold Sepolia sync is 3.6 s on an M2
+    // simulator, and worse, the host cannot act at all while it runs -- it
+    // answers a `web` module's call synchronously on the thread this driver's
+    // loop turns. So a Cancel sent on the strength of the `Sync now`
+    // confirmation is 3.6 s late, and the view has disabled the button by then.
+    void bothPressesAreArmedBeforeAnythingIsAsserted()
     {
         const WebDriveFlow flow =
             WebDriveFlows::select(QStringLiteral("wallet_ui"), QStringLiteral("private-sync"));
+        int startAt = -1;
         int cancelAt = -1;
+        int firstAwaitAfterStart = -1;
         int movedAt = -1;
         for (int i = 0; i < flow.steps.size(); ++i) {
             const WebDriveStep& step = flow.steps.at(i);
-            if (step.act == WebDriveStep::Act::Press
-                && step.control == QLatin1String("Cancel"))
-                cancelAt = i;
+            if (step.control == QLatin1String("Sync now")) startAt = i;
+            if (step.control == QLatin1String("Cancel")) cancelAt = i;
+            if (step.act == WebDriveStep::Act::Await && startAt >= 0
+                && firstAwaitAfterStart < 0)
+                firstAwaitAfterStart = i;
             if (step.act == WebDriveStep::Act::Await
                 && step.watch.want == WebPageWatch::Want::Moved)
                 movedAt = i;
         }
-        QVERIFY(cancelAt >= 0);
-        QVERIFY(movedAt > cancelAt);
+        QVERIFY(startAt >= 0);
+        // Neither press waits for the page to confirm it: the confirmation is
+        // in a queue the host will not read until the walk is over.
+        QCOMPARE(flow.steps.at(startAt).act, WebDriveStep::Act::PressAhead);
+        QCOMPARE(flow.steps.at(cancelAt).act, WebDriveStep::Act::PressAhead);
+        // The cancel is armed immediately after the start, and on the PAGE's
+        // clock -- a delay measured on the host would be measured on a thread
+        // that is about to stop.
+        QCOMPARE(cancelAt, startAt + 1);
+        QVERIFY(flow.steps.at(cancelAt).afterMs > 0);
+        QVERIFY(firstAwaitAfterStart > cancelAt);
         // ...so the movement has to be read over the whole flow: by then every
         // line that carried it is behind the cursor.
+        QVERIFY(movedAt > cancelAt);
         QVERIFY(flow.steps.at(movedAt).watch.overTheWholeFlow);
     }
 

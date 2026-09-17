@@ -61,6 +61,23 @@ private slots:
                  QStringLiteral("window.logosDrive.read('Account label')"));
     }
 
+    // A PRESS THE PAGE FIRES ON ITS OWN CLOCK (logos-workspace#238). A `web`
+    // module's outbound call is answered SYNCHRONOUSLY by the host, so a host
+    // that has to press something DURING one cannot time the press itself --
+    // its own loop is the one that stops. It arms the press in the page
+    // instead, before the call starts.
+    void aPressCanBeArmedOnThePagesOwnClock()
+    {
+        QCOMPARE(WebPageInput::pressCall(QStringLiteral("Cancel"), 1200),
+                 QStringLiteral("setTimeout(function(){window.logosDrive.press('Cancel');}, 1200)"));
+        // No delay is the plain call, so a caller need not special-case it.
+        QCOMPARE(WebPageInput::pressCall(QStringLiteral("Cancel"), 0),
+                 WebPageInput::pressCall(QStringLiteral("Cancel")));
+        // ...and the escaping is the same one, because it is the same call.
+        QVERIFY(WebPageInput::pressCall(QStringLiteral("Pay Ann's bill"), 50)
+                    .contains(QLatin1String("Ann\\'s")));
+    }
+
     // A quote in a control's name or in the text being typed is a broken
     // script, and a broken script is silence -- the page throws where nothing
     // is listening, and the driver waits out its budget for an answer that was

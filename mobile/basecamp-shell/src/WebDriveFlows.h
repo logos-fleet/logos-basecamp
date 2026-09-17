@@ -121,17 +121,37 @@ private:
 // desktop inspector; WebPageInput.h has the account of the two handles.
 struct WebDriveStep {
     enum class Act {
-        Press,  // press `control`
-        Type,   // type `text` into `control`
-        Read,   // `control` must hold `text`
-        Await,  // `watch` must be satisfied by a page console line
+        Press,      // press `control`
+        PressAhead, // ...arm the press in the page and do not wait for it
+        Type,       // type `text` into `control`
+        Read,       // `control` must hold `text`
+        Await,      // `watch` must be satisfied by a page console line
     };
     Act          act = Act::Press;
     QString      control;
     QString      text;
     WebPageWatch watch;
+    // PressAhead only: how long the PAGE waits before pressing.
+    int          afterMs = 0;
 
     static WebDriveStep press(const QString& control);
+
+    // A PRESS SENT BEFORE THE HOST STOPS ANSWERING.
+    //
+    // A `web` module's outbound call crosses to the host and the host answers
+    // it SYNCHRONOUSLY, so a module call that takes seconds stops the host's
+    // event loop -- and this driver runs on it. A flow whose next press has to
+    // land DURING such a call therefore cannot wait for the previous press to
+    // be confirmed: the confirmation is sitting in a queue the host will not
+    // read until the work is done. So both presses go into the page first and
+    // the PAGE sequences them on its own timer, which is what a person with two
+    // fingers does anyway.
+    //
+    // Nothing is asserted about the press itself. What it did is asserted by
+    // the `Await` steps after it, off the module's own announcements -- which
+    // is a stronger claim than "the page says it dispatched a pointer event".
+    static WebDriveStep pressAhead(const QString& control, int afterMs);
+
     static WebDriveStep type(const QString& control, const QString& text);
     static WebDriveStep read(const QString& control, const QString& holds);
     static WebDriveStep await(const WebPageWatch& watch);

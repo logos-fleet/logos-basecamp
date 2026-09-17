@@ -652,9 +652,11 @@ presses `Private`, `Check`, `Sync now` and `Cancel`, and asserts:
 ```
 [shell] web input: wallet_ui published the distance to the chain head --
         targetBlock = 11721544
-[shell] web input: pressed wallet_ui's 'Sync now'
+[shell] web input: sent wallet_ui's 'Sync now' press without waiting for the
+        page to confirm it
+[shell] web input: armed wallet_ui's 'Cancel' press, +1200 ms on the page's own
+        clock
 [shell] web input: wallet_ui published a walk that started -- state = running
-[shell] web input: pressed wallet_ui's 'Cancel'
 [shell] web input: wallet_ui published the block the cancelled walk kept --
         keptToBlock = 11721544
 [shell] web input: wallet_ui published a percentage that moved while the walk
@@ -669,19 +671,32 @@ proves the button was pressed and nothing about the walk. So the percentage
 step takes the first reading as a baseline and waits for one that differs from
 it.
 
-**Why the Cancel comes before the movement.** A device measured it: on an iPad
-Air 13-inch (M2) simulator against public Sepolia, the whole 11.7 M-block cold
-sync is **3.7 s and two windows** — the subsquid frontier in one and a
-1 300-block tail in the other — so the page publishes `running` at 0 % and
-`done` at 100 % with nothing in between. Waiting for a moved percentage first
-waits for a walk that has already finished, and then presses a Cancel the view
-has disabled. Pressing it while the window is in flight works on a device where
-the walk is seconds and on one where it is minutes: `railgun_module` is
-`concurrency: single`, so the cancel queues behind the window and the wallet
-checks the cancel flag before the `done` flag when the window lands. The
-movement is then read over the WHOLE flow (`overTheWholeFlow`), because on the
-fast device every line that carried it — the `cancelled:` line's own `percent`
-included — was published inside those 3.7 s.
+**Why both presses are armed before anything is asserted.** Two device runs
+measured it, on an iPad Air 13-inch (M2) simulator against public Sepolia:
+
+- the whole 11.7 M-block **cold** sync is **3.6 s and two windows** — the
+  subsquid frontier in one and a ~1 300-block tail in the other — so the page
+  publishes `running` at 0 % and `done` at 100 % with nothing in between. A flow
+  that waits for a moved percentage before pressing Cancel waits for a walk that
+  is already over, and then presses a Cancel the view has disabled
+  (`enabled: state === "running"`);
+- and worse, **the host cannot act at all while that window runs.** A `web`
+  module's `sync_step` crosses to the host, and the host answers it
+  *synchronously* on the thread this driver's own loop turns. Measured: the
+  page's `pressed 'Sync now'` reached the host 3.6 s before the host could read
+  it, and the `pressed 'Cancel'` it triggered landed **after**
+  `private sync done:`.
+
+So `Sync now` and `Cancel` both go into the page up front and the **page** fires
+the second on its own timer 1.2 s later — which is what a person with two
+fingers does anyway — and what they did is read off the module's own
+announcements afterwards. That works on a device where the walk is seconds and
+on one where it is minutes: `railgun_module` is `concurrency: single`, so the
+cancel queues behind the window in flight and the wallet checks its cancel flag
+*before* the `done` flag when that window lands. The movement is then read over
+the WHOLE flow (`overTheWholeFlow`), because on the fast device every line that
+carried it — the `cancelled:` line's own `percent` included — was published
+inside those 3.6 s.
 
 The `keptToBlock` assertion is the one a human looking at the screen would not
 make: a cancel that publishes `state: "cancelled"` and keeps no block has

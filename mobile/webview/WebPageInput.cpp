@@ -338,6 +338,17 @@ QString WebPageInput::pressCall(const QString& control)
     return QStringLiteral("window.logosDrive.press(%1)").arg(quoted(control));
 }
 
+QString WebPageInput::pressCall(const QString& control, int afterMs)
+{
+    if (afterMs <= 0) return pressCall(control);
+    // The page's own timer, so the delay is measured on the thread that will do
+    // the pressing rather than on a host that may be busy answering the press
+    // before it. See the header.
+    return QStringLiteral("setTimeout(function(){%1;}, %2)")
+        .arg(pressCall(control))
+        .arg(afterMs);
+}
+
 QString WebPageInput::typeCall(const QString& control, const QString& text)
 {
     return QStringLiteral("window.logosDrive.type(%1, %2)")

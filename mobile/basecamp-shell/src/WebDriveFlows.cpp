@@ -17,9 +17,16 @@ namespace {
 // core's admission race six times at 500 ms (#235). 30 s covers both.
 constexpr int kStatusBudgetMs = 30000;
 // The wallet publishing `running` is synchronous with the press -- it is the
-// line `startPrivateSync` writes before it asks for the first window -- so this
-// is a page round trip and not a chain walk.
-constexpr int kAcceptedBudgetMs = 30000;
+// line `startPrivateSync` writes before it asks for the first window -- but the
+// host cannot READ it until the window in flight is over, so this budget has to
+// cover that window, not a page round trip.
+constexpr int kAcceptedBudgetMs = 180000;
+// HOW LONG THE PAGE WAITS BEFORE PRESSING CANCEL, measured on its OWN thread.
+// Long enough that `Sync now` has certainly been pressed and the view has
+// re-evaluated the Cancel button's `enabled: state === "running"`; short enough
+// to be inside the first `sync_step`, which on this venue's iPad simulator
+// against public Sepolia is the whole 11.7 M-block history in 3.6 s.
+constexpr int kCancelAfterMs = 1200;
 // A CANCEL LANDS AFTER THE WINDOW ALREADY IN FLIGHT, and that window is the
 // expensive one: `sync_step` takes everything up to the subsquid frontier in a
 // single window however far away it is. Measured 3.7 s for the whole 11.7 M
@@ -91,18 +98,30 @@ WebDriveFlow seedImport()
 //     the same either way;
 //   * and the percentage MOVED while it ran.
 //
-// THE CANCEL IS PRESSED THE MOMENT THE WALK IS ACCEPTED, and the movement is
-// asserted after it rather than before. That order is not a preference, it is
-// what a device measured: on an iPad Air 13-inch (M2) simulator against public
-// Sepolia the whole 11.7 M-block cold sync is 3.7 s and TWO windows -- the
-// subsquid frontier in one and a 1 300-block tail in the other -- so the page
-// publishes `running` at 0 % and `done` at 100 % with nothing in between.
-// Waiting for a moved percentage BEFORE pressing Cancel therefore waits for a
-// walk that has already finished, and then presses a Cancel the view has
-// disabled. Pressing it while the window is in flight works on both a device
-// where the walk is seconds and one where it is minutes: `railgun_module` is
-// `concurrency: single`, so the cancel queues behind the window and the wallet
-// checks the cancel flag BEFORE the `done` flag when the window lands.
+// BOTH PRESSES GO IN BEFORE THE HOST STOPS ANSWERING, and the assertions come
+// after. That order is not a preference, it is what two device runs measured on
+// an iPad Air 13-inch (M2) simulator against public Sepolia:
+//
+//   * the whole 11.7 M-block COLD sync is 3.6 s and TWO windows -- the subsquid
+//     frontier in one and a ~1 300-block tail in the other -- so the page
+//     publishes `running` at 0 % and `done` at 100 % with nothing between them.
+//     A flow that waits for a moved percentage before pressing Cancel waits for
+//     a walk that is already over, and then presses a Cancel the view has
+//     disabled (`enabled: state === "running"`);
+//   * and worse, THE HOST CANNOT ACT AT ALL WHILE THAT WINDOW RUNS. A `web`
+//     module's `sync_step` crosses to the host, which answers it synchronously
+//     on the thread this driver's own loop turns -- so the page's "pressed
+//     'Sync now'" reached the host 3.6 s before the host could read it, and a
+//     Cancel sent on the strength of it is 3.6 s too late. Measured: the
+//     `pressed 'Cancel'` line lands AFTER `private sync done:`.
+//
+// So `Sync now` and `Cancel` are both armed in the page, the page fires the
+// second one on its own timer 1.2 s later, and what they did is read off the
+// module's announcements afterwards. It works on a device where the walk is
+// seconds and on one where it is minutes: `railgun_module` is
+// `concurrency: single`, so the cancel queues behind the window in flight, and
+// the wallet checks its cancel flag BEFORE the `done` flag when that window
+// lands -- so a cancelled walk publishes `cancelled` and not `done`.
 //
 // The movement is then read over the WHOLE flow (`overTheWholeFlow`), because
 // on the fast device every line that carried it -- including the `cancelled:`
@@ -159,9 +178,9 @@ WebDriveFlow privateSync()
         // buttons are reachable before the long one is pressed.
         WebDriveStep::press(QStringLiteral("Check")),
         WebDriveStep::await(distance),
-        WebDriveStep::press(QStringLiteral("Sync now")),
+        WebDriveStep::pressAhead(QStringLiteral("Sync now"), 0),
+        WebDriveStep::pressAhead(QStringLiteral("Cancel"), kCancelAfterMs),
         WebDriveStep::await(accepted),
-        WebDriveStep::press(QStringLiteral("Cancel")),
         WebDriveStep::await(kept),
         WebDriveStep::await(moved),
     };
@@ -183,6 +202,15 @@ WebDriveStep WebDriveStep::press(const QString& control)
     WebDriveStep step;
     step.act = Act::Press;
     step.control = control;
+    return step;
+}
+
+WebDriveStep WebDriveStep::pressAhead(const QString& control, int afterMs)
+{
+    WebDriveStep step;
+    step.act = Act::PressAhead;
+    step.control = control;
+    step.afterMs = afterMs;
     return step;
 }
 

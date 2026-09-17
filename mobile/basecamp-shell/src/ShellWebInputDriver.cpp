@@ -251,6 +251,29 @@ bool ShellWebInputDriver::walk(const WebDriveFlow& flow)
             continue;
         }
 
+        // A PRESS THAT IS NOT WAITED FOR. Sent and left in the page, because
+        // the step after it has to reach the page before the host stops
+        // answering -- see WebDriveFlows.h. The cursor is untouched: what the
+        // press did is read by the `Await` steps that follow it.
+        if (step.act == WebDriveStep::Act::PressAhead) {
+            auto* web = MobileWebContainerBackend::instance();
+            if (!web->runJavaScriptIn(flow.app, WebPageInput::driverScript())
+                || !web->runJavaScriptIn(flow.app,
+                                         WebPageInput::pressCall(step.control, step.afterMs))) {
+                emit log(QStringLiteral("WRONG: this platform cannot put a script in %1's page")
+                             .arg(flow.app));
+                return false;
+            }
+            emit log(step.afterMs > 0
+                         ? QStringLiteral("web input: armed %1's '%2' press, +%3 ms on the "
+                                          "page's own clock")
+                               .arg(flow.app, step.control).arg(step.afterMs)
+                         : QStringLiteral("web input: sent %1's '%2' press without waiting "
+                                          "for the page to confirm it")
+                               .arg(flow.app, step.control));
+            continue;
+        }
+
         const bool typing = step.act == WebDriveStep::Act::Type;
         const bool reading = step.act == WebDriveStep::Act::Read;
         const QString call = typing  ? WebPageInput::typeCall(step.control, step.text)
