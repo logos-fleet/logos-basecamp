@@ -67,6 +67,35 @@ QStringList ShellWebBudgetDriver::shippedWebModulesToLoad() const
     return tree;
 }
 
+QStringList ShellWebBudgetDriver::openableWebApps()
+{
+    auto* web = MobileWebContainerBackend::instance();
+    QStringList openable;
+    for (const QString& app : tiledWebApps()) {
+        // A TILE IS NOT A PAGE (logos-workspace#230). `wallet_ui` ships its
+        // `web` assets and declares dependencies -- eth_rpc_module,
+        // keystore_module, uniswap_module, token_list_module -- that an image
+        // whose Bundled set does not carry them cannot satisfy, so the core
+        // refuses the load and the app keeps a launcher tile with nothing
+        // behind it.
+        //
+        // PRESSING IT ENDED THE PASS, and that is why this filter exists rather
+        // than a kinder failure inside openAndWeigh(): the press spent the whole
+        // 60 s page budget waiting for a page that was never coming and then
+        // returned false, so the memory-warning measurement below -- the half
+        // #153 added and #230 needs -- was never reached on ANY Android run
+        // (Xiaomi 25028RN03Y and Samsung SM-G990B, 2026-09-17). Named and
+        // skipped, so the numbers that CAN be taken are taken.
+        if (!web->hasView(app)) {
+            emit log(QStringLiteral("web budget: skipping %1 -- it has a tile on this "
+                                    "device but no `web` page behind it").arg(app));
+            continue;
+        }
+        openable.append(app);
+    }
+    return openable;
+}
+
 void ShellWebBudgetDriver::loadShippedWebModules()
 {
     const QStringList tree = shippedWebModulesToLoad();
@@ -98,11 +127,20 @@ void ShellWebBudgetDriver::weigh(const QString& occasion)
 {
     const LiveRuntimeBudget& budget = MobileWebContainerBackend::instance()->budget();
     const qint64 ceiling = budget.appCeilingBytes();
-    emit log(QStringLiteral("WEB BUDGET: %1 -- %2 live runtime(s), app %3, budget %4 "
-                            "(%5 x %6), ceiling %7")
+    emit log(QStringLiteral("WEB BUDGET: %1 -- %2 live runtime(s), app %3, device free %4, "
+                            "budget %5 (%6 x %7), ceiling %8")
                  .arg(occasion,
                       QString::number(budget.live().size()),
                       reportedAs(basecamp::web::appResidentBytes(),
+                                 QStringLiteral("not reported by this platform")),
+                      // THE PAGE'S OWN COST IS ONLY IN THIS ONE, on Android
+                      // (logos-workspace#230): the app's figure is this
+                      // process and the page lives in a Chromium renderer that
+                      // is not. A row of this pass that carried only the app's
+                      // number under-reported what a `web` runtime costs here
+                      // by about 2.5x. See AppMemory.h for why it is not the
+                      // app's number and must not be read as one.
+                      reportedAs(basecamp::web::deviceAvailableBytes(),
                                  QStringLiteral("not reported by this platform")),
                       megabytes(budget.budgetBytes()),
                       QString::number(budget.maxLiveRuntimes()),
@@ -157,7 +195,7 @@ void ShellWebBudgetDriver::run()
     weigh(QStringLiteral("before any web app is open"));
 
     loadShippedWebModules();
-    const QStringList apps = tiledWebApps();
+    const QStringList apps = openableWebApps();
     if (apps.isEmpty()) {
         emit log(QStringLiteral("web budget: no `web` module in this build has a UI page"));
         return;

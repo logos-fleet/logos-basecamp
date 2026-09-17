@@ -42,6 +42,27 @@ qint64 appResidentBytes();
 // reads this caps its count -- see LiveRuntimeBudget::kMaxLiveRuntimes.
 qint64 deviceMemoryBytes();
 
+// HOW MUCH OF THAT IS STILL FREE, in bytes, or -1 where this platform has no
+// such figure -- `MemAvailable` from /proc/meminfo on Android/Linux.
+//
+// THE ONLY NUMBER ON ANDROID IN WHICH A PAGE'S REAL COST APPEARS, which is why
+// it is here (logos-workspace#230). appResidentBytes() above is this process
+// and the page is not in this process: measured on a Xiaomi 25028RN03Y
+// (2.7 GB) on 2026-09-17, the first `web` page moved the app's own figure by
+// 101 MB and the second by 1 MB, while the Chromium renderer that actually
+// holds them both went from nothing to 255 MB. `MemAvailable` moved by the
+// renderer's amount, because it is the device's book and the renderer is on it.
+//
+// IT IS NOT THE APP'S NUMBER AND MUST NOT BE READ AS ONE. Every other process
+// on the phone is in it too, so it falls when something else grows and rises
+// when the OS reclaims -- it says what room is left, never what this app is
+// spending. Reported beside appResidentBytes() rather than instead of it.
+//
+// -1 ON DARWIN, deliberately. iOS charges jetsam a per-process footprint and
+// publishes no device-wide free figure to an app; the honest answer there is
+// that there is no such reading, not `hw.memsize` minus a guess.
+qint64 deviceAvailableBytes();
+
 // SUBSCRIBE TO THE PLATFORM'S MEMORY WARNING. `onWarning` is called on the Qt
 // main thread when the OS says it wants memory back; returns false where this
 // platform has no such signal, and then the container is left with the polling

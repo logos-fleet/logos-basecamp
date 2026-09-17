@@ -322,6 +322,33 @@ private slots:
         QVERIFY(bytes > 256LL * 1024 * 1024);
         QVERIFY(bytes < Q_INT64_C(1024) * 1024 * 1024 * 1024);
     }
+
+    void theDeviceAlsoSaysHowMuchOfItIsLeft()
+    {
+        // #230: THE ONLY NUMBER ON ANDROID A `web` PAGE APPEARS IN.
+        //
+        // appResidentBytes() is this process and a page is not in this process.
+        // Measured on a Xiaomi 25028RN03Y (2.7 GB) on 2026-09-17: the first
+        // `web` page moved the app's own figure by 101 MB and the second by
+        // 1 MB, while the Chromium renderer holding both went from nothing to
+        // 255 MB -- and MemAvailable moved by the renderer's amount. A pass
+        // that reported only the app's figure under-reported the page by 2.5x.
+        const qint64 available = basecamp::web::deviceAvailableBytes();
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+        // Where /proc/meminfo exists the reading is real, and it is a SHARE of
+        // the device rather than a figure of its own -- a machine cannot have
+        // more memory free than it has.
+        QVERIFY2(available > 0,
+                 qPrintable(QStringLiteral("deviceAvailableBytes() = %1").arg(available)));
+        QVERIFY(available <= basecamp::web::deviceMemoryBytes());
+#else
+        // ...and where it does not, the answer is "there is no such reading"
+        // rather than a number derived from one that means something else. iOS
+        // charges jetsam a per-process footprint and publishes no device-wide
+        // free figure to an app.
+        QCOMPARE(available, Q_INT64_C(-1));
+#endif
+    }
 };
 
 QTEST_MAIN(LiveRuntimeBudgetTest)
