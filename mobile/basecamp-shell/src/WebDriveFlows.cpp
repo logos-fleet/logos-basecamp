@@ -37,6 +37,22 @@ constexpr int kCancelBudgetMs = 180000;
 // whole flow. It is a scan of what happened, not a wait.
 constexpr int kSyncMoveBudgetMs = 30000;
 
+// THE SHIELD'S BUDGETS. Its plan is `prepare_shield` (pure calldata, no
+// network) plus `get_transaction_count` and `gas_price` -- two ordinary RPCs
+// over a phone's radio -- and then one `request_approval` against a module in
+// the same image. A minute covers all of it with the admission retry in it.
+constexpr int kShieldRouteBudgetMs = 60000;
+// HOW LONG THE PAGE WAITS BEFORE PRESSING CANCEL. Generous rather than tuned:
+// the cancel is correct wherever in the plan it lands (see the flow), so this
+// only has to be long enough that `Shield` has certainly been pressed and short
+// enough that a run is not waiting on it.
+constexpr int kShieldCancelAfterMs = 4000;
+// A cancel during `sign` is one call to a module in the same image; a cancel
+// during `plan` waits for the RPC already in flight. A minute covers both.
+constexpr int kShieldCancelBudgetMs = 60000;
+// A scan of what happened, like the sync's.
+constexpr int kShieldMoveBudgetMs = 30000;
+
 // wallet_ui's Advanced-tab seed import: the flow logos-workspace#147 could not
 // verify on a device and the reason #174 was split out of it.
 //
@@ -187,6 +203,95 @@ WebDriveFlow privateSync()
     return flow;
 }
 
+// wallet_ui's Private tab, the OTHER direction: the shield that puts public
+// funds INTO the pool, started and then LEFT (logos-workspace#235, clauses 1
+// and 2 for `wrap` / `approve` / `shield`).
+//
+// WHAT THIS CAN CHECK ON A DEVICE WITH NO MONEY IN IT, which is the whole
+// design of the flow. The route is `plan` -> `sign` -> `wrap` -> `approve` ->
+// `shield`, and only the last three spend anything. `plan` is
+// `railgun_module.prepare_shield` (pure calldata, no network) plus two eth_rpc
+// reads; `sign` lodges one approval request with `keystore_module` and then
+// waits for a human in the Signer app -- which is not installed on this venue's
+// simulators, so the route parks there indefinitely and NOTHING is ever signed
+// or broadcast. That park is exactly where clause 2's interesting answer lives:
+// a cancel here withdraws the request and leaves nothing on chain, and the
+// wallet says so in a `note`.
+//
+// SO THE FLOW IS SAFE BY CONSTRUCTION, not by being careful with an amount. It
+// cannot reach a transaction because there is no approver to let it.
+//
+// BOTH PRESSES ARE ARMED BEFORE ANYTHING IS ASSERTED, for the same reason the
+// sync flow's are: a `web` module's outbound call is answered SYNCHRONOUSLY on
+// the thread this driver's loop turns, so the host cannot read the page's
+// "pressed 'Shield'" until the plan's RPC reads are done. The page fires the
+// second press on its own timer.
+//
+// THE CANCEL IS CORRECT WHEREVER IT LANDS, which is why the delay is generous
+// rather than tuned. During `plan` the wallet sets a flag and the reply in
+// flight finds it; during `sign` it withdraws the request it has a handle for;
+// between the two -- the request lodged but the reply not yet delivered -- the
+// reply itself withdraws it. All three ends publish `cancelled` with the same
+// note.
+//
+// THE BUTTONS ARE PRESSED BY objectName AND NOT BY THEIR TEXT. The accessible
+// name is matched case-insensitively FROM THE FRONT, and this tab now has a
+// "Shield" button under a "Shield into the pool" heading and three controls
+// whose names begin with "Cancel". An objectName is asked of the QML runtime
+// directly and is exact.
+WebDriveFlow privateShield()
+{
+    WebDriveFlow flow;
+    flow.name = QStringLiteral("private-shield");
+    flow.app = QStringLiteral("wallet_ui");
+    flow.verdict = QStringLiteral(
+        "THE WALLET PLANS A SHIELD AND CAN BE LEFT BEFORE ANYTHING IS SIGNED, from inside "
+        "the app");
+
+    WebPageWatch onRoute;
+    onRoute.marker = QStringLiteral("private shield running:");
+    onRoute.field = QStringLiteral("leg");
+    onRoute.want = WebPageWatch::Want::Present;
+    onRoute.budgetMs = kShieldRouteBudgetMs;
+    onRoute.what = QStringLiteral("the leg the shield is on");
+
+    WebPageWatch left;
+    left.marker = QStringLiteral("private shield cancelled:");
+    left.field = QStringLiteral("note");
+    left.want = WebPageWatch::Want::Present;
+    left.budgetMs = kShieldCancelBudgetMs;
+    left.what = QStringLiteral("what leaving the shield left behind");
+
+    WebPageWatch moved;
+    // THE SURFACE MOVED, which is #235's "the app has not hung" stated as
+    // something a driver can read: more than one state was published for one
+    // shield. Over the whole flow, because on a fast device every line is
+    // already behind the cursor by the time the cancel lands.
+    moved.marker = QStringLiteral("private shield ");
+    moved.field = QStringLiteral("state");
+    moved.want = WebPageWatch::Want::Moved;
+    moved.overTheWholeFlow = true;
+    moved.budgetMs = kShieldMoveBudgetMs;
+    moved.what = QStringLiteral("a route that published more than one state");
+
+    flow.steps = {
+        WebDriveStep::press(QStringLiteral("Private")),
+        // Sepolia WETH, and an amount in base units small enough to be dust if
+        // this ever DID reach a chain. Neither is load-bearing: the route cannot
+        // get past `sign` without an approver.
+        WebDriveStep::type(QStringLiteral("privateShieldAssetField"),
+                           QStringLiteral("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14")),
+        WebDriveStep::type(QStringLiteral("privateShieldAmountField"), QStringLiteral("1000")),
+        WebDriveStep::pressAhead(QStringLiteral("privateShieldButton"), 0),
+        WebDriveStep::pressAhead(QStringLiteral("privateShieldCancelButton"),
+                                 kShieldCancelAfterMs),
+        WebDriveStep::await(onRoute),
+        WebDriveStep::await(left),
+        WebDriveStep::await(moved),
+    };
+    return flow;
+}
+
 // The object a `<something>: {…}` line carries, or an empty one.
 QJsonObject objectOn(const QString& line)
 {
@@ -288,7 +393,7 @@ bool WebPageWatcher::offer(const QString& line)
 QList<WebDriveFlow> WebDriveFlows::forApp(const QString& app)
 {
     if (app == QLatin1String("wallet_ui"))
-        return { seedImport(), privateSync() };
+        return { seedImport(), privateSync(), privateShield() };
     return {};
 }
 

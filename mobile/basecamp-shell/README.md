@@ -628,6 +628,8 @@ says which it wants:
 --drive web-input:seed-import,web-input:private-sync  both, in that order
 ```
 
+`wallet_ui` carries three: `seed-import`, `private-sync` and `private-shield`.
+
 The catalogue is [`src/WebDriveFlows.h`](src/WebDriveFlows.h) — data, not code
 in the driver, so the next `web` app adds to it and a unit test can state it on
 a desktop with no webview. A flow name no app in the build carries is refused
@@ -670,6 +672,57 @@ presses `Private`, `Check`, `Sync now` and `Cancel`, and asserts:
 proves the button was pressed and nothing about the walk. So the percentage
 step takes the first reading as a baseline and waits for one that differs from
 it.
+
+### `private-shield` — the other direction, driven with no money
+
+`--drive web-input:private-shield` walks the route that puts **public** funds
+into the RAILGUN pool (logos-workspace#235's `wrap` / `approve` / `shield`):
+it presses `Private`, types an asset and an amount, arms `Shield` and then
+`Cancel shield`, and asserts off the wallet's own announcements:
+
+```
+[shell] web input: wallet_ui published the leg the shield is on -- leg = plan
+[shell] web input: wallet_ui published what leaving the shield left behind --
+        note = Stopped before any transaction reached the chain …
+[shell] web input: wallet_ui published a route that published more than one
+        state -- state = cancelled
+```
+
+**It cannot spend anything, by construction rather than by being careful with
+the amount.** The route is `plan → sign → wrap → approve → shield` and only the
+last three touch a chain. `plan` is `railgun_module.prepare_shield` (pure
+calldata, no network) plus two eth_rpc reads; `sign` lodges one approval request
+with `keystore_module` and then waits for a human in the **Signer app**, which
+is not installed on this venue's simulators. So the route parks at `sign`
+indefinitely, nothing is ever signed or broadcast, and the cancel is pressed
+exactly where #235's second clause has its interesting answer.
+
+**The cancel is correct wherever it lands**, which is why its delay is generous
+rather than tuned: during `plan` the wallet sets a flag and the reply in flight
+finds it; during `sign` it withdraws the request it has a handle for; between
+the two, the request's own reply withdraws it. All three publish `cancelled`
+with the same note.
+
+**It needs two things in place, and both are one launch flag.** `owner` is the
+selected account, so a keystore with nothing in it refuses the shield before a
+call goes out — run `seed-import` ahead of it. And `prepare_shield` is the
+route's first call, so `railgun_module` has to have an engine:
+
+```
+--call 'eth_rpc_module.init_defaults()' \
+--call 'railgun_module.init_from_seed(str:{"chainId":11155111,"seed":"0x…"})' \
+--drive web-input:seed-import,web-input:private-shield
+```
+
+Measured on an iPad Air 13-inch (M2) simulator: without the seed import the
+press lands, the wallet refuses on `owner`, and the pass reports that no
+`private shield running:` line was published — which is the flow telling the
+truth about a device that cannot shield rather than a defect in either.
+
+**Its buttons are pressed by `objectName`, not by their text.** An accessible
+name is matched case-insensitively *from the front*, and the Private tab now has
+a `Shield` button under a "Shield into the pool" heading and three controls
+whose names begin with `Cancel`.
 
 **Why both presses are armed before anything is asserted.** Two device runs
 measured it, on an iPad Air 13-inch (M2) simulator against public Sepolia:
