@@ -74,7 +74,13 @@ The Shell knows how to drive itself through nine acceptance passes, and it runs
 --drive catalog     open the Applications section and read the CATALOG off the
                     page: a row for every entry, an install control only where
                     the row may be installed, and a refused row carrying the
-                    reason it was refused in (#169)
+                    reason it was refused in (#169). Takes `install` after a
+                    colon to PRESS that control -- `--drive catalog:install`,
+                    or `--drive catalog:install=<package>` to name the row --
+                    which walks the signer gate on screen and checks the
+                    package arrived, with no `--install` flag anywhere (#249).
+                    Named plainly it presses nothing, because a press starts a
+                    download
 --drive popups      open a Popup, a modal Dialog and a Menu in EVERY scene the
                     Shell has on screen, and read the pixels: does the surface
                     draw them? (#187) Needs no module and no network
@@ -102,6 +108,24 @@ Composable, on one flag or several: `--drive apps,modules` and `--drive apps
 by name, and the passes beside it still run. So is an option on a pass that
 takes none (`--drive modules:something`), and so is `--drive all:something` —
 an option would have to mean the same thing to ten passes.
+
+**Pressing Install needs a catalog, and pressing it is a different route from
+`--install`.** `--drive catalog:install` finds the row's own control in the
+scene, taps it, and answers the signer gate the App Manager puts up; `--install
+<package>` goes through `ShellCatalogDriver`, which approves that gate in C++.
+Only the first is the route a user takes, and it was the one nothing drove --
+which is how the control came to be inert for days with every check green
+(#249). Both want the same three flags:
+
+```
+  --repository http://127.0.0.1:<port>/logos-repo.json
+  --trust-signer <name>=<did:jwk:...>
+  --drive catalog:install
+```
+
+A run that finds nothing installable (every row already on the device, which is
+what a SECOND launch looks like) says so and presses nothing; a row the catalog
+refuses is reported with its reason and its signer DID, off the page.
 
 **Why it is not the default.** It used to be: every launch fired all of them
 from one timer, gated only by whether the BUILD carried something drivable, so

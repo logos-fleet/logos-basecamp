@@ -28,14 +28,33 @@ TestCase {
     name: "StoreCatalogView"
     when: windowShown
 
-    // A stand-in for basecamp::appmanager::StoreAppManager: QML reads two
-    // properties off it and calls one slot, and this answers all three. The
-    // rows are in the shape StoreAppManager::catalogEntries publishes.
+    // A stand-in for basecamp::appmanager::StoreAppManager, SHAPED LIKE THE
+    // GATE and not like a button handler -- which is the thing this fake got
+    // wrong, and the reason the suite was green while the press was dead
+    // (logos-workspace#249).
+    //
+    // `beginInstall` does not install. The real one downloads the package, asks
+    // package_manager who signed it and STOPS at stage 4 of five, publishing
+    // `signerPrompt` and waiting for approveSigner() / rejectSigner()
+    // (InstallGate.h). A fake whose beginInstall just recorded a name asserted
+    // that the button emits -- which it always did -- and could not notice that
+    // nothing on the page ever called the other two.
     QtObject {
         id: fakeAppManager
 
         property string catalogUnavailableReason: ""
         property var lastInstallRequest: ""
+        // The two properties the page has to draw, in the shape
+        // InstallGate::signerPrompt / refusedSigner publish them.
+        property var signerPrompt: ({})
+        property var refusedSigner: ({})
+        property string lastError: ""
+        property int installs: 0
+        property string installed: ""
+        // What signerTrust will say about the next package: approvable, or
+        // refused over a key this device does not vouch for (ADR 0008).
+        property bool signerIsInstallable: true
+
         property var catalogEntries: [
             {
                 name: "web_counter_b", displayName: "Web Counter B", version: "1.0.0",
@@ -73,7 +92,49 @@ TestCase {
             },
         ]
 
-        function beginInstall(name) { lastInstallRequest = name }
+        function beginInstall(name) {
+            lastInstallRequest = name
+            lastError = ""
+            refusedSigner = ({})
+            if (!signerIsInstallable) {
+                // The gate refuses before it prompts -- an Install button
+                // beside a package that cannot be installed is the one thing
+                // signerTrust exists to prevent -- and the IDENTITY survives
+                // the refusal because the DID is the only way forward.
+                signerPrompt = ({})
+                lastError = "'" + name + "' is signed by a key your keyring "
+                            + "does not vouch for"
+                refusedSigner = ({
+                    name: name, version: "1.0.0", signatureStatus: "signed",
+                    signerName: "logos-catalog-test",
+                    signerDid: "did:jwk:eyJjcnYiOiJFZDI1NTE5Ig",
+                })
+                return
+            }
+            signerPrompt = ({
+                name: name, version: "1.0.0", installable: true,
+                signatureStatus: "signed", policy: "require",
+                signerName: "logos-catalog-test",
+                signerDid: "did:jwk:eyJjcnYiOiJFZDI1NTE5Ig",
+                trusted: true, trustedAs: "logos-catalog-test",
+            })
+        }
+
+        function approveSigner() {
+            if (Object.keys(signerPrompt).length === 0)
+                return
+            installed = signerPrompt.name
+            ++installs
+            signerPrompt = ({})
+        }
+
+        function rejectSigner() {
+            if (Object.keys(signerPrompt).length === 0)
+                return
+            lastError = "you did not trust the signer of '"
+                        + signerPrompt.name + "'"
+            signerPrompt = ({})
+        }
     }
 
     Component {
@@ -100,6 +161,16 @@ TestCase {
             { tag: "ipad-air-13-portrait", width: 928,  height: 1326 },
             { tag: "desktop",              width: 1440, height: 900  },
         ];
+    }
+
+    function init() {
+        fakeAppManager.signerPrompt = ({})
+        fakeAppManager.refusedSigner = ({})
+        fakeAppManager.lastError = ""
+        fakeAppManager.lastInstallRequest = ""
+        fakeAppManager.installs = 0
+        fakeAppManager.installed = ""
+        fakeAppManager.signerIsInstallable = true
     }
 
     function openCatalog(data) {
@@ -206,5 +277,136 @@ TestCase {
 
         host.destroy();
         empty.destroy();
+    }
+
+    // ── THE PRESS, END TO END (logos-workspace#249) ────────────────────────
+    //
+    // An operator pressed Install on two rows this very model called
+    // installable and got no install, no error and no visible change. The
+    // press was fine: `beginInstall` ran, downloaded a megabyte, reached the
+    // signer prompt and stopped there -- and NOTHING in any scene was bound to
+    // `signerPrompt`, so stage 5 of the gate had no caller and the flow parked
+    // for ever behind a page that looked idle.
+    function test_pressing_install_puts_the_signer_gate_on_screen_data() {
+        return viewport_data();
+    }
+
+    function test_pressing_install_puts_the_signer_gate_on_screen(data) {
+        var host = openCatalog(data);
+
+        compare(findChild(host.catalog, "storeCatalog.signer.install"), null,
+                "no gate before the press");
+
+        mouseClick(findChild(host.catalog, "storeCatalog.install.web_counter_b"));
+        tryVerify(function() {
+            return findChild(host.catalog, "storeCatalog.signer.title") !== null;
+        }, 2000, "pressing Install puts the signer gate on screen");
+
+        var title = findChild(host.catalog, "storeCatalog.signer.title");
+        verify(title.text.indexOf("web_counter_b") >= 0,
+               "naming the package being installed: " + title.text);
+
+        // NAME AND DID TOGETHER. The name is self-asserted by the publisher;
+        // the DID is what the keyring was checked against. Either alone tells
+        // the user nothing they can verify.
+        var identity = findChild(host.catalog, "storeCatalog.signer.identity");
+        verify(identity, "the gate names the signer");
+        verify(identity.text.indexOf("logos-catalog-test") >= 0,
+               "by name: " + identity.text);
+        verify(identity.text.indexOf("did:jwk:eyJjcnYiOiJFZDI1NTE5Ig") >= 0,
+               "and by DID: " + identity.text);
+
+        // REACHABLE, not merely present -- the same claim the row's own
+        // control has to satisfy at a phone's width.
+        var approve = findChild(host.catalog, "storeCatalog.signer.install");
+        verify(approve, "and it offers a way to approve");
+        var origin = approve.mapToItem(host.contentItem, 0, 0);
+        verify(origin.x >= 0 && origin.x + approve.width <= host.width
+               && origin.y >= 0 && origin.y + approve.height <= host.height,
+               "the approve control spans x " + Math.round(origin.x) + ".."
+               + Math.round(origin.x + approve.width) + " y "
+               + Math.round(origin.y) + ".." + Math.round(origin.y + approve.height)
+               + ", outside the " + host.width + "x" + host.height + " viewport");
+
+        host.destroy();
+    }
+
+    function test_approving_the_gate_installs_data() {
+        return viewport_data();
+    }
+
+    function test_approving_the_gate_installs(data) {
+        var host = openCatalog(data);
+
+        mouseClick(findChild(host.catalog, "storeCatalog.install.web_counter_b"));
+        tryVerify(function() {
+            return findChild(host.catalog, "storeCatalog.signer.install") !== null;
+        }, 2000, "the gate is up");
+
+        mouseClick(findChild(host.catalog, "storeCatalog.signer.install"));
+        tryCompare(fakeAppManager, "installed", "web_counter_b", 2000,
+                   "approving the signer is what installs the package");
+        compare(fakeAppManager.installs, 1, "once");
+        tryVerify(function() {
+            return findChild(host.catalog, "storeCatalog.signer.install") === null;
+        }, 2000, "and the gate comes back down");
+
+        host.destroy();
+    }
+
+    function test_cancelling_the_gate_installs_nothing_and_says_so_data() {
+        return viewport_data();
+    }
+
+    function test_cancelling_the_gate_installs_nothing_and_says_so(data) {
+        var host = openCatalog(data);
+
+        mouseClick(findChild(host.catalog, "storeCatalog.install.web_counter_b"));
+        tryVerify(function() {
+            return findChild(host.catalog, "storeCatalog.signer.cancel") !== null;
+        }, 2000, "the gate is up");
+
+        mouseClick(findChild(host.catalog, "storeCatalog.signer.cancel"));
+        tryVerify(function() {
+            return findChild(host.catalog, "storeCatalog.signer.cancel") === null;
+        }, 2000, "cancelling takes the gate down");
+        compare(fakeAppManager.installs, 0, "and installs nothing");
+
+        // AND SAYS WHY, in the words the gate refused it in. A press whose
+        // only outcome is a property nobody drew is the defect this whole
+        // issue is.
+        var shown = findChild(host.catalog, "storeCatalog.error");
+        verify(shown, "the page carries the refusal");
+        verify(shown.visible, "on screen");
+        compare(shown.text, "you did not trust the signer of 'web_counter_b'");
+
+        host.destroy();
+    }
+
+    // A REFUSAL THAT NEVER REACHES A PROMPT still has to be visible, and it is
+    // the common one under a Store shell's `require` policy (ADR 0008):
+    // package_manager refuses a package signed by a key the keyring does not
+    // vouch for, and the DID is the only way forward from there -- it is what
+    // would be anchored, and a phone has no `lgx keyring` to ask afterwards.
+    function test_a_refused_signer_is_named_even_with_no_gate() {
+        var host = openCatalog({ width: 306, height: 834 });
+        fakeAppManager.signerIsInstallable = false;
+
+        mouseClick(findChild(host.catalog, "storeCatalog.install.web_counter_b"));
+
+        tryVerify(function() {
+            var e = findChild(host.catalog, "storeCatalog.error");
+            return e && e.visible && e.text !== "";
+        }, 2000, "the refusal is on the page");
+        compare(findChild(host.catalog, "storeCatalog.signer.install"), null,
+                "and there is no Install control behind it");
+
+        var who = findChild(host.catalog, "storeCatalog.refusedSigner");
+        verify(who, "the refused key is named");
+        verify(who.text.indexOf("did:jwk:eyJjcnYiOiJFZDI1NTE5Ig") >= 0,
+               "by DID, which is the actionable half: " + who.text);
+        compare(fakeAppManager.installs, 0, "nothing was installed");
+
+        host.destroy();
     }
 }

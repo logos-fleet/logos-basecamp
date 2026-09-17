@@ -150,5 +150,13 @@ foreach(test_src IN LISTS TEST_SOURCES)
         Qt6::QuickWidgets
         Qt6::Test
     )
+    # THE REPO ROOT, for the gates that read SOURCE rather than link it.
+    # `shell_backend_signal_contract_test` resolves the shared shell's
+    # `Connections` handlers and MainContainer's string-named connects against
+    # both backend headers -- a question about two files that cannot be linked
+    # into one harness (ShellModulesBackend needs a core runtime), and one the
+    # compiler answers for neither end of a SIGNAL() macro.
+    target_compile_definitions(${test_name} PRIVATE
+        BASECAMP_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/..")
     add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()

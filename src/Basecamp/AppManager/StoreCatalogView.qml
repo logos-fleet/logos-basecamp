@@ -41,6 +41,40 @@ Rectangle {
     readonly property string unavailableReason:
         appManager ? appManager.catalogUnavailableReason : ""
 
+    // THE SECOND HALF OF AN INSTALL, and until logos-workspace#249 nothing in
+    // any scene was bound to it.
+    //
+    // Pressing Install does not install. It runs StoreAppManager::beginInstall,
+    // which downloads the package, asks package_manager who signed it and then
+    // STOPS -- nothing is installed behind a signer the user has not seen
+    // (InstallGate.h, step 4). So the press publishes `signerPrompt` and waits
+    // for approveSigner() / rejectSigner(), and a page that draws neither turns
+    // the whole flow into a button that does nothing: the operator on #249
+    // pressed Install on two rows the model itself called installable and got
+    // no install, no error and no visible change, twice.
+    //
+    // A map, and an EMPTY map is truthy in JavaScript -- `{}` passes `if (x)`.
+    // So "is one on screen" is a key count and not a null check; reading it as
+    // one puts the gate up from the first frame over an empty prompt.
+    readonly property var signerPrompt: appManager ? appManager.signerPrompt : null
+    readonly property bool awaitingSigner:
+        !!signerPrompt && Object.keys(signerPrompt).length > 0
+
+    // WHO WAS REFUSED, when the refusal came from the signer step and named a
+    // key. Identity WITHOUT an install control, which is the whole point of it
+    // (InstallGate::refusedSigner): under a Store shell's `require` policy the
+    // only way forward from "signed by a key your keyring does not vouch for"
+    // is for that DID to be anchored, and the sentence in `lastError` cannot
+    // carry a DID.
+    readonly property var refusedSigner: appManager ? appManager.refusedSigner : null
+    readonly property bool hasRefusedSigner:
+        !!refusedSigner && Object.keys(refusedSigner).length > 0
+
+    // ...and the sentence itself. The one place a refused install is visible at
+    // all: every step of the gate reports through it, and a download that
+    // failed on the network looks exactly like an inert button without it.
+    readonly property string lastError: appManager ? appManager.lastError : ""
+
     // Pressed Install on a row. The App Manager owns the gate that follows
     // (signer prompt, consent, the core's load); nothing here decides any of it.
     signal installRequested(string packageName)
@@ -76,6 +110,36 @@ Rectangle {
             color: Theme.palette.textSecondary
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
+        }
+
+        // WHY THE LAST PRESS DID NOT INSTALL. A refusal arrives from five
+        // different steps of the gate -- an unavailable row, a failed download,
+        // a signer this device does not vouch for, a refused install, the
+        // user's own Cancel -- and every one of them used to end in a property
+        // no scene was bound to.
+        LogosText {
+            objectName: "storeCatalog.error"
+            text: root.lastError
+            visible: text !== ""
+            color: Theme.palette.error
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+
+        // ...AND THE KEY IT WAS REFUSED OVER, when there was one. `lastError`
+        // is a sentence; this is the DID, which is the only actionable thing
+        // about that refusal and the one a sentence cannot hold.
+        Loader {
+            active: root.hasRefusedSigner
+            Layout.fillWidth: true
+            sourceComponent: LogosText {
+                objectName: "storeCatalog.refusedSigner"
+                text: qsTr("signed by %1\n%2")
+                          .arg(root.refusedSigner.signerName || qsTr("an unnamed publisher"))
+                          .arg(root.refusedSigner.signerDid || "")
+                color: Theme.palette.textSubtle
+                wrapMode: Text.WrapAnywhere
+            }
         }
 
         ListView {
@@ -177,6 +241,138 @@ Rectangle {
                             text: qsTr("Install")
                             variant: LogosButton.Variant.Primary
                             onClicked: root.installRequested(row.entryName)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── THE SIGNER GATE ────────────────────────────────────────────────────
+    //
+    // The other half of the press, and the reason pressing Install did nothing
+    // at all until logos-workspace#249. `beginInstall` downloads the package,
+    // asks package_manager who signed it and STOPS at stage 4 of five
+    // (InstallGate.h); the install happens in `approveSigner`, which nothing
+    // in any scene could call. So the flow's whole visible surface was a button
+    // that started a download and then parked for ever.
+    //
+    // IN THIS PAGE, not a Popup and not the desktop's overlay layer. Both of
+    // those are the wrong scene for a Store shell: OverlayDialogs.qml is driven
+    // by MainUIBackend's dialog signals, which ShellModulesBackend does not
+    // emit, and a QtQuick Popup is parented to an Overlay beside the view --
+    // invisible to a driver that walks from the root object, and on the venue's
+    // physical iPad a popup that takes focus and raises a keyboard while
+    // NOTHING of it is on the screen (logos-workspace#187). A Loader over this
+    // ColumnLayout is reachable by a finger and by a driver in exactly the way
+    // the rows are.
+    //
+    // NAME AND DID TOGETHER, and that is the criterion rather than a layout
+    // choice (InstallGate::signerPrompt): the name is self-asserted by whoever
+    // published the package, the DID is what this device's keyring was checked
+    // against, and either one alone tells the user nothing they can verify.
+    Loader {
+        objectName: "storeCatalog.signerGate"
+        active: root.awaitingSigner
+        anchors.fill: parent
+        z: 10
+
+        sourceComponent: Rectangle {
+            // OPAQUE, AND IT SWALLOWS PRESSES. A second press on the row
+            // behind this would run the gate again from stage 1 -- a second
+            // download, and `m_installing` repointed at whatever was pressed
+            // last while the first package is the one on disk.
+            color: Qt.rgba(0, 0, 0, 0.75)
+
+            MouseArea {
+                anchors.fill: parent
+                // Nothing: the two controls below are the only ways out.
+            }
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: Math.min(parent.width - 2 * Theme.spacing.large,
+                                480 - 2 * Theme.spacing.large)
+                implicitHeight: gateContent.implicitHeight + 2 * Theme.spacing.large
+                height: implicitHeight
+                radius: Theme.spacing.radiusMedium
+                color: Theme.palette.backgroundSecondary
+                border.width: 1
+                border.color: Theme.palette.borderSecondary
+
+                ColumnLayout {
+                    id: gateContent
+                    anchors.fill: parent
+                    anchors.margins: Theme.spacing.large
+                    spacing: Theme.spacing.small
+
+                    LogosText {
+                        objectName: "storeCatalog.signer.title"
+                        text: qsTr("Install %1 %2?")
+                                  .arg(root.signerPrompt.name || "")
+                                  .arg(root.signerPrompt.version || "")
+                        font.weight: Theme.typography.weightBold
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    LogosText {
+                        objectName: "storeCatalog.signer.identity"
+                        // WrapAnywhere: a DID is one unbroken token ~100
+                        // characters long, and WordWrap leaves it overflowing a
+                        // phone-width panel rather than breaking it.
+                        text: qsTr("Signed by %1\n%2")
+                                  .arg(root.signerPrompt.signerName
+                                       || qsTr("an unnamed publisher"))
+                                  .arg(root.signerPrompt.signerDid || "")
+                        color: Theme.palette.textSecondary
+                        wrapMode: Text.WrapAnywhere
+                        Layout.fillWidth: true
+                    }
+
+                    // WHETHER THIS DEVICE VOUCHES FOR THAT KEY, in its own
+                    // words. package_manager decided it; a Store shell's
+                    // `require` policy (ADR 0008) is why a package can reach
+                    // this panel at all, and the user is the last check on it.
+                    LogosText {
+                        objectName: "storeCatalog.signer.status"
+                        text: (root.signerPrompt.signatureStatus || qsTr("unknown"))
+                              + " \u00b7 "
+                              + (root.signerPrompt.trusted === true
+                                     ? qsTr("trusted on this device as '%1'")
+                                           .arg(root.signerPrompt.trustedAs || "")
+                                     : qsTr("NOT in this device's keyring"))
+                        color: root.signerPrompt.trusted === true
+                                   ? Theme.palette.success : Theme.palette.warning
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        spacing: Theme.spacing.small
+                        Layout.fillWidth: true
+                        Layout.topMargin: Theme.spacing.small
+
+                        Item { Layout.fillWidth: true }
+
+                        LogosButton {
+                            objectName: "storeCatalog.signer.cancel"
+                            text: qsTr("Cancel")
+                            variant: LogosButton.Variant.Secondary
+                            onClicked: {
+                                if (root.appManager)
+                                    root.appManager.rejectSigner()
+                            }
+                        }
+
+                        LogosButton {
+                            objectName: "storeCatalog.signer.install"
+                            text: qsTr("Install")
+                            variant: LogosButton.Variant.Primary
+                            onClicked: {
+                                if (root.appManager)
+                                    root.appManager.approveSigner()
+                            }
                         }
                     }
                 }
