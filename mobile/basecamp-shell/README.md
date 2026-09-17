@@ -703,15 +703,21 @@ finds it; during `sign` it withdraws the request it has a handle for; between
 the two, the request's own reply withdraws it. All three publish `cancelled`
 with the same note.
 
-**It needs `railgun_module` initialised first**, because `prepare_shield` is the
-route's first call and a module with no engine refuses it — which ends the
-shield `failed` before there is anything to cancel. Pair the pass with the call
-that does it:
+**It needs two things in place, and both are one launch flag.** `owner` is the
+selected account, so a keystore with nothing in it refuses the shield before a
+call goes out — run `seed-import` ahead of it. And `prepare_shield` is the
+route's first call, so `railgun_module` has to have an engine:
 
 ```
---call 'railgun_module.init_from_seed(str:{"chainId":11155111,…})' \
---drive web-input:private-shield
+--call 'eth_rpc_module.init_defaults()' \
+--call 'railgun_module.init_from_seed(str:{"chainId":11155111,"seed":"0x…"})' \
+--drive web-input:seed-import,web-input:private-shield
 ```
+
+Measured on an iPad Air 13-inch (M2) simulator: without the seed import the
+press lands, the wallet refuses on `owner`, and the pass reports that no
+`private shield running:` line was published — which is the flow telling the
+truth about a device that cannot shield rather than a defect in either.
 
 **Its buttons are pressed by `objectName`, not by their text.** An accessible
 name is matched case-insensitively *from the front*, and the Private tab now has
