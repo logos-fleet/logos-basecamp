@@ -31,8 +31,12 @@
 // records the weighed figure at 0, 1, ... N live runtimes and again after the
 // shed, and checks three things:
 //
-//   * all the pages together moved it up by at least a third of a renderer;
-//   * the FIRST page did, on its own -- a renderer starting is ~290 MB;
+//   * all the pages together moved it up by at least what a page is expected
+//     to move it on THIS platform -- a third of a renderer where the device's
+//     book carries the whole of it, and only the noise figure on iOS, where
+//     this process is charged part of the WebContent process and a page moved
+//     it 43 MB on an iPad Air 4 (#153);
+//   * the FIRST page did, on its own;
 //   * and SHEDDING TOOK IT BACK DOWN, which is the discriminating one. The
 //     blind reading passes the first two (the app does allocate to start a
 //     renderer; it just cannot see what the renderer then holds) and fails only

@@ -162,6 +162,30 @@ void ShellWebBudgetDriver::weigh(const QString& occasion)
 // only step this allowance guards is the one whose signal is 250 MB or more.
 static constexpr qint64 kFigureNoiseBytes = 32LL * 1024 * 1024;
 
+// ...AND HOW FAR A PAGE MUST MOVE IT before the figure counts as weighing the
+// pages at all. Per platform, because the two frames are charged differently:
+//
+//   * Android/Linux: the device's book carries the whole renderer. The first
+//     page moved it +127, +215, +272 and +302 MB across four runs on a Xiaomi
+//     25028RN03Y and +1031 MB on a Lenovo TB520FU (2026-09-17). It reads under
+//     the renderer's 290 MB on the phone because MemAvailable counts page cache
+//     the kernel gives up in the same seconds, so a third of a renderer is the
+//     floor rather than a whole one.
+//   * iOS/macOS: this process is charged only PART of the WebContent process.
+//     Measured on a physical iPad Air 4 (#153), the first page moved
+//     appResidentBytes() 178 -> 221 MB -- 43 MB, a seventh of the Android
+//     signal. A floor set to Android's would report WRONG on every iOS run for
+//     a reading that is correct there, so the floor here is the noise figure:
+//     what the check still catches is a figure that does not move at all.
+qint64 pageMovesAtLeastBytes()
+{
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+    return LiveRuntimeBudget::kDeviceRuntimeBytes / 3;
+#else
+    return kFigureNoiseBytes;
+#endif
+}
+
 void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, int pagesShed)
 {
     if (m_weighed.size() < 2) {
@@ -179,11 +203,10 @@ void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, in
         return;
     }
 
-    // ONE: THE PAGES HAVE TO BE IN IT AT ALL. A renderer is ~290 MB on the
-    // venue's phones; a figure that moved by less than a third of that between
-    // no pages and all of them is not weighing them.
+    // ONE: THE PAGES HAVE TO BE IN IT AT ALL, by whatever this platform's
+    // pages are expected to move it -- see pageMovesAtLeastBytes().
     const qint64 movedUp = atMost - atRest;
-    const qint64 floor = LiveRuntimeBudget::kDeviceRuntimeBytes / 3;
+    const qint64 floor = pageMovesAtLeastBytes();
     if (movedUp < floor) {
         emit log(QStringLiteral("WRONG: %1 live runtime(s) moved the weighed figure by only "
                                 "%2 (from %3 to %4) -- a page costs about %5, so this figure "
@@ -222,9 +245,9 @@ void ShellWebBudgetDriver::reportWhetherTheFigureMoved(qint64 afterShedBytes, in
         // renderer starting does not move up is blind whatever else it does.
         if (step < floor)
             emit log(QStringLiteral("WRONG: the first live runtime moved the weighed figure "
-                                    "by only %1 -- a renderer costs about %2")
-                         .arg(megabytes(step),
-                              megabytes(LiveRuntimeBudget::kDeviceRuntimeBytes)));
+                                    "by only %1; this platform's pages should move it at "
+                                    "least %2")
+                         .arg(megabytes(step), megabytes(floor)));
     }
     emit log(QStringLiteral("web budget: the weighed figure, page by page: %1 (the pages "
                             "share one renderer, so only the first step is a page's real "

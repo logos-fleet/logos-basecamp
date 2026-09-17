@@ -274,6 +274,12 @@ lower on the phone and 2 MB *higher* on the tablet — while the weighed figure
 falls 107 MB and 232 MB, which is the renderer the host's `ps` sees give its
 pages back.
 
+The floor the pass checks those movements against is per platform: a third of a
+renderer where the device's book carries the whole of it, and the noise figure
+on iOS, where this process is charged only part of the WebContent process — a
+page moved `appResidentBytes()` 178 → 221 MB on a physical iPad Air 4 (#153),
+a seventh of the Android signal.
+
 **Steps past the first are printed, not asserted.** The pages share a renderer,
 so the second and third cost ~5 MB each — under the noise of a figure the whole
 device is in. On the Lenovo the second page's step read −68 MB and the third's
