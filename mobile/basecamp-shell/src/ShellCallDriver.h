@@ -27,6 +27,15 @@
 // It loads what it names, through the ordinary core path, exactly as the Modules
 // tab does -- so a module that the app ships, or that the App Manager installed,
 // is reached the same way.
+//
+// AND IT WAITS AS LONG AS THE CALL SAID IT MAY. The per-call budget used to be
+// 60 000 ms for everything, which is a number this file picked rather than
+// anything about calls: a RAILGUN private send takes 154 s on a simulator and
+// 239 s on an iPad Air 4, so the run that WORKED printed `CALL FAILED ... timed
+// out after 60000ms` and the module finished correctly 94 s after the waiter had
+// gone (#235). `--call-timeout <ms>` sets the budget for the calls after it, and
+// a call that does run out now says it is still running rather than leaving the
+// verdict line to contradict the console.
 #pragma once
 
 #include "appmanager/ModuleCallScript.h"

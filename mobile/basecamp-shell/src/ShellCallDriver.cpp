@@ -24,7 +24,6 @@ namespace {
 // fetch its document and instantiate a wasm image, and on a cold phone launch
 // that is seconds rather than milliseconds.
 constexpr int kReachableMs = 60000;
-constexpr int kCallTimeoutMs = 60000;
 
 // HOW LONG THE LOOP TURNS AFTER THE LAST CALL, and it is not padding.
 //
@@ -161,13 +160,24 @@ void ShellCallDriver::run()
             continue;
         }
 
+        // THE BUDGET IS THE CALL'S, not this driver's. See ModuleCallScript:
+        // 60 s was never a fact about calls, and a RAILGUN private send spends
+        // ~220 s of it syncing the accumulator (#235).
         logos::CallError err;
         const QVariant raw = client->invokeRemoteMethod(call.module, call.method, call.args,
-                                                        Timeout(kCallTimeoutMs), &err);
+                                                        Timeout(call.timeoutMs), &err);
         if (!err.ok()) {
             emit log(QStringLiteral("CALL FAILED %1: %2 (%3)")
                          .arg(call.source, QString::fromStdString(err.message),
                               QString::fromStdString(err.code)));
+            // A TIMEOUT IS NOT A FAILURE, it is this waiter leaving. The module
+            // is still working and will finish; say so, because the console line
+            // it prints later otherwise contradicts the verdict line here.
+            if (err.code == "timeout")
+                emit log(QStringLiteral("call: %1 was given %2 ms and is STILL RUNNING -- "
+                                        "raise it with --call-timeout <ms> before --call")
+                             .arg(call.source)
+                             .arg(call.timeoutMs));
             ++failed;
             continue;
         }
